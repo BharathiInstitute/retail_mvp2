@@ -1,24 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// Admin / User Management Module — Self-contained UI shell + demo data
-///
-/// Sections:
-/// - Role Matrix (Owner/Manager/Cashier/Clerk/Accountant)
-/// - User CRUD list with actions (edit, delete, view, reset password)
-/// - Tenant card with switcher (mock tenants)
-/// - Audit Log (recent admin actions)
-/// - Multi-store configuration with add store button
-/// - Central Tax & Invoice Template Settings
-/// - Email/OTP verification demo card
+// Consolidated Admin module in a single file.
+// Combines the main AdminModuleScreen and a simple AdminScreen list view.
+
 class AdminModuleScreen extends StatefulWidget {
   const AdminModuleScreen({super.key});
-
   @override
   State<AdminModuleScreen> createState() => _AdminModuleScreenState();
 }
 
 class _AdminModuleScreenState extends State<AdminModuleScreen> {
-  // Demo users
   final List<_User> _users = [
     _User(name: 'Alice Owner', email: 'alice@acme.com', role: 'Owner', active: true),
     _User(name: 'Bob Manager', email: 'bob@acme.com', role: 'Manager', active: true),
@@ -27,32 +18,27 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
     _User(name: 'Eve Accountant', email: 'eve@acme.com', role: 'Accountant', active: true),
   ];
 
-  // Demo tenants
   final List<_Tenant> _tenants = const [
     _Tenant(id: 't1', name: 'Acme Retail', createdAt: '2024-01-15'),
     _Tenant(id: 't2', name: 'Bravo Stores', createdAt: '2024-05-10'),
   ];
   late _Tenant _selectedTenant;
 
-  // Demo audit log
   final List<_Audit> _audits = [
     _Audit(date: DateTime.now().subtract(const Duration(hours: 3)), action: 'User Created', by: 'Alice'),
     _Audit(date: DateTime.now().subtract(const Duration(hours: 2)), action: 'Role Changed (Carol → Cashier)', by: 'Bob'),
     _Audit(date: DateTime.now().subtract(const Duration(hours: 1)), action: 'Password Reset (Dave)', by: 'Alice'),
   ];
 
-  // Demo stores
   final List<_Store> _stores = [
     _Store(name: 'Main Branch', location: 'Chennai', active: true),
     _Store(name: 'City Center', location: 'Bengaluru', active: false),
   ];
 
-  // Demo tax/settings
   double gstRate = 18.0;
   double defaultTax = 5.0;
   String invoiceTemplate = 'Standard';
 
-  // Demo OTP state
   bool otpSent = false;
   bool otpVerified = false;
 
@@ -62,44 +48,25 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
     _selectedTenant = _tenants.first;
   }
 
-  void _addUser() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add User (Demo)'),
-        content: const Text('This is a placeholder form. Integrate backend later.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        ],
-      ),
-    );
-  }
-
-  void _editUser(_User user) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit User (Demo)'),
-        content: Text('Edit ${user.name} — placeholder only.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ),
-    );
-  }
-
+  void _addUser() => showDialog(
+        context: context,
+        builder: (context) => const AlertDialog(title: Text('Add User (Demo)'), content: Text('Placeholder form. Integrate backend later.'), actions: [
+          CloseButton(),
+        ]),
+      );
+  void _editUser(_User user) => showDialog(
+        context: context,
+        builder: (context) => AlertDialog(title: const Text('Edit User (Demo)'), content: Text('Edit ${user.name} — placeholder only.'), actions: const [CloseButton()]),
+      );
   void _deleteUser(_User user) {
     setState(() => _users.remove(user));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${user.name} (demo)')));
   }
-
-  void _resetPassword(_User user) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Password reset link sent to ${user.email} (demo)')));
-  }
-
+  void _resetPassword(_User user) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Password reset link sent to ${user.email} (demo)')));
   void _sendOtp() {
     setState(() => otpSent = true);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('OTP sent (demo)')));
   }
-
   void _verifyOtp() {
     if (!otpSent) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Send OTP first')));
@@ -108,21 +75,14 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
     setState(() => otpVerified = true);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('OTP verified (demo)')));
   }
-
-  void _addStore() {
-    setState(() => _stores.add(_Store(name: 'New Store', location: 'Pune', active: true)));
-  }
+  void _addStore() => setState(() => _stores.add(_Store(name: 'New Store', location: 'Pune', active: true)));
 
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width >= 1100;
     final roleMatrix = _RoleMatrix(users: _users);
     final userCrud = _UserCrud(users: _users, onAdd: _addUser, onEdit: _editUser, onDelete: _deleteUser, onResetPassword: _resetPassword);
-    final tenantCard = _TenantCard(
-      tenant: _selectedTenant,
-      tenants: _tenants,
-      onSwitch: (t) => setState(() => _selectedTenant = t),
-    );
+    final tenantCard = _TenantCard(tenant: _selectedTenant, tenants: _tenants, onSwitch: (t) => setState(() => _selectedTenant = t));
     final auditLog = _AuditLog(audits: _audits);
     final storeConfig = _StoreConfig(stores: _stores, onAdd: _addStore);
     final settingsCard = _SettingsCard(
@@ -130,7 +90,9 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
       defaultTax: defaultTax,
       invoiceTemplate: invoiceTemplate,
       onChanged: (g, d, t) => setState(() {
-        gstRate = g; defaultTax = d; invoiceTemplate = t;
+        gstRate = g;
+        defaultTax = d;
+        invoiceTemplate = t;
       }),
     );
     final signupCard = _SignupOtpCard(otpSent: otpSent, otpVerified: otpVerified, onSend: _sendOtp, onVerify: _verifyOtp);
@@ -141,26 +103,12 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             flex: 3,
-            child: ListView(children: [
-              tenantCard,
-              const SizedBox(height: 12),
-              roleMatrix,
-              const SizedBox(height: 12),
-              userCrud,
-              const SizedBox(height: 12),
-              storeConfig,
-            ]),
+            child: ListView(children: [tenantCard, const SizedBox(height: 12), roleMatrix, const SizedBox(height: 12), userCrud, const SizedBox(height: 12), storeConfig]),
           ),
           const SizedBox(width: 16),
           Expanded(
             flex: 2,
-            child: ListView(children: [
-              settingsCard,
-              const SizedBox(height: 12),
-              signupCard,
-              const SizedBox(height: 12),
-              auditLog,
-            ]),
+            child: ListView(children: [settingsCard, const SizedBox(height: 12), signupCard, const SizedBox(height: 12), auditLog]),
           ),
         ]),
       );
@@ -184,12 +132,28 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
   }
 }
 
-// ===== Widgets =====
+// Simple alternative Admin landing
+class AdminScreen extends StatelessWidget {
+  const AdminScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: ListView(children: const [
+        ListTile(leading: Icon(Icons.group_outlined), title: Text('Users'), subtitle: Text('TODO: Manage users and roles')),
+        Divider(),
+        ListTile(leading: Icon(Icons.business_outlined), title: Text('Tenants'), subtitle: Text('TODO: Tenant setup and settings')),
+        Divider(),
+        ListTile(leading: Icon(Icons.settings_outlined), title: Text('Settings'), subtitle: Text('TODO: App settings')),
+      ]),
+    );
+  }
+}
 
+// ===== Widgets =====
 class _RoleMatrix extends StatelessWidget {
   final List<_User> users;
   const _RoleMatrix({required this.users});
-
   @override
   Widget build(BuildContext context) {
     const roles = ['Owner', 'Manager', 'Cashier', 'Clerk', 'Accountant'];
@@ -236,7 +200,6 @@ class _UserCrud extends StatelessWidget {
   final void Function(_User) onResetPassword;
   final VoidCallback onAdd;
   const _UserCrud({required this.users, required this.onEdit, required this.onDelete, required this.onResetPassword, required this.onAdd});
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -279,7 +242,6 @@ class _TenantCard extends StatelessWidget {
   final List<_Tenant> tenants;
   final ValueChanged<_Tenant> onSwitch;
   const _TenantCard({required this.tenant, required this.tenants, required this.onSwitch});
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -305,7 +267,6 @@ class _TenantCard extends StatelessWidget {
 class _AuditLog extends StatelessWidget {
   final List<_Audit> audits;
   const _AuditLog({required this.audits});
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -338,7 +299,6 @@ class _StoreConfig extends StatelessWidget {
   final List<_Store> stores;
   final VoidCallback onAdd;
   const _StoreConfig({required this.stores, required this.onAdd});
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -376,7 +336,6 @@ class _SettingsCard extends StatelessWidget {
   final String invoiceTemplate;
   final void Function(double, double, String) onChanged;
   const _SettingsCard({required this.gstRate, required this.defaultTax, required this.invoiceTemplate, required this.onChanged});
-
   @override
   Widget build(BuildContext context) {
     final gstController = TextEditingController(text: gstRate.toStringAsFixed(0));
@@ -420,11 +379,7 @@ class _SettingsCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
             ),
-            child: Row(children: [
-              const Icon(Icons.receipt_long_outlined),
-              const SizedBox(width: 8),
-              Text('Invoice Preview • $invoiceTemplate'),
-            ]),
+            child: Row(children: [const Icon(Icons.receipt_long_outlined), const SizedBox(width: 8), Text('Invoice Preview • $invoiceTemplate')]),
           ),
         ]),
       ),
@@ -438,7 +393,6 @@ class _SignupOtpCard extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onVerify;
   const _SignupOtpCard({required this.otpSent, required this.otpVerified, required this.onSend, required this.onVerify});
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -465,33 +419,9 @@ class _SignupOtpCard extends StatelessWidget {
 }
 
 // ===== Demo data classes =====
-class _User {
-  final String name;
-  final String email;
-  final String role;
-  final bool active;
-  _User({required this.name, required this.email, required this.role, required this.active});
-}
+class _User { final String name; final String email; final String role; final bool active; _User({required this.name, required this.email, required this.role, required this.active}); }
+class _Tenant { final String id; final String name; final String createdAt; const _Tenant({required this.id, required this.name, required this.createdAt}); @override String toString() => name; }
+class _Audit { final DateTime date; final String action; final String by; _Audit({required this.date, required this.action, required this.by}); }
+class _Store { final String name; final String location; final bool active; _Store({required this.name, required this.location, required this.active}); }
 
-class _Tenant {
-  final String id;
-  final String name;
-  final String createdAt;
-  const _Tenant({required this.id, required this.name, required this.createdAt});
-  @override
-  String toString() => name;
-}
-
-class _Audit {
-  final DateTime date;
-  final String action;
-  final String by;
-  _Audit({required this.date, required this.action, required this.by});
-}
-
-class _Store {
-  final String name;
-  final String location;
-  final bool active;
-  _Store({required this.name, required this.location, required this.active});
-}
+// TODO: Future models/services can be added here or refactored into separate files if needed.

@@ -2,7 +2,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/providers/auth_providers.dart';
+import 'package:retail_mvp2/app_shell.dart';
+
+// Consolidated Dashboard module in a single file.
+// Includes DashboardScreen and all helper widgets.
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});

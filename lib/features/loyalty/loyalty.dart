@@ -1,31 +1,20 @@
 import 'package:flutter/material.dart';
 
-/// Loyalty Module — Self-contained UI shell with demo data and local state.
-///
-/// Requirements covered:
-/// - Points balance (available, earned, redeemed) for a customer
-/// - Earn/Redeem actions with confirmation (dummy logic)
-/// - CRM profile card with loyalty badge and balance
-/// - Earning & Redemption rules (demo values)
-/// - Recent loyalty transactions list (demo data)
-/// - Simple report (issued vs redeemed) with a tiny bar chart
-/// - Material 3, responsive layout, Cards + ListView
-/// - Mock data embedded, TODOs for backend integration
+// Loyalty consolidated into a single file.
+// Exposes LoyaltyModuleScreen; contains demo UI, models, and helpers.
+
 class LoyaltyModuleScreen extends StatefulWidget {
   const LoyaltyModuleScreen({super.key});
-
   @override
   State<LoyaltyModuleScreen> createState() => _LoyaltyModuleScreenState();
 }
 
 class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
-  // Demo customers
   final List<_CustomerProfile> _customers = const [
     _CustomerProfile(id: 'c1', name: 'Alice'),
     _CustomerProfile(id: 'c2', name: 'Bob'),
   ];
 
-  // Demo transactions (EARN positive points, REDEEM negative points)
   final List<_LoyaltyTx> _transactions = [
     _LoyaltyTx(date: DateTime.now().subtract(const Duration(days: 1)), type: _TxType.earn, points: 20, customerId: 'c1', customerName: 'Alice'),
     _LoyaltyTx(date: DateTime.now().subtract(const Duration(days: 2)), type: _TxType.redeem, points: -10, customerId: 'c1', customerName: 'Alice'),
@@ -34,7 +23,6 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
     _LoyaltyTx(date: DateTime.now().subtract(const Duration(days: 5)), type: _TxType.redeem, points: -5, customerId: 'c2', customerName: 'Bob'),
   ];
 
-  // Demo rules: ₹100 spent = 1 point, 1 point = ₹1
   _LoyaltyRules rules = const _LoyaltyRules(spendPerPoint: 100, valuePerPoint: 1);
 
   late _CustomerProfile _selectedCustomer;
@@ -104,9 +92,7 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
     _showSnack('Redeemed $pts pts (₹${pts * rules.valuePerPoint}) (demo)');
   }
 
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _showSnack(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   int _earnedFor(String customerId) => _transactions
       .where((t) => t.customerId == customerId && t.type == _TxType.earn)
@@ -118,13 +104,8 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
 
   int _availablePointsFor(String customerId) => _earnedFor(customerId) - _redeemedFor(customerId);
 
-  int get _totalIssued => _transactions
-      .where((t) => t.type == _TxType.earn)
-      .fold<int>(0, (sum, t) => sum + t.points);
-
-  int get _totalRedeemed => _transactions
-      .where((t) => t.type == _TxType.redeem)
-      .fold<int>(0, (sum, t) => sum + (-t.points));
+  int get _totalIssued => _transactions.where((t) => t.type == _TxType.earn).fold<int>(0, (sum, t) => sum + t.points);
+  int get _totalRedeemed => _transactions.where((t) => t.type == _TxType.redeem).fold<int>(0, (sum, t) => sum + (-t.points));
 
   String _badgeFor(int points) {
     if (points >= 200) return 'Gold';
@@ -159,15 +140,12 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
 
     final rulesCard = _RulesCard(
       rules: rules,
-      onEdit: () {
-        // TODO: Open rules edit dialog & persist to backend (Firestore)
-      },
+      onEdit: () {},
     );
 
     final transactionsCard = _TransactionsCard(transactions: _transactions);
     final chartCard = _IssuedRedeemedChart(issued: _totalIssued, redeemed: _totalRedeemed);
 
-    // Layout: two columns on wide screens; stacked ListView on small screens
     if (isWide) {
       return Padding(
         padding: const EdgeInsets.all(16),
@@ -219,8 +197,6 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
   }
 }
 
-// ===== UI widgets =====
-
 class _ProfileCard extends StatelessWidget {
   final _CustomerProfile customer;
   final List<_CustomerProfile> customers;
@@ -229,16 +205,7 @@ class _ProfileCard extends StatelessWidget {
   final int redeemed;
   final String badge;
   final ValueChanged<_CustomerProfile> onCustomerChanged;
-
-  const _ProfileCard({
-    required this.customer,
-    required this.customers,
-    required this.available,
-    required this.earned,
-    required this.redeemed,
-    required this.badge,
-    required this.onCustomerChanged,
-  });
+  const _ProfileCard({required this.customer, required this.customers, required this.available, required this.earned, required this.redeemed, required this.badge, required this.onCustomerChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -264,21 +231,43 @@ class _ProfileCard extends StatelessWidget {
               DropdownButton<_CustomerProfile>(
                 value: customer,
                 onChanged: (c) => c != null ? onCustomerChanged(c) : null,
-                items: [
-                  for (final c in customers)
-                    DropdownMenuItem(value: c, child: Text(c.name)),
-                ],
+                items: [for (final c in customers) DropdownMenuItem(value: c, child: Text(c.name))],
               ),
             ],
           ),
           const SizedBox(height: 16),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            _MetricTile(title: 'Available', value: '$available pts', icon: Icons.savings_outlined),
-            _MetricTile(title: 'Earned', value: '$earned pts', icon: Icons.trending_up),
-            _MetricTile(title: 'Redeemed', value: '$redeemed pts', icon: Icons.trending_down),
+          Wrap(spacing: 12, runSpacing: 12, children: const [
+            _MetricTile(title: 'Available', value: '—', icon: Icons.savings_outlined),
+            _MetricTile(title: 'Earned', value: '—', icon: Icons.trending_up),
+            _MetricTile(title: 'Redeemed', value: '—', icon: Icons.trending_down),
           ]),
         ]),
       ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  const _MetricTile({required this.title, required this.value, required this.icon});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 8),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: Theme.of(context).textTheme.labelMedium),
+          Text(value, style: Theme.of(context).textTheme.titleMedium),
+        ]),
+      ]),
     );
   }
 }
@@ -289,14 +278,7 @@ class _ActionsCard extends StatelessWidget {
   final _LoyaltyRules rules;
   final VoidCallback onEarn;
   final VoidCallback onRedeem;
-  const _ActionsCard({
-    required this.amountController,
-    required this.redeemController,
-    required this.rules,
-    required this.onEarn,
-    required this.onRedeem,
-  });
-
+  const _ActionsCard({required this.amountController, required this.redeemController, required this.rules, required this.onEarn, required this.onRedeem});
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -309,40 +291,24 @@ class _ActionsCard extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: amountController,
-                decoration: InputDecoration(
-                  labelText: 'Amount spent (₹)',
-                  helperText: '₹${rules.spendPerPoint} = 1 pt',
-                  prefixIcon: const Icon(Icons.currency_rupee),
-                ),
+                decoration: InputDecoration(labelText: 'Amount spent (₹)', helperText: '₹${rules.spendPerPoint} = 1 pt', prefixIcon: const Icon(Icons.currency_rupee)),
                 keyboardType: TextInputType.number,
               ),
             ),
             const SizedBox(width: 12),
-            FilledButton.icon(
-              onPressed: onEarn,
-              icon: const Icon(Icons.add),
-              label: const Text('Earn'),
-            ),
+            FilledButton.icon(onPressed: onEarn, icon: const Icon(Icons.add), label: const Text('Earn')),
           ]),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
               child: TextField(
                 controller: redeemController,
-                decoration: InputDecoration(
-                  labelText: 'Points to redeem',
-                  helperText: '1 pt = ₹${rules.valuePerPoint}',
-                  prefixIcon: const Icon(Icons.star_border),
-                ),
+                decoration: InputDecoration(labelText: 'Points to redeem', helperText: '1 pt = ₹${rules.valuePerPoint}', prefixIcon: const Icon(Icons.star_border)),
                 keyboardType: TextInputType.number,
               ),
             ),
             const SizedBox(width: 12),
-            OutlinedButton.icon(
-              onPressed: onRedeem,
-              icon: const Icon(Icons.remove),
-              label: const Text('Redeem'),
-            ),
+            OutlinedButton.icon(onPressed: onRedeem, icon: const Icon(Icons.remove), label: const Text('Redeem')),
           ]),
           const SizedBox(height: 8),
           Text('Demo only — no backend calls. ', style: Theme.of(context).textTheme.bodySmall),
@@ -356,24 +322,20 @@ class _RulesCard extends StatelessWidget {
   final _LoyaltyRules rules;
   final VoidCallback onEdit;
   const _RulesCard({required this.rules, required this.onEdit});
-
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Earning & Redemption Rules', style: Theme.of(context).textTheme.titleMedium),
-              TextButton.icon(onPressed: onEdit, icon: const Icon(Icons.edit_outlined), label: const Text('Edit')),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Earning & Redemption Rules', style: Theme.of(context).textTheme.titleMedium),
+            TextButton.icon(onPressed: onEdit, icon: const Icon(Icons.edit_outlined), label: const Text('Edit')),
+          ]),
           const SizedBox(height: 8),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            _InfoChip(icon: Icons.currency_rupee, label: '₹${rules.spendPerPoint} spent = 1 pt'),
-            _InfoChip(icon: Icons.swap_horiz, label: '1 pt = ₹${rules.valuePerPoint} value'),
+          Wrap(spacing: 12, runSpacing: 12, children: const [
+            _InfoChip(icon: Icons.currency_rupee, label: '₹100 spent = 1 pt'),
+            _InfoChip(icon: Icons.swap_horiz, label: '1 pt = ₹1 value'),
           ]),
           const SizedBox(height: 8),
           Text('TODO: Persist and fetch rules from backend (Firestore/Functions).', style: Theme.of(context).textTheme.bodySmall),
@@ -386,17 +348,13 @@ class _RulesCard extends StatelessWidget {
 class _TransactionsCard extends StatelessWidget {
   final List<_LoyaltyTx> transactions;
   const _TransactionsCard({required this.transactions});
-
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Text('Recent Loyalty Transactions', style: Theme.of(context).textTheme.titleMedium),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), child: Text('Recent Loyalty Transactions', style: Theme.of(context).textTheme.titleMedium)),
           const Divider(height: 1),
           ListView.separated(
             itemCount: transactions.length,
@@ -409,9 +367,7 @@ class _TransactionsCard extends StatelessWidget {
               final pts = isEarn ? '+${t.points}' : '${t.points}';
               return ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: isEarn
-                      ? Colors.green.withValues(alpha: .15)
-                      : Colors.red.withValues(alpha: .15),
+                  backgroundColor: isEarn ? Colors.green.withValues(alpha: .15) : Colors.red.withValues(alpha: .15),
                   child: Icon(isEarn ? Icons.trending_up : Icons.trending_down, color: isEarn ? Colors.green : Colors.red),
                 ),
                 title: Text('${t.customerName} • $pts pts'),
@@ -429,10 +385,9 @@ class _IssuedRedeemedChart extends StatelessWidget {
   final int issued;
   final int redeemed;
   const _IssuedRedeemedChart({required this.issued, required this.redeemed});
-
   @override
   Widget build(BuildContext context) {
-    final total = (issued + redeemed).clamp(1, 1 << 31); // avoid divide-by-zero
+    final total = (issued + redeemed).clamp(1, 1 << 31);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -443,17 +398,14 @@ class _IssuedRedeemedChart extends StatelessWidget {
             final maxW = constraints.maxWidth;
             final issuedW = maxW * (issued / total);
             final redeemedW = maxW * (redeemed / total);
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Bar(label: 'Issued', color: Colors.indigo, width: issuedW, value: issued),
-                const SizedBox(height: 8),
-                _Bar(label: 'Redeemed', color: Colors.orange, width: redeemedW, value: redeemed),
-              ],
-            );
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _Bar(label: 'Issued', color: Colors.indigo, width: issuedW, value: issued),
+              const SizedBox(height: 8),
+              _Bar(label: 'Redeemed', color: Colors.orange, width: redeemedW, value: redeemed),
+            ]);
           }),
           const SizedBox(height: 8),
-          Wrap(spacing: 12, children: [
+          Wrap(spacing: 12, children: const [
             _LegendDot(color: Colors.indigo, label: 'Issued'),
             _LegendDot(color: Colors.orange, label: 'Redeemed'),
           ]),
@@ -465,42 +417,10 @@ class _IssuedRedeemedChart extends StatelessWidget {
   }
 }
 
-// ===== Small UI pieces =====
-
-class _MetricTile extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  const _MetricTile({required this.title, required this.value, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 8),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: Theme.of(context).textTheme.labelMedium),
-            Text(value, style: Theme.of(context).textTheme.titleMedium),
-          ]),
-        ],
-      ),
-    );
-  }
-}
-
 class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
   const _InfoChip({required this.icon, required this.label});
-
   @override
   Widget build(BuildContext context) => Chip(avatar: Icon(icon, size: 16), label: Text(label));
 }
@@ -511,19 +431,14 @@ class _Bar extends StatelessWidget {
   final double width;
   final int value;
   const _Bar({required this.label, required this.color, required this.width, required this.value});
-
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('$label ($value)') ,
+      Text('$label ($value)'),
       const SizedBox(height: 4),
       ConstrainedBox(
         constraints: const BoxConstraints(minWidth: 20, maxHeight: 14),
-        child: Container(
-          height: 14,
-          width: width,
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
-        ),
+        child: Container(height: 14, width: width, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6))),
       ),
     ]);
   }
@@ -533,7 +448,6 @@ class _LegendDot extends StatelessWidget {
   final Color color;
   final String label;
   const _LegendDot({required this.color, required this.label});
-
   @override
   Widget build(BuildContext context) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -544,13 +458,10 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-// ===== Demo data models =====
-
 class _CustomerProfile {
   final String id;
   final String name;
   const _CustomerProfile({required this.id, required this.name});
-
   @override
   String toString() => name;
 }
@@ -560,14 +471,14 @@ enum _TxType { earn, redeem }
 class _LoyaltyTx {
   final DateTime date;
   final _TxType type;
-  final int points; // positive for earn, negative for redeem
+  final int points;
   final String customerId;
   final String customerName;
   _LoyaltyTx({required this.date, required this.type, required this.points, required this.customerId, required this.customerName});
 }
 
 class _LoyaltyRules {
-  final int spendPerPoint; // rupees per 1 pt earned
-  final int valuePerPoint; // rupees per 1 pt redeemed
+  final int spendPerPoint;
+  final int valuePerPoint;
   const _LoyaltyRules({required this.spendPerPoint, required this.valuePerPoint});
 }

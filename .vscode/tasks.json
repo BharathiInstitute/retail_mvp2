@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Analyze after core flatten",
+			"type": "shell",
+			"command": "flutter analyze",
+			"problemMatcher": [
+				"$dart-buildmate"
+			],
+			"group": "build"
+		}
+	]
+}

@@ -26,10 +26,9 @@ lib/
 	core/
 		router/app_router.dart
 		widgets/app_shell.dart, common_widgets.dart
-		providers/auth_providers.dart
-		models/models.dart
-		services/mock_services.dart
-		guards/role_guard.dart
+		state/app_state.dart
+		(features now self-contained; legacy models/services removed)
+		(guards removed; role guard example now inline-commented in app_router.dart)
 	features/
 		<feature>/{ui,models,services}
 ```
