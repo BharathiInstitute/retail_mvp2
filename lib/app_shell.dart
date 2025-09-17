@@ -1,97 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+// Auth providers
+import 'core/auth/auth.dart';
 
-// Feature screens used by the router
-import 'features/dashboard/dashboard.dart';
-import 'features/pos/pos.dart';
-import 'features/inventory/inventory.dart';
-import 'features/billing/billing.dart';
-import 'features/crm/crm.dart';
-import 'features/accounting/accounting.dart';
-import 'features/loyalty/loyalty.dart';
-import 'features/admin/admin.dart';
+// Module screens used by the router
+import 'modules/dashboard/dashboard.dart';
+import 'modules/pos/pos.dart';
+import 'modules/inventory/inventory.dart';
+import 'modules/billing/billing.dart';
+import 'modules/crm/crm.dart';
+import 'modules/accounting/accounting.dart';
+import 'modules/loyalty/loyalty.dart';
+import 'modules/admin/admin.dart';
+// Auth screens
+import 'modules/auth/login_screen.dart';
+import 'modules/auth/register_screen.dart';
+import 'modules/auth/forgot_password_screen.dart';
 
 // ===== Inlined app state (from previous app_state.dart) =====
 import 'dart:async';
-// Models
-enum UserRole { admin, manager, cashier, viewer }
 
-class AuthUser {
-  final String uid;
-  final String? displayName;
-  final String? email;
-  final UserRole role;
-  const AuthUser({required this.uid, this.displayName, this.email, this.role = UserRole.viewer});
-}
-
-// Repository
-class MockAuthRepository {
-  final _controller = StreamController<AuthUser?>.broadcast();
-  AuthUser? _current;
-
-  Stream<AuthUser?> get stream => _controller.stream;
-  AuthUser? get currentUser => _current;
-
-  Future<void> signInAnonymously() async {
-    _current = const AuthUser(uid: 'anon', displayName: 'Guest', role: UserRole.viewer);
-    _controller.add(_current);
-  }
-
-  Future<void> signInAsAdmin() async {
-    _current = const AuthUser(uid: 'admin1', displayName: 'Admin', email: 'admin@example.com', role: UserRole.admin);
-    _controller.add(_current);
-  }
-
-  Future<void> signInAsManager() async {
-    _current = const AuthUser(uid: 'mgr1', displayName: 'Manager', email: 'manager@example.com', role: UserRole.manager);
-    _controller.add(_current);
-  }
-
-  Future<void> signOut() async {
-    _current = null;
-    _controller.add(null);
-  }
-
-  void dispose() {
-    _controller.close();
-  }
-}
-
-final authRepositoryProvider = Provider<MockAuthRepository>((ref) {
-  final repo = MockAuthRepository();
-  ref.onDispose(repo.dispose);
-  return repo;
-});
-
-// Providers
-class AuthStateNotifier extends StateNotifier<AuthUser?> {
-  final MockAuthRepository repo;
-  late final StreamSubscription<AuthUser?> _sub;
-
-  AuthStateNotifier(this.repo) : super(repo.currentUser) {
-    _sub = repo.stream.listen((user) => state = user);
-    repo.signInAnonymously();
-  }
-
-  @override
-  void dispose() {
-    _sub.cancel();
-    super.dispose();
-  }
-}
-
-final authStateProvider = StateNotifierProvider<AuthStateNotifier, AuthUser?>((ref) {
-  final repo = ref.watch(authRepositoryProvider);
-  return AuthStateNotifier(repo);
-});
-
-final userRoleProvider = Provider<UserRole>((ref) {
-  final user = ref.watch(authStateProvider);
-  return user?.role ?? UserRole.viewer;
-});
-
-// ===== Inlined router (from previous app_router.dart) =====
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -101,11 +30,36 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     navigatorKey: _rootNavigatorKey,
     debugLogDiagnostics: false,
     initialLocation: '/dashboard',
-    refreshListenable: GoRouterRefreshStream(authRepo.stream),
+    refreshListenable: GoRouterRefreshStream(authRepo.authStateChanges()),
     redirect: (context, state) {
+      // Simple auth guard
+      final isLoggedIn = ref.read(authStateProvider) != null;
+      final loggingIn = state.matchedLocation.startsWith('/login') ||
+          state.matchedLocation.startsWith('/register') ||
+          state.matchedLocation.startsWith('/forgot');
+      if (!isLoggedIn && !loggingIn) return '/login';
+      if (isLoggedIn && loggingIn) return '/dashboard';
       return null;
     },
     routes: [
+      // Public auth routes
+      GoRoute(
+        path: '/login',
+        name: 'login',
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/register',
+        name: 'register',
+        builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot',
+        name: 'forgot',
+        builder: (context, state) => const ForgotPasswordScreen(),
+      ),
+
+      // Authenticated shell routes
       StatefulShellRoute.indexedStack(
         builder: (context, state, navShell) => AppShell(navigationShell: navShell),
         branches: [
@@ -282,9 +236,8 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = MediaQuery.of(context).size.width >= 900;
-    final role = ref.watch(userRoleProvider);
-  // Show all menu items and allow navigation to Admin for demo access
-  final items = _allItems;
+    final user = ref.watch(authStateProvider);
+    final items = _allItems;
 
     // Compute selected index relative to full list (not filtered)
     int selectedIndex = items.indexWhere((e) => e.branchIndex == navigationShell.currentIndex);
@@ -295,30 +248,30 @@ class AppShell extends ConsumerWidget {
         actions: [
           IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
           IconButton(onPressed: () {}, icon: const Icon(Icons.brightness_6)),
-          PopupMenuButton<UserRole>(
-            initialValue: role,
-            onSelected: (r) {
-              final repo = ref.read(authRepositoryProvider);
-              switch (r) {
-                case UserRole.admin:
-                  repo.signInAsAdmin();
-                  break;
-                case UserRole.manager:
-                  repo.signInAsManager();
-                  break;
-                case UserRole.cashier:
-                case UserRole.viewer:
-                  repo.signInAnonymously();
-                  break;
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: UserRole.admin, child: Text('Role: Admin')),
-              PopupMenuItem(value: UserRole.manager, child: Text('Role: Manager')),
-              PopupMenuItem(value: UserRole.viewer, child: Text('Role: Guest')),
-            ],
-            icon: const Icon(Icons.person_outline),
-          ),
+          if (user != null)
+            PopupMenuButton<String>(
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  value: 'email',
+                  enabled: false,
+                  child: Text(user.email ?? 'Signed in'),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(value: 'signout', child: Text('Sign out')),
+              ],
+              onSelected: (v) async {
+                if (v == 'signout') {
+                  await ref.read(authRepositoryProvider).signOut();
+                  if (context.mounted) context.go('/login');
+                }
+              },
+              icon: const Icon(Icons.person_outline),
+            )
+          else
+            TextButton(
+              onPressed: () => context.go('/login'),
+              child: const Text('Sign in'),
+            ),
         ],
       ),
       drawer: isWide

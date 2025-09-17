@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "745497590383",
+    "project_id": "retail-erp-dc742",
+    "storage_bucket": "retail-erp-dc742.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:745497590383:android:330e32a1a461e4529cab9a",
+        "android_client_info": {
+          "package_name": "com.example.retail_mvp2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADiFrD-NkRwVM52p2WQPqnFsZ578qZv88"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
