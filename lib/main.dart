@@ -16,5 +16,7 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Startup seeding removed.
+
   runApp(const ProviderScope(child: MyApp()));
 }
