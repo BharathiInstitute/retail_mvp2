@@ -407,30 +407,16 @@ class _PosPageState extends State<PosPage> {
           return ListTile(
             title: Text('${p.name}  •  ₹${p.price.toStringAsFixed(2)}'),
             subtitle: Text('SKU: ${p.sku}  •  Stock: ${p.stock}  •  GST ${p.taxPercent}%'),
-            trailing: SizedBox(
-              width: 96,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    tooltip: isFav ? 'Unfavorite' : 'Mark favorite',
-                    icon: Icon(isFav ? Icons.star : Icons.star_border, color: isFav ? Colors.amber : null),
-                    onPressed: () => setState(() {
-                      if (isFav) {
-                        favoriteSkus.remove(p.sku);
-                      } else {
-                        favoriteSkus.add(p.sku);
-                      }
-                    }),
-                  ),
-                  IconButton(
-                    tooltip: 'Add to cart',
-                    icon: const Icon(Icons.add_shopping_cart),
-                    onPressed: p.stock > 0 ? () => addToCart(p) : null,
-                  ),
-                ],
-              ),
+            trailing: IconButton(
+              tooltip: isFav ? 'Unfavorite' : 'Mark favorite',
+              icon: Icon(isFav ? Icons.star : Icons.star_border, color: isFav ? Colors.amber : null),
+              onPressed: () => setState(() {
+                if (isFav) {
+                  favoriteSkus.remove(p.sku);
+                } else {
+                  favoriteSkus.add(p.sku);
+                }
+              }),
             ),
             onTap: p.stock > 0 ? () => addToCart(p) : null,
           );
