@@ -24,6 +24,15 @@ Future<void> main() async {
     if (auth.currentUser == null) {
       await auth.signInAnonymously();
     }
+    // Debug: log project and user to help diagnose rule failures.
+    final app = Firebase.app();
+    // These prints appear in your debug console.
+    // If uid is null, enable Anonymous in Firebase Console.
+    // If projectId is unexpected, regenerate firebase_options.dart.
+    // ignore: avoid_print
+    print('[Firebase] projectId=${app.options.projectId}');
+    // ignore: avoid_print
+    print('[Auth] uid=${auth.currentUser?.uid} (isAnonymous=${auth.currentUser?.isAnonymous})');
   } catch (_) {
     // Non-fatal: UI can still load; Firestore writes may fail until signed in.
   }
