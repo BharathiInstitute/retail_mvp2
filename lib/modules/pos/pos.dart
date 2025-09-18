@@ -57,13 +57,10 @@ class _PosPageState extends State<PosPage> {
   void addToCart(Product p, {int qty = 1}) {
     final existing = cart[p.sku];
     final newQty = (existing?.qty ?? 0) + qty;
-    if (newQty > p.stock) {
-      _snack('Insufficient stock for ${p.name}');
-      return;
-    }
     setState(() {
       cart[p.sku] = CartItem(product: p, qty: newQty);
     });
+    _snack('Added to cart: ${p.name} (x$newQty)');
   }
 
   void removeFromCart(String sku) {
@@ -76,8 +73,6 @@ class _PosPageState extends State<PosPage> {
     final newQty = item.qty + delta;
     if (newQty <= 0) {
       removeFromCart(sku);
-    } else if (newQty > item.product.stock) {
-      _snack('Insufficient stock for ${item.product.name}');
     } else {
       setState(() => cart[sku] = item.copyWith(qty: newQty));
     }
@@ -165,19 +160,8 @@ class _PosPageState extends State<PosPage> {
       item.product.stock -= item.qty;
     }
 
-    // Persist stock decrement to Firestore (best-effort, not transactional with UI)
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      for (final item in cart.values) {
-        final ref = item.product.ref;
-        if (ref != null) {
-          batch.update(ref, {'stock': FieldValue.increment(-item.qty)});
-        }
-      }
-      batch.commit();
-    } catch (_) {
-      // Ignore errors for demo; in real app, handle retries/conflicts
-    }
+    // Note: Not writing stock back to Firestore here because inventory uses batches.
+    // Stock adjustments should be handled via batch movements or a Cloud Function.
 
     final summary = _buildInvoiceSummary();
 
@@ -388,8 +372,6 @@ class _PosPageState extends State<PosPage> {
 
     if (found == null) {
       _snack('No product for code: $code');
-    } else if (found.stock <= 0) {
-      _snack('Out of stock: ${found.name}');
     } else {
       addToCart(found);
     }
@@ -418,7 +400,7 @@ class _PosPageState extends State<PosPage> {
                 }
               }),
             ),
-            onTap: p.stock > 0 ? () => addToCart(p) : null,
+            onTap: () => addToCart(p),
           );
         },
       ),
@@ -447,8 +429,8 @@ class _PosPageState extends State<PosPage> {
               itemBuilder: (_, i) {
                 final p = popular[i];
                 return ElevatedButton(
-                  onPressed: p.stock > 0 ? () => addToCart(p) : null,
-                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                  onPressed: () => addToCart(p),
+                  child: Text('${p.name} • ₹${p.price.toStringAsFixed(2)}', overflow: TextOverflow.ellipsis),
                 );
               },
             ),
@@ -633,7 +615,7 @@ class Product {
   final String name;
   final double price;
   int stock;
-  final int taxPercent; // GST
+  final int taxPercent; // GST % from taxPct
   final String? barcode;
   final DocumentReference<Map<String, dynamic>>? ref;
 
@@ -649,19 +631,29 @@ class Product {
 
   factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
-    final priceRaw = data['price'];
+    final priceRaw = data['unitPrice'];
     final price = priceRaw is num ? priceRaw.toDouble() : double.tryParse('$priceRaw') ?? 0.0;
-    final stockRaw = data['stock'];
-    final stock = stockRaw is int ? stockRaw : int.tryParse('$stockRaw') ?? 0;
-    final taxRaw = data['taxPercent'];
-    final tax = taxRaw is int ? taxRaw : int.tryParse('$taxRaw') ?? 0;
+    // Compute stock from batches list if provided
+    int stock = 0;
+    final batches = data['batches'];
+    if (batches is List) {
+      for (final b in batches) {
+        if (b is Map && b['qty'] != null) {
+          final q = b['qty'];
+          if (q is num) stock += q.toInt();
+          else if (q is String) stock += int.tryParse(q) ?? 0;
+        }
+      }
+    }
+    final taxRaw = data['taxPct'];
+    final tax = taxRaw is num ? taxRaw.toInt() : int.tryParse('$taxRaw') ?? 0;
     return Product(
-      sku: (data['sku'] ?? '').toString(),
+      sku: (data['sku'] ?? doc.id).toString(),
       name: (data['name'] ?? '').toString(),
       price: price,
       stock: stock,
       taxPercent: tax,
-      barcode: (data['barcode'])?.toString(),
+      barcode: (data['barcode'] ?? '').toString(),
       ref: doc.reference,
     );
   }
