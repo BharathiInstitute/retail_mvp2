@@ -570,12 +570,7 @@ class _PosPageState extends State<PosPage> {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: () => _snack('Printing invoice...'), icon: const Icon(Icons.print), label: const Text('Print Invoice'))),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(onPressed: () => _snack('Email sent'), icon: const Icon(Icons.email), label: const Text('Email Invoice'))),
-          ]),
+          // Removed Print/Email invoice buttons as requested
         ]),
       ),
     );
