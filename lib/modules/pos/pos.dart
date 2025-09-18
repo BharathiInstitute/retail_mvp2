@@ -417,12 +417,12 @@ class _PosPageState extends State<PosPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Popular Items', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          if (popular.isEmpty)
+          if (popular.isEmpty) ...[
             const Padding(
               padding: EdgeInsets.all(8.0),
               child: Text('Mark items as favorite to see them here.'),
-            )
-          else
+            ),
+          ] else ...[
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -436,6 +436,7 @@ class _PosPageState extends State<PosPage> {
                 );
               },
             ),
+          ],
         ]),
       ),
     );
@@ -460,7 +461,9 @@ class _PosPageState extends State<PosPage> {
                           context: context,
                           builder: (_) => _HeldOrdersDialog(orders: heldOrders),
                         );
-                        if (sel != null) resumeHeld(sel);
+                        if (sel != null) {
+                          resumeHeld(sel);
+                        }
                       },
                 icon: const Icon(Icons.play_circle),
                 label: const Text('Resume'),
@@ -585,7 +588,7 @@ class _PosPageState extends State<PosPage> {
       icon: Icon(icon, color: selected ? Theme.of(context).colorScheme.primary : null),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
+        backgroundColor: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08) : null,
         side: BorderSide(color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor),
       ),
     );
@@ -637,8 +640,11 @@ class Product {
       for (final b in batches) {
         if (b is Map && b['qty'] != null) {
           final q = b['qty'];
-          if (q is num) stock += q.toInt();
-          else if (q is String) stock += int.tryParse(q) ?? 0;
+          if (q is num) {
+            stock += q.toInt();
+          } else if (q is String) {
+            stock += int.tryParse(q) ?? 0;
+          }
         }
       }
     }
