@@ -8,17 +8,18 @@ class InventoryRepository {
 
   final FirebaseFirestore _db;
 
-  /// Stream products for a tenant ordered by name.
-  Stream<List<ProductDoc>> streamProducts({required String tenantId}) {
-    return _db
-        .collection('inventory')
-        .where('tenantId', isEqualTo: tenantId)
-        .snapshots()
-        .map((snap) {
-          final list = snap.docs.map((d) => ProductDoc.fromDoc(d)).toList();
-          list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-          return list;
-        });
+  /// Stream products ordered by name. If [tenantId] is provided, filters by it;
+  /// otherwise streams all products (public view).
+  Stream<List<ProductDoc>> streamProducts({String? tenantId}) {
+    Query<Map<String, dynamic>> q = _db.collection('inventory');
+    if (tenantId != null) {
+      q = q.where('tenantId', isEqualTo: tenantId);
+    }
+    return q.snapshots().map((snap) {
+      final list = snap.docs.map((d) => ProductDoc.fromDoc(d)).toList();
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return list;
+    });
   }
 
   // Seeding and bulk delete helpers removed

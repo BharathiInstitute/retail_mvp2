@@ -9,7 +9,10 @@ service cloud.firestore {
 
     // Inventory collection (products)
     match /inventory/{docId} {
-      allow read, write: if isSignedIn();
+      // Public read access so all users (including unauthenticated) can view products
+      allow get, list, read: if true;
+      // Restrict writes to authenticated users only (tighten later per-tenant if needed)
+      allow create, update, delete: if isSignedIn();
     }
 
     // Add other modules as they move to Firestore (examples):

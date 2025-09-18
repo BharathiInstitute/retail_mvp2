@@ -310,14 +310,15 @@ String _fmtDateTime(DateTime d) => '${_fmtDate(d)} ${d.hour.toString().padLeft(2
 
 // Firestore-backed products panel providers
 final _inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRepository());
-final _tenantIdProvider = Provider<String>((ref) {
+final _tenantIdProvider = Provider<String?>((ref) {
   final user = ref.watch(authStateProvider);
-  return user?.uid ?? 'demo-tenant';
+  // Return null to show all products to everyone when not signed in
+  return user?.uid;
 });
 final _productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) {
   final repo = ref.watch(_inventoryRepoProvider);
-  final tenantId = ref.watch(_tenantIdProvider);
-  return repo.streamProducts(tenantId: tenantId);
+  // Show all products to everyone (no tenant filter)
+  return repo.streamProducts(tenantId: null);
 });
 
 class _CloudProductsView extends ConsumerStatefulWidget {
@@ -332,12 +333,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(_productsStreamProvider);
+    final user = ref.watch(authStateProvider);
+    final bool isSignedIn = user != null;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           FilledButton.icon(
-            onPressed: () => _openAddDialog(context),
+            onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
             icon: const Icon(Icons.add),
             label: const Text('Add Product'),
           ),
@@ -349,7 +352,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
           ),
           const SizedBox(width: 8),
           OutlinedButton.icon(
-            onPressed: () => _importCsv(context),
+            onPressed: isSignedIn ? () => _importCsv(context) : _requireSignInNotice,
             icon: const Icon(Icons.file_upload_outlined),
             label: const Text('Import CSV'),
           ),
@@ -360,7 +363,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
             child: async.when(
               data: (list) {
                 if (list.isEmpty) {
-                  return const Center(child: Text('No products found. Sign in and add a product.'));
+                  return const Center(child: Text('No products found in Inventory.'));
                 }
                 _currentProducts = list; // cache for export
                 return ListView.separated(
@@ -376,12 +379,12 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                         IconButton(
                           tooltip: 'Edit',
                           icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => _openEditDialog(context, p),
+                          onPressed: isSignedIn ? () => _openEditDialog(context, p) : null,
                         ),
                         IconButton(
                           tooltip: 'Delete',
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _confirmDelete(context, p),
+                          onPressed: isSignedIn ? () => _confirmDelete(context, p) : null,
                         ),
                       ]),
                     );
@@ -405,6 +408,11 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       );
 
   Future<void> _openAddDialog(BuildContext context) async {
+    final user = ref.read(authStateProvider);
+    if (user == null) {
+      _requireSignInNotice();
+      return;
+    }
     final result = await showDialog<_AddProductResult>(
       context: context,
       builder: (_) => const _AddProductDialog(),
@@ -412,6 +420,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     if (result == null) return;
     final repo = ref.read(_inventoryRepoProvider);
     final tenantId = ref.read(_tenantIdProvider);
+    if (tenantId == null) {
+      _requireSignInNotice();
+      return;
+    }
     await repo.addProduct(
       tenantId: tenantId,
       sku: result.sku,
@@ -514,6 +526,11 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   }
 
   Future<void> _importCsv(BuildContext context) async {
+    final user = ref.read(authStateProvider);
+    if (user == null) {
+      _requireSignInNotice();
+      return;
+    }
     final textCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
     final result = await showDialog<bool>(
@@ -564,6 +581,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     // Prepare batch import (simple loop calling addProduct)
     final repo = ref.read(_inventoryRepoProvider);
     final tenantId = ref.read(_tenantIdProvider);
+    if (tenantId == null) {
+      _requireSignInNotice();
+      return;
+    }
     int imported = 0;
     final rows = table.skip(1).where((r) => r.isNotEmpty && r.any((c) => c.trim().isNotEmpty));
     for (final r in rows) {
@@ -594,6 +615,13 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Imported $imported products')));
     }
+  }
+
+  void _requireSignInNotice() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please sign in to add, edit, delete, or import products.')),
+    );
   }
 }
 
