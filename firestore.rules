@@ -15,6 +15,11 @@ service cloud.firestore {
       allow create, update, delete: if isSignedIn();
     }
 
+    // CRM customers collection
+    match /customers/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
     // Add other modules as they move to Firestore (examples):
     // match /suppliers/{docId} { allow read, write: if isSignedIn(); }
     // match /transfers/{docId} { allow read, write: if isSignedIn(); }

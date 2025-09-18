@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Consolidated CRM module in a single file.
 // Includes CrmListScreen, CustomerProfilePage, and all related models/helpers.
@@ -229,9 +230,112 @@ class _CustomerProfilePageState extends State<CustomerProfilePage> {
 
 class _QuickAddCustomerForm extends StatefulWidget { @override State<_QuickAddCustomerForm> createState() => _QuickAddCustomerFormState(); }
 class _QuickAddCustomerFormState extends State<_QuickAddCustomerForm> {
-	final _formKey = GlobalKey<FormState>(); final nameCtrl = TextEditingController(); final phoneCtrl = TextEditingController(); final emailCtrl = TextEditingController();
-	@override void dispose() { nameCtrl.dispose(); phoneCtrl.dispose(); emailCtrl.dispose(); super.dispose(); }
-	@override Widget build(BuildContext context) { return Padding(padding: const EdgeInsets.all(16.0), child: Form(key: _formKey, child: Column(mainAxisSize: MainAxisSize.min, children: [Text('Add Customer', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8), TextFormField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null), TextFormField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone, validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null), TextFormField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email'), keyboardType: TextInputType.emailAddress, validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null), const SizedBox(height: 12), Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), const SizedBox(width: 8), ElevatedButton(onPressed: () { if (_formKey.currentState!.validate()) { final now = DateTime.now(); final c = CrmCustomer(id: UniqueKey().toString(), name: nameCtrl.text.trim(), phone: phoneCtrl.text.trim(), email: emailCtrl.text.trim(), status: LoyaltyStatus.bronze, totalSpend: 0, lastVisit: now, preferences: '', notes: '', smsOptIn: false, emailOptIn: false, history: [],); Navigator.pop(context, c); } }, child: const Text('Add')) ])] ) )); }
+	final _formKey = GlobalKey<FormState>();
+	final nameCtrl = TextEditingController();
+	final phoneCtrl = TextEditingController();
+	final emailCtrl = TextEditingController();
+	bool _saving = false;
+
+	@override
+	void dispose() {
+		nameCtrl.dispose();
+		phoneCtrl.dispose();
+		emailCtrl.dispose();
+		super.dispose();
+	}
+
+	Future<void> _submit() async {
+		if (!_formKey.currentState!.validate()) return;
+		setState(() => _saving = true);
+		try {
+			final now = DateTime.now();
+			final doc = await FirebaseFirestore.instance.collection('customers').add({
+				'name': nameCtrl.text.trim(),
+				'phone': phoneCtrl.text.trim(),
+				'email': emailCtrl.text.trim(),
+				'status': 'bronze',
+				'totalSpend': 0.0,
+				'lastVisit': Timestamp.fromDate(now),
+				'preferences': '',
+				'notes': '',
+				'smsOptIn': false,
+				'emailOptIn': false,
+				'createdAt': FieldValue.serverTimestamp(),
+				'updatedAt': FieldValue.serverTimestamp(),
+			});
+
+			final created = CrmCustomer(
+				id: doc.id,
+				name: nameCtrl.text.trim(),
+				phone: phoneCtrl.text.trim(),
+				email: emailCtrl.text.trim(),
+				status: LoyaltyStatus.bronze,
+				totalSpend: 0,
+				lastVisit: now,
+				preferences: '',
+				notes: '',
+				smsOptIn: false,
+				emailOptIn: false,
+				history: const [],
+			);
+			if (mounted) Navigator.pop(context, created);
+		} catch (e) {
+			if (!mounted) return;
+			ScaffoldMessenger.of(context).showSnackBar(
+				SnackBar(content: Text('Failed to add customer: $e')),
+			);
+		} finally {
+			if (mounted) setState(() => _saving = false);
+		}
+	}
+
+	@override
+	Widget build(BuildContext context) {
+		return Padding(
+			padding: const EdgeInsets.all(16.0),
+			child: Form(
+				key: _formKey,
+				child: Column(
+					mainAxisSize: MainAxisSize.min,
+					children: [
+						Text('Add Customer', style: Theme.of(context).textTheme.titleMedium),
+						const SizedBox(height: 8),
+						TextFormField(
+							controller: nameCtrl,
+							decoration: const InputDecoration(labelText: 'Name'),
+							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null,
+						),
+						TextFormField(
+							controller: phoneCtrl,
+							decoration: const InputDecoration(labelText: 'Phone'),
+							keyboardType: TextInputType.phone,
+							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null,
+						),
+						TextFormField(
+							controller: emailCtrl,
+							decoration: const InputDecoration(labelText: 'Email'),
+							keyboardType: TextInputType.emailAddress,
+							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
+						),
+						const SizedBox(height: 12),
+						Row(
+							mainAxisAlignment: MainAxisAlignment.end,
+							children: [
+								TextButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+								const SizedBox(width: 8),
+								ElevatedButton(
+									onPressed: _saving ? null : _submit,
+									child: _saving
+										? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+										: const Text('Add'),
+								),
+							],
+						),
+					],
+				),
+			),
+		);
+	}
 }
 
 // Data & Utilities

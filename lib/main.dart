@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'app_shell.dart';
 
@@ -15,6 +16,17 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Ensure an authenticated session (anonymous) so Firestore rules that
+  // require authentication can be satisfied without a full auth flow yet.
+  try {
+    final auth = FirebaseAuth.instance;
+    if (auth.currentUser == null) {
+      await auth.signInAnonymously();
+    }
+  } catch (_) {
+    // Non-fatal: UI can still load; Firestore writes may fail until signed in.
+  }
 
   // Startup seeding removed.
 
