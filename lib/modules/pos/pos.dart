@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
 
@@ -10,17 +11,8 @@ class PosPage extends StatefulWidget {
 }
 
 class _PosPageState extends State<PosPage> {
-  // Demo Data
-  final List<Product> products = [
-    Product(sku: 'SKU1001', name: 'Milk 1L', price: 55.0, stock: 50, taxPercent: 5),
-    Product(sku: 'SKU1002', name: 'Bread Loaf', price: 40.0, stock: 80, taxPercent: 5),
-    Product(sku: 'SKU1003', name: 'Rice 5kg', price: 345.0, stock: 30, taxPercent: 5),
-    Product(sku: 'SKU2001', name: 'Shampoo 200ml', price: 120.0, stock: 25, taxPercent: 18),
-    Product(sku: 'SKU2002', name: 'Soap Bar', price: 30.0, stock: 100, taxPercent: 18),
-    Product(sku: 'SKU3001', name: 'Biscuits', price: 20.0, stock: 200, taxPercent: 12),
-    Product(sku: 'SKU4001', name: 'Cooking Oil 1L', price: 160.0, stock: 40, taxPercent: 5),
-    Product(sku: 'SKU5001', name: 'Toothpaste', price: 90.0, stock: 60, taxPercent: 12),
-  ];
+  // Firestore-backed products cache (for quick lookup by barcode/SKU)
+  List<Product> _cacheProducts = [];
 
   final List<Customer> customers = [
     Customer(name: 'Walk-in Customer'),
@@ -55,17 +47,20 @@ class _PosPageState extends State<PosPage> {
     discountType = DiscountType.percent;
   }
 
+  // Stream products from Firestore `inventory` collection
+  Stream<List<Product>> get _productStream => FirebaseFirestore.instance
+      .collection('inventory')
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => Product.fromDoc(d)).toList());
+
   // Business logic helpers (demo only)
   void addToCart(Product p, {int qty = 1}) {
     final existing = cart[p.sku];
     final newQty = (existing?.qty ?? 0) + qty;
-    if (newQty > p.stock) {
-      _snack('Insufficient stock for ${p.name}');
-      return;
-    }
     setState(() {
       cart[p.sku] = CartItem(product: p, qty: newQty);
     });
+    _snack('Added to cart: ${p.name} (x$newQty)');
   }
 
   void removeFromCart(String sku) {
@@ -78,8 +73,6 @@ class _PosPageState extends State<PosPage> {
     final newQty = item.qty + delta;
     if (newQty <= 0) {
       removeFromCart(sku);
-    } else if (newQty > item.product.stock) {
-      _snack('Insufficient stock for ${item.product.name}');
     } else {
       setState(() => cart[sku] = item.copyWith(qty: newQty));
     }
@@ -167,6 +160,9 @@ class _PosPageState extends State<PosPage> {
       item.product.stock -= item.qty;
     }
 
+    // Note: Not writing stock back to Firestore here because inventory uses batches.
+    // Stock adjustments should be handled via batch movements or a Cloud Function.
+
     final summary = _buildInvoiceSummary();
 
     // Clear transactional state
@@ -178,13 +174,31 @@ class _PosPageState extends State<PosPage> {
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Invoice Preview (GST)'),
         content: SizedBox(width: 480, child: summary),
         actions: [
-          TextButton(onPressed: () { Navigator.pop(context); _snack('Printing invoice...'); }, child: const Text('Print')),
-          TextButton(onPressed: () { Navigator.pop(context); _snack('Email sent'); }, child: const Text('Email')),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          TextButton.icon(
+            onPressed: () {
+              // Placeholder: Hook to actual print logic if available
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Printing invoice...')));
+            },
+            icon: const Icon(Icons.print),
+            label: const Text('Print'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              // Placeholder: Hook to actual email logic if available
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Email sent (demo)...')));
+            },
+            icon: const Icon(Icons.email),
+            label: const Text('Email'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -229,20 +243,38 @@ class _PosPageState extends State<PosPage> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 1100;
-    final filtered = _filteredProducts();
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: isWide ? _wideLayout(filtered) : _narrowLayout(filtered),
+    return StreamBuilder<List<Product>>(
+      stream: _productStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('Error loading products: ${snapshot.error}'));
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final allProducts = snapshot.data!;
+        // Update cache for barcode/search usage
+        _cacheProducts = allProducts;
+        final filtered = _filteredProducts(allProducts);
+        return Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: isWide ? _wideLayout(filtered, allProducts) : _narrowLayout(filtered, allProducts),
+        );
+      },
     );
   }
 
-  List<Product> _filteredProducts() {
+  List<Product> _filteredProducts(List<Product> products) {
     final q = searchCtrl.text.trim().toLowerCase();
     if (q.isEmpty) return products;
-    return products.where((p) => p.sku.toLowerCase().contains(q) || p.name.toLowerCase().contains(q)).toList();
+    return products.where((p) =>
+      (p.sku.toLowerCase().contains(q)) ||
+      (p.name.toLowerCase().contains(q)) ||
+      ((p.barcode ?? '').toLowerCase().contains(q))
+    ).toList();
   }
 
-  Widget _wideLayout(List<Product> filtered) {
+  Widget _wideLayout(List<Product> filtered, List<Product> allProducts) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -256,7 +288,7 @@ class _PosPageState extends State<PosPage> {
               const SizedBox(height: 8),
               Expanded(child: _productList(filtered)),
               const SizedBox(height: 8),
-              _popularGrid(),
+              _popularGrid(allProducts),
             ],
           ),
         ),
@@ -270,14 +302,14 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  Widget _narrowLayout(List<Product> filtered) {
+  Widget _narrowLayout(List<Product> filtered, List<Product> allProducts) {
     return ListView(
       children: [
         _searchAndBarcode(),
         const SizedBox(height: 8),
         SizedBox(height: 240, child: _productList(filtered)),
         const SizedBox(height: 8),
-        _popularGrid(),
+        _popularGrid(allProducts),
         const SizedBox(height: 8),
         _cartSection(),
         const SizedBox(height: 8),
@@ -319,16 +351,47 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  void _scan() {
-    final sku = barcodeCtrl.text.trim();
-    final p = products.where((e) => e.sku.toLowerCase() == sku.toLowerCase()).firstWhere(
-          (e) => true,
-          orElse: () => Product(sku: '', name: '', price: 0, stock: 0, taxPercent: 0),
-        );
-    if (p.sku.isEmpty) {
-      _snack('No product for barcode/SKU: $sku');
+  Future<void> _scan() async {
+    final code = barcodeCtrl.text.trim();
+    if (code.isEmpty) return;
+    // Try local cache first
+    Product? found;
+    for (final p in _cacheProducts) {
+      if (p.sku.toLowerCase() == code.toLowerCase() ||
+          (p.barcode != null && p.barcode!.toLowerCase() == code.toLowerCase())) {
+        found = p;
+        break;
+      }
+    }
+    // If not found, query Firestore by sku then barcode
+    if (found == null) {
+      try {
+        final bySku = await FirebaseFirestore.instance
+            .collection('inventory')
+            .where('sku', isEqualTo: code)
+            .limit(1)
+            .get();
+        if (bySku.docs.isNotEmpty) {
+          found = Product.fromDoc(bySku.docs.first);
+        } else {
+          final byBarcode = await FirebaseFirestore.instance
+              .collection('inventory')
+              .where('barcode', isEqualTo: code)
+              .limit(1)
+              .get();
+          if (byBarcode.docs.isNotEmpty) {
+            found = Product.fromDoc(byBarcode.docs.first);
+          }
+        }
+      } catch (e) {
+        _snack('Scan failed: $e');
+      }
+    }
+
+    if (found == null) {
+      _snack('No product for code: $code');
     } else {
-      addToCart(p);
+      addToCart(found);
     }
     barcodeCtrl.clear();
   }
@@ -355,27 +418,27 @@ class _PosPageState extends State<PosPage> {
                 }
               }),
             ),
-            onTap: p.stock > 0 ? () => addToCart(p) : null,
+            onTap: () => addToCart(p),
           );
         },
       ),
     );
   }
 
-  Widget _popularGrid() {
-    final popular = products.where((p) => favoriteSkus.contains(p.sku)).toList();
+  Widget _popularGrid(List<Product> allProducts) {
+    final popular = allProducts.where((p) => favoriteSkus.contains(p.sku)).toList();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Popular Items', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          if (popular.isEmpty)
+          if (popular.isEmpty) ...[
             const Padding(
               padding: EdgeInsets.all(8.0),
               child: Text('Mark items as favorite to see them here.'),
-            )
-          else
+            ),
+          ] else ...[
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -384,11 +447,12 @@ class _PosPageState extends State<PosPage> {
               itemBuilder: (_, i) {
                 final p = popular[i];
                 return ElevatedButton(
-                  onPressed: p.stock > 0 ? () => addToCart(p) : null,
-                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                  onPressed: () => addToCart(p),
+                  child: Text('${p.name} • ₹${p.price.toStringAsFixed(2)}', overflow: TextOverflow.ellipsis),
                 );
               },
             ),
+          ],
         ]),
       ),
     );
@@ -413,7 +477,9 @@ class _PosPageState extends State<PosPage> {
                           context: context,
                           builder: (_) => _HeldOrdersDialog(orders: heldOrders),
                         );
-                        if (sel != null) resumeHeld(sel);
+                        if (sel != null) {
+                          resumeHeld(sel);
+                        }
                       },
                 icon: const Icon(Icons.play_circle),
                 label: const Text('Resume'),
@@ -525,12 +591,7 @@ class _PosPageState extends State<PosPage> {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: () => _snack('Printing invoice...'), icon: const Icon(Icons.print), label: const Text('Print Invoice'))),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(onPressed: () => _snack('Email sent'), icon: const Icon(Icons.email), label: const Text('Email Invoice'))),
-          ]),
+          // Removed Print/Email invoice buttons as requested
         ]),
       ),
     );
@@ -543,7 +604,7 @@ class _PosPageState extends State<PosPage> {
       icon: Icon(icon, color: selected ? Theme.of(context).colorScheme.primary : null),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
+        backgroundColor: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08) : null,
         side: BorderSide(color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor),
       ),
     );
@@ -570,9 +631,51 @@ class Product {
   final String name;
   final double price;
   int stock;
-  final int taxPercent; // GST
+  final int taxPercent; // GST % from taxPct
+  final String? barcode;
+  final DocumentReference<Map<String, dynamic>>? ref;
 
-  Product({required this.sku, required this.name, required this.price, required this.stock, required this.taxPercent});
+  Product({
+    required this.sku,
+    required this.name,
+    required this.price,
+    required this.stock,
+    required this.taxPercent,
+    this.barcode,
+    this.ref,
+  });
+
+  factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? <String, dynamic>{};
+    final priceRaw = data['unitPrice'];
+    final price = priceRaw is num ? priceRaw.toDouble() : double.tryParse('$priceRaw') ?? 0.0;
+    // Compute stock from batches list if provided
+    int stock = 0;
+    final batches = data['batches'];
+    if (batches is List) {
+      for (final b in batches) {
+        if (b is Map && b['qty'] != null) {
+          final q = b['qty'];
+          if (q is num) {
+            stock += q.toInt();
+          } else if (q is String) {
+            stock += int.tryParse(q) ?? 0;
+          }
+        }
+      }
+    }
+    final taxRaw = data['taxPct'];
+    final tax = taxRaw is num ? taxRaw.toInt() : int.tryParse('$taxRaw') ?? 0;
+    return Product(
+      sku: (data['sku'] ?? doc.id).toString(),
+      name: (data['name'] ?? '').toString(),
+      price: price,
+      stock: stock,
+      taxPercent: tax,
+      barcode: (data['barcode'] ?? '').toString(),
+      ref: doc.reference,
+    );
+  }
 }
 
 class Customer {

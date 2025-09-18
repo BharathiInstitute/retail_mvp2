@@ -511,15 +511,16 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     final csv = CsvUtils.listToCsv(rows);
     final bytes = Uint8List.fromList(csv.codeUnits);
     // Try automatic download on web; fallback to dialog elsewhere or if failed.
+    final ctx = context;
     downloadBytes(bytes, 'products_export.csv', 'text/csv').then((ok) {
       if (ok) return;
-      if (!context.mounted) return;
+      if (!mounted) return;
       showDialog(
-        context: context,
+        context: ctx,
         builder: (_) => AlertDialog(
           title: const Text('Export CSV'),
           content: SizedBox(width: 700, child: SelectableText(csv)),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
         ),
       );
     });
@@ -533,8 +534,9 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     }
     final textCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    final ctx = context;
     final result = await showDialog<bool>(
-      context: context,
+      context: ctx,
       builder: (_) => AlertDialog(
         title: const Text('Import CSV'),
         content: Form(
@@ -550,8 +552,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Import')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Import')),
         ],
       ),
     );
@@ -563,7 +565,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     try {
       table = CsvUtils.csvToList(csv);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
       return;
     }
     if (table.isEmpty) return;
@@ -574,7 +577,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     final okHeaders = header.length == expected.length &&
         List.generate(expected.length, (i) => header[i] == expected[i]).every((x) => x);
     if (!okHeaders) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
       return;
     }
 
@@ -612,9 +616,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
         // Continue with next row on error
       }
     }
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Imported $imported products')));
-    }
+  if (!mounted) return;
+  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Imported $imported products')));
   }
 
   void _requireSignInNotice() {
