@@ -179,6 +179,22 @@ class _PosPageState extends State<PosPage> {
         title: const Text('Invoice Preview (GST)'),
         content: SizedBox(width: 480, child: summary),
         actions: [
+          TextButton.icon(
+            onPressed: () {
+              // Placeholder: Hook to actual print logic if available
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Printing invoice...')));
+            },
+            icon: const Icon(Icons.print),
+            label: const Text('Print'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              // Placeholder: Hook to actual email logic if available
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Email sent (demo)...')));
+            },
+            icon: const Icon(Icons.email),
+            label: const Text('Email'),
+          ),
           TextButton(
             onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
             child: const Text('Close'),
