@@ -174,13 +174,15 @@ class _PosPageState extends State<PosPage> {
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Invoice Preview (GST)'),
         content: SizedBox(width: 480, child: summary),
         actions: [
-          TextButton(onPressed: () { Navigator.pop(context); _snack('Printing invoice...'); }, child: const Text('Print')),
-          TextButton(onPressed: () { Navigator.pop(context); _snack('Email sent'); }, child: const Text('Email')),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
