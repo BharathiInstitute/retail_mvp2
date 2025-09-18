@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
 
@@ -10,17 +11,8 @@ class PosPage extends StatefulWidget {
 }
 
 class _PosPageState extends State<PosPage> {
-  // Demo Data
-  final List<Product> products = [
-    Product(sku: 'SKU1001', name: 'Milk 1L', price: 55.0, stock: 50, taxPercent: 5),
-    Product(sku: 'SKU1002', name: 'Bread Loaf', price: 40.0, stock: 80, taxPercent: 5),
-    Product(sku: 'SKU1003', name: 'Rice 5kg', price: 345.0, stock: 30, taxPercent: 5),
-    Product(sku: 'SKU2001', name: 'Shampoo 200ml', price: 120.0, stock: 25, taxPercent: 18),
-    Product(sku: 'SKU2002', name: 'Soap Bar', price: 30.0, stock: 100, taxPercent: 18),
-    Product(sku: 'SKU3001', name: 'Biscuits', price: 20.0, stock: 200, taxPercent: 12),
-    Product(sku: 'SKU4001', name: 'Cooking Oil 1L', price: 160.0, stock: 40, taxPercent: 5),
-    Product(sku: 'SKU5001', name: 'Toothpaste', price: 90.0, stock: 60, taxPercent: 12),
-  ];
+  // Firestore-backed products cache (for quick lookup by barcode/SKU)
+  List<Product> _cacheProducts = [];
 
   final List<Customer> customers = [
     Customer(name: 'Walk-in Customer'),
@@ -54,6 +46,12 @@ class _PosPageState extends State<PosPage> {
     // Fix discount mode to Percent (discount type selector removed)
     discountType = DiscountType.percent;
   }
+
+  // Stream products from Firestore `inventory` collection
+  Stream<List<Product>> get _productStream => FirebaseFirestore.instance
+      .collection('inventory')
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => Product.fromDoc(d)).toList());
 
   // Business logic helpers (demo only)
   void addToCart(Product p, {int qty = 1}) {
@@ -167,6 +165,20 @@ class _PosPageState extends State<PosPage> {
       item.product.stock -= item.qty;
     }
 
+    // Persist stock decrement to Firestore (best-effort, not transactional with UI)
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      for (final item in cart.values) {
+        final ref = item.product.ref;
+        if (ref != null) {
+          batch.update(ref, {'stock': FieldValue.increment(-item.qty)});
+        }
+      }
+      batch.commit();
+    } catch (_) {
+      // Ignore errors for demo; in real app, handle retries/conflicts
+    }
+
     final summary = _buildInvoiceSummary();
 
     // Clear transactional state
@@ -229,20 +241,38 @@ class _PosPageState extends State<PosPage> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 1100;
-    final filtered = _filteredProducts();
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: isWide ? _wideLayout(filtered) : _narrowLayout(filtered),
+    return StreamBuilder<List<Product>>(
+      stream: _productStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('Error loading products: ${snapshot.error}'));
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final allProducts = snapshot.data!;
+        // Update cache for barcode/search usage
+        _cacheProducts = allProducts;
+        final filtered = _filteredProducts(allProducts);
+        return Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: isWide ? _wideLayout(filtered, allProducts) : _narrowLayout(filtered, allProducts),
+        );
+      },
     );
   }
 
-  List<Product> _filteredProducts() {
+  List<Product> _filteredProducts(List<Product> products) {
     final q = searchCtrl.text.trim().toLowerCase();
     if (q.isEmpty) return products;
-    return products.where((p) => p.sku.toLowerCase().contains(q) || p.name.toLowerCase().contains(q)).toList();
+    return products.where((p) =>
+      (p.sku.toLowerCase().contains(q)) ||
+      (p.name.toLowerCase().contains(q)) ||
+      ((p.barcode ?? '').toLowerCase().contains(q))
+    ).toList();
   }
 
-  Widget _wideLayout(List<Product> filtered) {
+  Widget _wideLayout(List<Product> filtered, List<Product> allProducts) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -256,7 +286,7 @@ class _PosPageState extends State<PosPage> {
               const SizedBox(height: 8),
               Expanded(child: _productList(filtered)),
               const SizedBox(height: 8),
-              _popularGrid(),
+              _popularGrid(allProducts),
             ],
           ),
         ),
@@ -270,14 +300,14 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  Widget _narrowLayout(List<Product> filtered) {
+  Widget _narrowLayout(List<Product> filtered, List<Product> allProducts) {
     return ListView(
       children: [
         _searchAndBarcode(),
         const SizedBox(height: 8),
         SizedBox(height: 240, child: _productList(filtered)),
         const SizedBox(height: 8),
-        _popularGrid(),
+        _popularGrid(allProducts),
         const SizedBox(height: 8),
         _cartSection(),
         const SizedBox(height: 8),
@@ -319,16 +349,49 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  void _scan() {
-    final sku = barcodeCtrl.text.trim();
-    final p = products.where((e) => e.sku.toLowerCase() == sku.toLowerCase()).firstWhere(
-          (e) => true,
-          orElse: () => Product(sku: '', name: '', price: 0, stock: 0, taxPercent: 0),
-        );
-    if (p.sku.isEmpty) {
-      _snack('No product for barcode/SKU: $sku');
+  Future<void> _scan() async {
+    final code = barcodeCtrl.text.trim();
+    if (code.isEmpty) return;
+    // Try local cache first
+    Product? found;
+    for (final p in _cacheProducts) {
+      if (p.sku.toLowerCase() == code.toLowerCase() ||
+          (p.barcode != null && p.barcode!.toLowerCase() == code.toLowerCase())) {
+        found = p;
+        break;
+      }
+    }
+    // If not found, query Firestore by sku then barcode
+    if (found == null) {
+      try {
+        final bySku = await FirebaseFirestore.instance
+            .collection('inventory')
+            .where('sku', isEqualTo: code)
+            .limit(1)
+            .get();
+        if (bySku.docs.isNotEmpty) {
+          found = Product.fromDoc(bySku.docs.first);
+        } else {
+          final byBarcode = await FirebaseFirestore.instance
+              .collection('inventory')
+              .where('barcode', isEqualTo: code)
+              .limit(1)
+              .get();
+          if (byBarcode.docs.isNotEmpty) {
+            found = Product.fromDoc(byBarcode.docs.first);
+          }
+        }
+      } catch (e) {
+        _snack('Scan failed: $e');
+      }
+    }
+
+    if (found == null) {
+      _snack('No product for code: $code');
+    } else if (found.stock <= 0) {
+      _snack('Out of stock: ${found.name}');
     } else {
-      addToCart(p);
+      addToCart(found);
     }
     barcodeCtrl.clear();
   }
@@ -362,8 +425,8 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  Widget _popularGrid() {
-    final popular = products.where((p) => favoriteSkus.contains(p.sku)).toList();
+  Widget _popularGrid(List<Product> allProducts) {
+    final popular = allProducts.where((p) => favoriteSkus.contains(p.sku)).toList();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
@@ -571,8 +634,37 @@ class Product {
   final double price;
   int stock;
   final int taxPercent; // GST
+  final String? barcode;
+  final DocumentReference<Map<String, dynamic>>? ref;
 
-  Product({required this.sku, required this.name, required this.price, required this.stock, required this.taxPercent});
+  Product({
+    required this.sku,
+    required this.name,
+    required this.price,
+    required this.stock,
+    required this.taxPercent,
+    this.barcode,
+    this.ref,
+  });
+
+  factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? <String, dynamic>{};
+    final priceRaw = data['price'];
+    final price = priceRaw is num ? priceRaw.toDouble() : double.tryParse('$priceRaw') ?? 0.0;
+    final stockRaw = data['stock'];
+    final stock = stockRaw is int ? stockRaw : int.tryParse('$stockRaw') ?? 0;
+    final taxRaw = data['taxPercent'];
+    final tax = taxRaw is int ? taxRaw : int.tryParse('$taxRaw') ?? 0;
+    return Product(
+      sku: (data['sku'] ?? '').toString(),
+      name: (data['name'] ?? '').toString(),
+      price: price,
+      stock: stock,
+      taxPercent: tax,
+      barcode: (data['barcode'])?.toString(),
+      ref: doc.reference,
+    );
+  }
 }
 
 class Customer {
