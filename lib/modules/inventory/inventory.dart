@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+// ignore_for_file: use_build_context_synchronously
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
@@ -424,7 +425,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       _requireSignInNotice();
       return;
     }
-    await repo.addProduct(
+  final messenger = ScaffoldMessenger.of(context); // capture before async
+  await repo.addProduct(
       tenantId: tenantId,
       sku: result.sku,
       name: result.name,
@@ -439,9 +441,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       storeQty: result.storeQty,
       warehouseQty: result.warehouseQty,
     );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Product added')));
-    }
+    if (!mounted) return;
+    messenger.showSnackBar(const SnackBar(content: Text('Product added')));
   }
 
   Future<void> _openEditDialog(BuildContext context, ProductDoc p) async {
@@ -451,7 +452,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (result == null) return;
     final repo = ref.read(_inventoryRepoProvider);
-    await repo.updateProduct(
+  final messenger = ScaffoldMessenger.of(context); // capture before async
+  await repo.updateProduct(
       sku: p.sku,
       name: result.name,
       unitPrice: result.unitPrice,
@@ -463,9 +465,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       costPrice: result.costPrice,
       isActive: result.isActive,
     );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Product updated')));
-    }
+    if (!mounted) return;
+    messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
   }
 
   Future<void> _confirmDelete(BuildContext context, ProductDoc p) async {
@@ -482,10 +483,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (ok != true) return;
     final repo = ref.read(_inventoryRepoProvider);
+    final messenger = ScaffoldMessenger.of(context); // capture before async
     await repo.deleteProduct(sku: p.sku);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Product deleted')));
-    }
+    if (!mounted) return;
+    messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
   }
 
   void _exportCsv() {
@@ -534,7 +535,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     }
     final textCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    final ctx = context;
+  final messenger = ScaffoldMessenger.of(context); // capture before async
+  final ctx = context; // still used for dialogs while mounted
     final result = await showDialog<bool>(
       context: ctx,
       builder: (_) => AlertDialog(
@@ -566,7 +568,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       table = CsvUtils.csvToList(csv);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
       return;
     }
     if (table.isEmpty) return;
@@ -578,7 +580,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
         List.generate(expected.length, (i) => header[i] == expected[i]).every((x) => x);
     if (!okHeaders) {
       if (!mounted) return;
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
+      messenger.showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
       return;
     }
 
@@ -617,7 +619,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       }
     }
   if (!mounted) return;
-  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Imported $imported products')));
+  messenger.showSnackBar(SnackBar(content: Text('Imported $imported products')));
   }
 
   void _requireSignInNotice() {

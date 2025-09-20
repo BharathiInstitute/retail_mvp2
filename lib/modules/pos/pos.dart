@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
 
@@ -163,6 +164,13 @@ class _PosPageState extends State<PosPage> {
     // Note: Not writing stock back to Firestore here because inventory uses batches.
     // Stock adjustments should be handled via batch movements or a Cloud Function.
 
+    // Compute net amount eligible for rewards (exclude tax)
+    final double netEarnable = (subtotal - discountValue).clamp(0.0, double.infinity);
+
+    // Accrue rewards to CRM (firestore) before clearing state
+    // This function does not use BuildContext after await to avoid analyzer warnings
+    _accrueRewards(netEarnable);
+
     final summary = _buildInvoiceSummary();
 
     // Clear transactional state
@@ -202,6 +210,53 @@ class _PosPageState extends State<PosPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _accrueRewards(double netAmount) async {
+    try {
+      if (netAmount <= 0) return;
+  final custName = selectedCustomer?.name.trim();
+      if (custName == null || custName.isEmpty || custName.toLowerCase() == 'walk-in customer') {
+        return; // skip walk-in / empty
+      }
+
+      // Ensure signed in (anonymous is fine)
+      final auth = FirebaseAuth.instance;
+      if (auth.currentUser == null) {
+        await auth.signInAnonymously();
+      }
+
+      final col = FirebaseFirestore.instance.collection('customers');
+      final snap = await col.where('name', isEqualTo: custName).limit(1).get();
+      final now = DateTime.now();
+      if (snap.docs.isNotEmpty) {
+        final ref = snap.docs.first.reference;
+        await ref.set({
+          'totalSpend': FieldValue.increment(netAmount),
+          'lastVisit': Timestamp.fromDate(now),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } else {
+        // Create minimal customer if not found
+        await col.add({
+          'name': custName,
+          'phone': '',
+          'email': '',
+          'status': 'bronze',
+          'totalSpend': netAmount,
+          'lastVisit': Timestamp.fromDate(now),
+          'preferences': '',
+          'notes': '',
+          'smsOptIn': false,
+          'emailOptIn': false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      // Silent failure; optionally log or surface minimal feedback without using context
+      // debugPrint('Reward accrual failed: $e');
+    }
   }
 
   Widget _buildInvoiceSummary() {
