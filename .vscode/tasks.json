@@ -9,6 +9,24 @@
 				"$dart-buildmate"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Analyze POS overflow fix",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
+		},
+		{
+			"label": "Analyze POS customer scrollbar",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
+		},
+		{
+			"label": "Analyze after customer selection UX fix",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
 		}
 	]
 }

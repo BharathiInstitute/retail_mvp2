@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'invoice_models.dart';
+import 'invoice_pdf.dart';
+import 'file_saver_io.dart' if (dart.library.html) 'file_saver_web.dart';
+import 'invoice_email_service.dart';
+import 'dart:typed_data';
 
 // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
 
@@ -16,11 +21,12 @@ class _PosPageState extends State<PosPage> {
   List<Product> _cacheProducts = [];
 
   // POS customers: Walk-in plus CRM customers from Firestore
-  static const Customer walkIn = Customer(id: '', name: 'Walk-in Customer');
-  List<Customer> customers = const [walkIn];
+  static final Customer walkIn = Customer(id: '', name: 'Walk-in Customer');
+  List<Customer> customers = [walkIn];
 
   final TextEditingController barcodeCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
+  final TextEditingController customerSearchCtrl = TextEditingController();
 
   final Map<String, CartItem> cart = {};
   final List<HeldOrder> heldOrders = [];
@@ -36,6 +42,9 @@ class _PosPageState extends State<PosPage> {
   // Selected payment mode (simple)
   PaymentMode selectedPaymentMode = PaymentMode.cash;
 
+  // Last generated invoice snapshot (for PDF/email after checkout)
+  InvoiceData? lastInvoice;
+
   String get invoiceNumber => 'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 
   @override
@@ -46,6 +55,15 @@ class _PosPageState extends State<PosPage> {
     discountType = DiscountType.percent;
     // Preload CRM customers once to seed the dropdown/search
     _loadCustomersOnce();
+  }
+
+  @override
+  void dispose() {
+    barcodeCtrl.dispose();
+    searchCtrl.dispose();
+    customerSearchCtrl.dispose();
+    discountCtrl.dispose();
+    super.dispose();
   }
 
   // Stream CRM customers from Firestore `customers` collection
@@ -108,15 +126,23 @@ class _PosPageState extends State<PosPage> {
 
   double get subtotal => cart.values.fold(0.0, (s, it) => s + it.product.price * it.qty);
 
+  // Effective percent discount comes from the selected customer's discountPercent plus any manual percent entered.
+  // For now we ADD them but clamp at 100%. (Alternative would be to take max; adjust if business logic changes.)
+  double get _customerPercent => (selectedCustomer?.discountPercent ?? 0).clamp(0, 100);
+  double get effectiveDiscountPercent => _customerPercent.clamp(0, 100);
+
   double get discountValue {
-    final val = double.tryParse(discountCtrl.text) ?? 0.0;
     switch (discountType) {
       case DiscountType.none:
-        return 0;
+        // Still allow automatic customer discount even if discountType was none previously.
+        if (_customerPercent == 0) return 0;
+        return (subtotal * (_customerPercent / 100)).clamp(0, subtotal);
       case DiscountType.percent:
-        return (subtotal * (val / 100)).clamp(0, subtotal);
+        return (subtotal * (_customerPercent / 100)).clamp(0, subtotal);
       case DiscountType.flat:
-        return val.clamp(0, subtotal);
+        final val = (double.tryParse(discountCtrl.text) ?? 0).clamp(0, subtotal);
+        // Apply customer percent on the remaining after flat? Simpler: treat flat as override when chosen.
+        return val.toDouble();
     }
   }
 
@@ -191,14 +217,57 @@ class _PosPageState extends State<PosPage> {
     // Note: Not writing stock back to Firestore here because inventory uses batches.
     // Stock adjustments should be handled via batch movements or a Cloud Function.
 
-    // Compute net amount eligible for rewards (exclude tax)
-    final double netEarnable = (subtotal - discountValue).clamp(0.0, double.infinity);
+  // Compute net amount eligible for rewards (exclude tax) and accrue before clearing state
+  final double netEarnable = (subtotal - discountValue).clamp(0.0, double.infinity);
+  _accrueRewards(netEarnable);
 
-    // Accrue rewards to CRM (firestore) before clearing state
-    // This function does not use BuildContext after await to avoid analyzer warnings
-    _accrueRewards(netEarnable);
+  // Build invoice snapshot BEFORE clearing state
+    // Build invoice snapshot BEFORE clearing state
+    final discounts = lineDiscounts;
+    final taxes = lineTaxes;
+    final taxesByRate = <int, double>{};
+    for (final it in cart.values) {
+      final tax = taxes[it.product.sku] ?? 0.0;
+      taxesByRate.update(it.product.taxPercent, (v) => v + tax, ifAbsent: () => tax);
+    }
+    final lines = cart.values.map((it) {
+      final price = it.product.price;
+      final lineSubtotal = price * it.qty;
+      final disc = discounts[it.product.sku] ?? 0.0;
+      final tax = taxes[it.product.sku] ?? 0.0;
+      final lineTotal = lineSubtotal - disc + tax;
+      return InvoiceLine(
+        sku: it.product.sku,
+        name: it.product.name,
+        qty: it.qty,
+        unitPrice: price,
+        taxPercent: it.product.taxPercent,
+        lineSubtotal: lineSubtotal,
+        discount: disc,
+        tax: tax,
+        lineTotal: lineTotal,
+      );
+    }).toList();
+    final now = DateTime.now();
+    final invoice = InvoiceData(
+      invoiceNumber: invoiceNumber,
+      timestamp: now,
+      customerName: selectedCustomer?.name ?? 'Walk-in Customer',
+      customerEmail: selectedCustomer?.email,
+      customerPhone: selectedCustomer?.phone,
+      customerId: selectedCustomer?.id,
+      lines: lines,
+      subtotal: subtotal,
+      discountTotal: discountValue,
+      taxTotal: totalTax,
+      grandTotal: grandTotal,
+      taxesByRate: taxesByRate,
+      customerDiscountPercent: _customerPercent,
+      paymentMode: selectedPaymentMode.label,
+    );
+    lastInvoice = invoice;
 
-    final summary = _buildInvoiceSummary();
+  final summary = _buildInvoiceSummaryFromInvoice(invoice);
 
     // Clear transactional state
     setState(() {
@@ -223,9 +292,14 @@ class _PosPageState extends State<PosPage> {
             label: const Text('Print'),
           ),
           TextButton.icon(
+            onPressed: () => _downloadInvoice(dialogCtx),
+            icon: const Icon(Icons.download),
+            label: const Text('Download'),
+          ),
+          TextButton.icon(
             onPressed: () {
-              // Placeholder: Hook to actual email logic if available
-              ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Email sent (demo)...')));
+              // Will trigger PDF generation & email/share (implemented later)
+              _emailInvoice(dialogCtx);
             },
             icon: const Icon(Icons.email),
             label: const Text('Email'),
@@ -239,6 +313,7 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
+<<<<<<< HEAD
   Future<void> _accrueRewards(double netAmount) async {
     try {
       if (netAmount <= 0) return;
@@ -269,52 +344,92 @@ class _PosPageState extends State<PosPage> {
           'name': custName,
           'phone': '',
           'email': '',
-          'status': 'bronze',
-          'totalSpend': netAmount,
-          'lastVisit': Timestamp.fromDate(now),
-          'preferences': '',
-          'notes': '',
-          'smsOptIn': false,
-          'emailOptIn': false,
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
+            Future<void> _accrueRewards(double netAmount) async {
+              try {
+                if (netAmount <= 0) return;
+                final custName = selectedCustomer?.name.trim();
+                if (custName == null || custName.isEmpty || custName.toLowerCase() == 'walk-in customer') {
+                  return; // skip walk-in / empty
+                }
+                final auth = FirebaseAuth.instance;
+                if (auth.currentUser == null) {
+                  await auth.signInAnonymously();
+                }
+                final col = FirebaseFirestore.instance.collection('customers');
+                final snap = await col.where('name', isEqualTo: custName).limit(1).get();
+                final now = DateTime.now();
+                if (snap.docs.isNotEmpty) {
+                  final ref = snap.docs.first.reference;
+                  await ref.set({
+                    'totalSpend': FieldValue.increment(netAmount),
+                    'lastVisit': Timestamp.fromDate(now),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+                } else {
+                  await col.add({
+                    'name': custName,
+                    'phone': '',
+                    'email': '',
+                    'status': 'bronze',
+                    'totalSpend': netAmount,
+                    'lastVisit': Timestamp.fromDate(now),
+                    'preferences': '',
+                    'notes': '',
+                    'smsOptIn': false,
+                    'emailOptIn': false,
+                    'createdAt': FieldValue.serverTimestamp(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                }
+              } catch (_) {
+                // swallow silently
+              }
+            }
+
+            // Removed legacy _buildInvoiceSummary (replaced by invoice snapshot version)
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Preparing PDF...')));
+      final (bytes, filename) = await _generatePdfBytes();
+      final saver = PdfSaver();
+      await saver.savePdf(filename, bytes);
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('PDF saved/downloaded')));
     } catch (e) {
-      // Silent failure; optionally log or surface minimal feedback without using context
-      // debugPrint('Reward accrual failed: $e');
+      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Failed to download PDF: $e')));
     }
   }
 
-  Widget _buildInvoiceSummary() {
-    // Build from last computed values; for demo we recompute
-    final discounts = lineDiscounts;
-    final taxes = lineTaxes;
+  Future<(List<int>, String)> _generatePdfBytes() async {
+    final bytes = await buildInvoicePdf(lastInvoice!);
+    final filename = '${lastInvoice!.invoiceNumber}.pdf';
+    return (bytes, filename);
+  }
+
+  Widget _buildInvoiceSummaryFromInvoice(InvoiceData invoice) {
+    final dateStr = '${invoice.timestamp.year.toString().padLeft(4, '0')}-${invoice.timestamp.month.toString().padLeft(2, '0')}-${invoice.timestamp.day.toString().padLeft(2, '0')}';
+    final timeStr = '${invoice.timestamp.hour.toString().padLeft(2, '0')}:${invoice.timestamp.minute.toString().padLeft(2, '0')}:${invoice.timestamp.second.toString().padLeft(2, '0')}';
+>>>>>>> c405321 (feat(pos): invoice PDF generation + email service scaffolding (storage upload + callable) and customer phone/email on invoice)
     return SingleChildScrollView(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Invoice #: $invoiceNumber'),
-        Text('Customer: ${selectedCustomer?.name ?? 'Walk-in'}'),
+        Text('Invoice #: ${invoice.invoiceNumber}'),
+        Text('Date: $dateStr  Time: $timeStr'),
+        Text('Customer: ${invoice.customerName}'),
+        if ((invoice.customerEmail ?? '').isNotEmpty)
+          Text('Email: ${invoice.customerEmail}'),
+        if ((invoice.customerPhone ?? '').isNotEmpty)
+          Text('Phone: ${invoice.customerPhone}'),
         const SizedBox(height: 8),
         const Divider(),
-        ...cart.values.map((it) {
-          final price = it.product.price;
-          final line = price * it.qty;
-          final disc = discounts[it.product.sku] ?? 0;
-          final tax = taxes[it.product.sku] ?? 0;
-          final net = line - disc + tax;
-          return ListTile(
-            dense: true,
-            title: Text('${it.product.name} x ${it.qty}'),
-            subtitle: Text('Price: ₹${price.toStringAsFixed(2)}  |  Disc: ₹${disc.toStringAsFixed(2)}  |  Tax ${it.product.taxPercent}%: ₹${tax.toStringAsFixed(2)}'),
-            trailing: Text('₹${net.toStringAsFixed(2)}'),
-          );
-        }),
+        ...invoice.lines.map((it) => ListTile(
+              dense: true,
+              title: Text('${it.name} x ${it.qty}'),
+              subtitle: Text('Price: ₹${it.unitPrice.toStringAsFixed(2)}  |  Disc: ₹${it.discount.toStringAsFixed(2)}  |  Tax ${it.taxPercent}%: ₹${it.tax.toStringAsFixed(2)}'),
+              trailing: Text('₹${it.lineTotal.toStringAsFixed(2)}'),
+            )),
         const Divider(),
-        _kv('Subtotal', subtotal),
-        _kv('Discount', -discountValue),
-        _kv('Tax Total', totalTax),
+        _kv('Subtotal', invoice.subtotal),
+        _kv('Discount', -invoice.discountTotal),
+        _kv('Tax Total', invoice.taxTotal),
         const Divider(),
-        _kv('Grand Total', grandTotal, bold: true),
+        _kv('Grand Total', invoice.grandTotal, bold: true),
         const SizedBox(height: 8),
       ]),
     );
@@ -628,51 +743,49 @@ class _PosPageState extends State<PosPage> {
       child: Padding(
         padding: const EdgeInsets.all(10.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Customer selection (searchable)
-          StreamBuilder<List<Customer>>(
-            stream: _customerStream,
-            initialData: customers,
-            builder: (context, snap) {
-              final list = (snap.data ?? customers);
-              return InkWell(
-                onTap: () async {
-                  final picked = await showDialog<Customer>(
-                    context: context,
-                    builder: (_) => _CustomerPickerDialog(
-                      customers: list,
-                      selected: selectedCustomer,
-                    ),
-                  );
-                  if (picked != null) {
-                    setState(() => selectedCustomer = picked);
-                  }
-                },
-                child: InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Customer'),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.person_outline),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(selectedCustomer?.name ?? walkIn.name, overflow: TextOverflow.ellipsis)),
-                      const Icon(Icons.search),
-                    ],
-                  ),
-                ),
-              );
-            },
+          _SearchableCustomerDropdown(
+            customersStream: _customerStream,
+            initialCustomers: customers,
+            selected: selectedCustomer,
+            onSelected: (c) => setState(() => selectedCustomer = c),
+            walkIn: walkIn,
           ),
+          const SizedBox(height: 6),
+          Builder(builder: (_) {
+            final c = selectedCustomer;
+            if (c == null || c.id.isEmpty) {
+              return const SizedBox();
+            }
+            String planLabel = (c.status ?? 'standard');
+            planLabel = planLabel[0].toUpperCase() + planLabel.substring(1);
+            return Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  if (c.email != null && c.email!.isNotEmpty)
+                    Text(c.email!, style: const TextStyle(fontSize: 12)),
+                  const SizedBox(height: 4),
+                  Wrap(spacing: 12, runSpacing: 4, children: [
+                    _miniInfoChip(Icons.workspace_premium, 'Plan: $planLabel'),
+                    _miniInfoChip(Icons.percent, 'Discount: ${c.discountPercent.toStringAsFixed(0)}%'),
+                    _miniInfoChip(Icons.card_giftcard, 'Rewards: ${c.rewardsPoints}'),
+                    _miniInfoChip(Icons.account_balance_wallet, 'Spend: ₹${c.totalSpend.toStringAsFixed(0)}'),
+                  ]),
+                ],
+              ),
+            );
+          }),
           const SizedBox(height: 8),
           // Discount (Percent only)
-          TextFormField(
-            controller: discountCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Discount Percent %'),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 10),
-          // Payments removed
-          const Divider(),
-          // Summary
+           // Discount (Customer-based only)
           _kv('Subtotal', subtotal),
           _kv('Discount', -discountValue),
           const SizedBox(height: 6),
@@ -718,6 +831,25 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
+  Widget _miniInfoChip(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 4),
+            Text(text, style: const TextStyle(fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
   // Payment split row removed
 
   Widget _kv(String label, double value, {bool bold = false}) {
@@ -727,6 +859,261 @@ class _PosPageState extends State<PosPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [Text(label, style: style), Text('₹${value.toStringAsFixed(2)}', style: style)],
+      ),
+    );
+  }
+}
+
+class _SearchableCustomerDropdown extends StatefulWidget {
+  final Stream<List<Customer>> customersStream;
+  final List<Customer> initialCustomers;
+  final Customer? selected;
+  final ValueChanged<Customer?> onSelected;
+  final Customer walkIn;
+  const _SearchableCustomerDropdown({
+    required this.customersStream,
+    required this.initialCustomers,
+    required this.selected,
+    required this.onSelected,
+    required this.walkIn,
+  });
+
+  @override
+  State<_SearchableCustomerDropdown> createState() => _SearchableCustomerDropdownState();
+}
+
+class _SearchableCustomerDropdownState extends State<_SearchableCustomerDropdown> {
+  final LayerLink _link = LayerLink();
+  late TextEditingController _controller;
+  late FocusNode _focusNode;
+  OverlayEntry? _entry;
+  List<Customer> _all = [];
+  List<Customer> _filtered = [];
+  Customer? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _focusNode = FocusNode();
+    _selected = widget.selected ?? widget.walkIn;
+    _all = widget.initialCustomers;
+    _filtered = _all;
+    // Listen to stream
+    widget.customersStream.listen((data) {
+      setState(() {
+        _all = data;
+        _applyFilter();
+      });
+    });
+  }
+
+  void _applyFilter() {
+    final q = _controller.text.trim().toLowerCase();
+    if (q.isEmpty) {
+      _filtered = _all;
+    } else {
+      _filtered = _all.where((c) => c.name.toLowerCase().contains(q) || (c.email ?? '').toLowerCase().contains(q)).toList();
+      if (!_filtered.any((c) => c.id.isEmpty)) {
+        // keep walk-in on top
+        final w = _all.firstWhere((c) => c.id.isEmpty, orElse: () => widget.walkIn);
+        _filtered.insert(0, w);
+      }
+    }
+    // Request overlay rebuild
+    _entry?.markNeedsBuild();
+  }
+
+  @override
+  void dispose() {
+    _entry?.remove();
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _openOverlay() {
+    _closeOverlay();
+    _entry = OverlayEntry(builder: (context) {
+      return Positioned.fill(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: _closeOverlay,
+          child: Stack(children: [
+            CompositedTransformFollower(
+              link: _link,
+              showWhenUnlinked: false,
+              offset: const Offset(0, 48),
+              child: Material(
+                elevation: 4,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: BorderRadius.circular(8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320, minWidth: 260),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: TextField(
+                          controller: _controller,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: 'Search customers',
+                            prefixIcon: const Icon(Icons.search, size: 18),
+                            suffixIcon: _controller.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    onPressed: () {
+                                      _controller.clear();
+                                      setState(() {
+                                        _applyFilter();
+                                      });
+                                    },
+                                  )
+                                : null,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          onChanged: (_) => setState(() => _applyFilter()),
+                          onSubmitted: (_) {
+                            if (_filtered.length == 1) _select(_filtered.first);
+                          },
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: _filtered.isEmpty
+                            ? const Center(child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: Text('No customers')))
+                            : ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: _filtered.length,
+                                separatorBuilder: (_, __) => const Divider(height: 1),
+                                itemBuilder: (_, i) {
+                                  final c = _filtered[i];
+                                  final isSelected = _selected?.id == c.id;
+                                  final isWalkIn = c.id.isEmpty;
+                                  final planLabel = (c.status ?? 'standard');
+                                  return InkWell(
+                                    onTap: () => _select(c),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(Icons.person_outline, size: 16, color: isSelected ? Theme.of(context).colorScheme.primary : null),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  c.name,
+                                                  style: TextStyle(fontWeight: FontWeight.w600, color: isSelected ? Theme.of(context).colorScheme.primary : null),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (!isWalkIn && c.discountPercent > 0)
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: Text('${c.discountPercent.toStringAsFixed(0)}% off', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.primary)),
+                                                ),
+                                            ],
+                                          ),
+                                          if (!isWalkIn) ...[
+                                            const SizedBox(height: 2),
+                                            Row(
+                                              children: [
+                                                if (c.email != null && c.email!.isNotEmpty)
+                                                  Expanded(
+                                                    child: Text(
+                                                      c.email!,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: const TextStyle(fontSize: 11),
+                                                    ),
+                                                  ),
+                                                const SizedBox(width: 6),
+                                                Text(planLabel, style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic)),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Row(
+                                              children: [
+                                                Icon(Icons.card_giftcard, size: 12, color: Theme.of(context).iconTheme.color),
+                                                const SizedBox(width: 2),
+                                                Text('${c.rewardsPoints}', style: const TextStyle(fontSize: 11)),
+                                                const SizedBox(width: 10),
+                                                Icon(Icons.account_balance_wallet, size: 12, color: Theme.of(context).iconTheme.color),
+                                                const SizedBox(width: 2),
+                                                Text('₹${c.totalSpend.toStringAsFixed(0)}', style: const TextStyle(fontSize: 11)),
+                                              ],
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      );
+    });
+    Overlay.of(context).insert(_entry!);
+  }
+
+  void _closeOverlay() {
+    _entry?.remove();
+    _entry = null;
+  }
+
+  void _select(Customer c) {
+    setState(() => _selected = c);
+    widget.onSelected(c);
+    _closeOverlay();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final display = _selected ?? widget.walkIn;
+    final isWalkIn = display.id.isEmpty;
+    final discount = (!isWalkIn && display.discountPercent > 0) ? ' (${display.discountPercent.toStringAsFixed(0)}% off)' : '';
+    final plan = (!isWalkIn && (display.status ?? '').isNotEmpty)
+        ? ' • ${(display.status![0].toUpperCase() + display.status!.substring(1))}'
+        : '';
+    return CompositedTransformTarget(
+      link: _link,
+      child: GestureDetector(
+        onTap: _openOverlay,
+        child: InputDecorator(
+          decoration: const InputDecoration(labelText: 'Customer'),
+          isEmpty: false,
+          child: Row(
+            children: [
+              const Icon(Icons.person_outline, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  display.name + discount + plan,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -789,12 +1176,57 @@ class Product {
 class Customer {
   final String id; // empty id for Walk-in
   final String name;
-  Customer({required this.id, required this.name});
+  final String? email;
+  final String? phone;
+  final String? status; // loyalty tier e.g. bronze/silver/gold
+  final double totalSpend;
+  final int rewardsPoints;
+  final double discountPercent; // derived suggested discount
+
+  Customer({
+    required this.id,
+    required this.name,
+    this.email,
+    this.phone,
+    this.status,
+    this.totalSpend = 0.0,
+    this.rewardsPoints = 0,
+    this.discountPercent = 0.0,
+  });
 
   factory Customer.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
-    final name = (data['name'] as String?)?.trim();
-    return Customer(id: doc.id, name: (name == null || name.isEmpty) ? 'Unnamed' : name);
+    String name = (data['name'] as String?)?.trim() ?? '';
+    if (name.isEmpty) name = 'Unnamed';
+    final tier = (data['status'] as String?)?.toLowerCase();
+    final spendRaw = data['totalSpend'];
+    final spend = spendRaw is num ? spendRaw.toDouble() : double.tryParse('$spendRaw') ?? 0.0;
+    // Simple derived rules for discount & rewards (can adjust later)
+    double discount;
+    switch (tier) {
+      case 'gold':
+        discount = 10;
+        break;
+      case 'silver':
+        discount = 5;
+        break;
+      case 'bronze':
+        discount = 2;
+        break;
+      default:
+        discount = 0;
+    }
+    final rewards = (spend / 100).floor(); // 1 point per ₹100 spent
+    return Customer(
+      id: doc.id,
+      name: name,
+      email: (data['email'] as String?)?.trim(),
+      phone: (data['phone'] as String?)?.trim(),
+      status: tier,
+      totalSpend: spend,
+      rewardsPoints: rewards,
+      discountPercent: discount,
+    );
   }
 }
 
@@ -860,68 +1292,3 @@ class _HeldOrdersDialog extends StatelessWidget {
   }
 }
 
-class _CustomerPickerDialog extends StatefulWidget {
-  final List<Customer> customers;
-  final Customer? selected;
-  const _CustomerPickerDialog({required this.customers, this.selected});
-
-  @override
-  State<_CustomerPickerDialog> createState() => _CustomerPickerDialogState();
-}
-
-class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
-  final TextEditingController _search = TextEditingController();
-  String get q => _search.text.trim().toLowerCase();
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = widget.customers.where((c) => q.isEmpty || c.name.toLowerCase().contains(q)).toList();
-    return AlertDialog(
-      title: const Text('Select Customer'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _search,
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Search customers'),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: filtered.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final c = filtered[i];
-                  final selected = widget.selected?.id == c.id;
-                  return ListTile(
-                    title: Text(c.name),
-                    trailing: selected ? const Icon(Icons.check, color: Colors.green) : null,
-                    onTap: () => Navigator.pop(context, c),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.pop(context, _posWalkInFallback(widget.customers)), child: const Text('Walk-in')),
-      ],
-    );
-  }
-}
-
-Customer _posWalkInFallback(List<Customer> list) {
-  return list.isNotEmpty ? list.first : Customer(id: '', name: 'Walk-in Customer');
-}
