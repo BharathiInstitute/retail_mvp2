@@ -15,11 +15,9 @@ class _PosPageState extends State<PosPage> {
   // Firestore-backed products cache (for quick lookup by barcode/SKU)
   List<Product> _cacheProducts = [];
 
-  final List<Customer> customers = [
-    Customer(name: 'Walk-in Customer'),
-    Customer(name: 'Rahul Sharma'),
-    Customer(name: 'Priya Singh'),
-  ];
+  // POS customers: Walk-in plus CRM customers from Firestore
+  static const Customer walkIn = Customer(id: '', name: 'Walk-in Customer');
+  List<Customer> customers = const [walkIn];
 
   final TextEditingController barcodeCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
@@ -46,6 +44,35 @@ class _PosPageState extends State<PosPage> {
     selectedCustomer = customers.first;
     // Fix discount mode to Percent (discount type selector removed)
     discountType = DiscountType.percent;
+    // Preload CRM customers once to seed the dropdown/search
+    _loadCustomersOnce();
+  }
+
+  // Stream CRM customers from Firestore `customers` collection
+  Stream<List<Customer>> get _customerStream => FirebaseFirestore.instance
+      .collection('customers')
+      .snapshots()
+      .map((snap) {
+        final list = snap.docs.map((d) => Customer.fromDoc(d)).toList();
+        list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        return [walkIn, ...list];
+      });
+
+  Future<void> _loadCustomersOnce() async {
+    try {
+      final s = await FirebaseFirestore.instance.collection('customers').get();
+      final list = s.docs.map((d) => Customer.fromDoc(d)).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      setState(() {
+        customers = [walkIn, ...list];
+        // keep existing selection if still present; else default to Walk-in
+        if (selectedCustomer == null || !customers.any((c) => c.id == selectedCustomer!.id)) {
+          selectedCustomer = walkIn;
+        }
+      });
+    } catch (_) {
+      // ignore errors for now
+    }
   }
 
   // Stream products from Firestore `inventory` collection
@@ -601,12 +628,38 @@ class _PosPageState extends State<PosPage> {
       child: Padding(
         padding: const EdgeInsets.all(10.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Customer selection
-          DropdownButtonFormField<Customer>(
-            value: selectedCustomer,
-            items: [for (final c in customers) DropdownMenuItem(value: c, child: Text(c.name))],
-            onChanged: (c) => setState(() => selectedCustomer = c),
-            decoration: const InputDecoration(labelText: 'Customer'),
+          // Customer selection (searchable)
+          StreamBuilder<List<Customer>>(
+            stream: _customerStream,
+            initialData: customers,
+            builder: (context, snap) {
+              final list = (snap.data ?? customers);
+              return InkWell(
+                onTap: () async {
+                  final picked = await showDialog<Customer>(
+                    context: context,
+                    builder: (_) => _CustomerPickerDialog(
+                      customers: list,
+                      selected: selectedCustomer,
+                    ),
+                  );
+                  if (picked != null) {
+                    setState(() => selectedCustomer = picked);
+                  }
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Customer'),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.person_outline),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(selectedCustomer?.name ?? walkIn.name, overflow: TextOverflow.ellipsis)),
+                      const Icon(Icons.search),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           // Discount (Percent only)
@@ -734,8 +787,15 @@ class Product {
 }
 
 class Customer {
+  final String id; // empty id for Walk-in
   final String name;
-  Customer({required this.name});
+  Customer({required this.id, required this.name});
+
+  factory Customer.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? <String, dynamic>{};
+    final name = (data['name'] as String?)?.trim();
+    return Customer(id: doc.id, name: (name == null || name.isEmpty) ? 'Unnamed' : name);
+  }
 }
 
 class CartItem {
@@ -798,4 +858,70 @@ class _HeldOrdersDialog extends StatelessWidget {
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
     );
   }
+}
+
+class _CustomerPickerDialog extends StatefulWidget {
+  final List<Customer> customers;
+  final Customer? selected;
+  const _CustomerPickerDialog({required this.customers, this.selected});
+
+  @override
+  State<_CustomerPickerDialog> createState() => _CustomerPickerDialogState();
+}
+
+class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
+  final TextEditingController _search = TextEditingController();
+  String get q => _search.text.trim().toLowerCase();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.customers.where((c) => q.isEmpty || c.name.toLowerCase().contains(q)).toList();
+    return AlertDialog(
+      title: const Text('Select Customer'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _search,
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Search customers'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: filtered.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final c = filtered[i];
+                  final selected = widget.selected?.id == c.id;
+                  return ListTile(
+                    title: Text(c.name),
+                    trailing: selected ? const Icon(Icons.check, color: Colors.green) : null,
+                    onTap: () => Navigator.pop(context, c),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, _posWalkInFallback(widget.customers)), child: const Text('Walk-in')),
+      ],
+    );
+  }
+}
+
+Customer _posWalkInFallback(List<Customer> list) {
+  return list.isNotEmpty ? list.first : Customer(id: '', name: 'Walk-in Customer');
 }
