@@ -288,6 +288,7 @@ class _QuickAddCustomerFormState extends State<_QuickAddCustomerForm> {
 				email: data['email'] as String,
 				status: LoyaltyStatus.bronze,
 				totalSpend: 0.0,
+				loyaltyPoints: 0.0,
 				lastVisit: now,
 				preferences: '',
 				notes: '',
@@ -526,6 +527,7 @@ class CrmCustomer {
 	final String email;
 	final LoyaltyStatus status;
 	final double totalSpend;
+	final double loyaltyPoints; // added for consistency with POS
 	final DateTime lastVisit;
 	final String preferences;
 	final String notes;
@@ -540,6 +542,7 @@ class CrmCustomer {
 		required this.email,
 		required this.status,
 		required this.totalSpend,
+		required this.loyaltyPoints,
 		required this.lastVisit,
 		required this.preferences,
 		required this.notes,
@@ -583,6 +586,7 @@ class CrmCustomer {
 			email: (data['email'] as String?)?.trim() ?? '',
 			status: parseStatus(statusStr),
 			totalSpend: toDouble(data['totalSpend']),
+			loyaltyPoints: toDouble(data['loyaltyPoints']),
 			lastVisit: parseDate(data['lastVisit']),
 			preferences: (data['preferences'] as String?) ?? '',
 			notes: (data['notes'] as String?) ?? '',
@@ -601,6 +605,7 @@ class CrmCustomer {
 		String? email,
 		LoyaltyStatus? status,
 		double? totalSpend,
+		double? loyaltyPoints,
 		DateTime? lastVisit,
 		String? preferences,
 		String? notes,
@@ -615,6 +620,7 @@ class CrmCustomer {
 			email: email ?? this.email,
 			status: status ?? this.status,
 			totalSpend: totalSpend ?? this.totalSpend,
+			loyaltyPoints: loyaltyPoints ?? this.loyaltyPoints,
 			lastVisit: lastVisit ?? this.lastVisit,
 			preferences: preferences ?? this.preferences,
 			notes: notes ?? this.notes,

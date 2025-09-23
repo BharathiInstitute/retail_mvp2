@@ -13,6 +13,8 @@ class InvoiceData {
   final double discountTotal;
   final double taxTotal;
   final double grandTotal;
+  final double redeemedValue; // currency value deducted via points
+  final double redeemedPoints; // points consumed
   final Map<int, double> taxesByRate; // GST% -> amount
   final double customerDiscountPercent; // for reference (applied percent)
   final String paymentMode; // simple label
@@ -29,6 +31,8 @@ class InvoiceData {
     required this.discountTotal,
     required this.taxTotal,
     required this.grandTotal,
+    required this.redeemedValue,
+    required this.redeemedPoints,
     required this.taxesByRate,
     required this.customerDiscountPercent,
     required this.paymentMode,
@@ -46,6 +50,8 @@ class InvoiceData {
         'discountTotal': discountTotal,
         'taxTotal': taxTotal,
         'grandTotal': grandTotal,
+        'redeemedValue': redeemedValue,
+        'redeemedPoints': redeemedPoints,
         'taxesByRate': taxesByRate.map((k, v) => MapEntry(k.toString(), v)),
         'customerDiscountPercent': customerDiscountPercent,
         'paymentMode': paymentMode,

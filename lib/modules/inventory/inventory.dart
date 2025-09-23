@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-// ignore_for_file: use_build_context_synchronously
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
@@ -7,6 +6,7 @@ import 'inventory_repository.dart';
 import 'csv_utils.dart';
 import 'download_helper_stub.dart'
   if (dart.library.html) 'download_helper_web.dart';
+import 'barcodes_pdf.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -226,7 +226,7 @@ class _InventoryPageState extends State<InventoryScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Row(children: [
+  Row(children: [
           ElevatedButton(onPressed: () => _snack('Audit submitted for review'), child: const Text('Submit Audit')),
           const SizedBox(width: 8),
           OutlinedButton(
@@ -357,6 +357,16 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
             icon: const Icon(Icons.file_upload_outlined),
             label: const Text('Import CSV'),
           ),
+          const SizedBox(width: 8),
+          // Barcodes PDF button: enabled once products have loaded (handled below after async resolves)
+          Builder(builder: (_) {
+            final hasData = !async.isLoading && async.hasValue && (async.valueOrNull?.isNotEmpty ?? false);
+            return OutlinedButton.icon(
+              onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('Barcodes PDF'),
+            );
+          }),
         ]),
         const SizedBox(height: 12),
         Expanded(
@@ -414,6 +424,9 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       _requireSignInNotice();
       return;
     }
+    // Capture messenger early
+    final messenger = ScaffoldMessenger.of(context);
+    // ignore: use_build_context_synchronously -- dialog awaited; messenger captured; using context solely to show dialog as per standard pattern.
     final result = await showDialog<_AddProductResult>(
       context: context,
       builder: (_) => const _AddProductDialog(),
@@ -425,8 +438,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       _requireSignInNotice();
       return;
     }
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  await repo.addProduct(
+    await repo.addProduct(
       tenantId: tenantId,
       sku: result.sku,
       name: result.name,
@@ -441,19 +453,21 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       storeQty: result.storeQty,
       warehouseQty: result.warehouseQty,
     );
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Product added')));
+    if (mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('Product added')));
+    }
   }
 
   Future<void> _openEditDialog(BuildContext context, ProductDoc p) async {
+    final messenger = ScaffoldMessenger.of(context);
+    // ignore: use_build_context_synchronously -- see justification above
     final result = await showDialog<_EditProductResult>(
       context: context,
       builder: (_) => _EditProductDialog(product: p),
     );
     if (result == null) return;
     final repo = ref.read(_inventoryRepoProvider);
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  await repo.updateProduct(
+    await repo.updateProduct(
       sku: p.sku,
       name: result.name,
       unitPrice: result.unitPrice,
@@ -465,11 +479,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       costPrice: result.costPrice,
       isActive: result.isActive,
     );
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
+    if (mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context, ProductDoc p) async {
+    final messenger = ScaffoldMessenger.of(context);
+    // ignore: use_build_context_synchronously -- dialog usage pattern guarded
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -483,9 +500,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (ok != true) return;
     final repo = ref.read(_inventoryRepoProvider);
-    final messenger = ScaffoldMessenger.of(context); // capture before async
     await repo.deleteProduct(sku: p.sku);
-    if (!mounted) return;
+    if (!mounted) return; // context safety after async gap
     messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
   }
 
@@ -512,10 +528,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     final csv = CsvUtils.listToCsv(rows);
     final bytes = Uint8List.fromList(csv.codeUnits);
     // Try automatic download on web; fallback to dialog elsewhere or if failed.
-    final ctx = context;
+    final ctx = context; // capture for dialog
     downloadBytes(bytes, 'products_export.csv', 'text/csv').then((ok) {
       if (ok) return;
-      if (!mounted) return;
+      if (!mounted) return; // ensure still mounted before dialog
       showDialog(
         context: ctx,
         builder: (_) => AlertDialog(
@@ -527,6 +543,36 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     });
   }
 
+  Future<void> _exportBarcodesPdf(BuildContext context) async {
+    if (_currentProducts.isEmpty) return;
+    final products = _currentProducts
+        .map((p) => BarcodeProduct(sku: p.sku, realBarcode: p.barcode))
+        .toList();
+    late final Uint8List bytes;
+    try {
+      bytes = await buildBarcodesPdf(products);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to build PDF: $e')));
+      return;
+    }
+    final ok = await downloadBytes(bytes, 'product_barcodes.pdf', 'application/pdf');
+    if (!mounted) return;
+    if (!ok) {
+      // Fallback: show simple dialog with note
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Barcodes PDF generated'),
+          content: const Text('Automatic download failed. Try again or check browser settings.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Barcodes PDF downloaded')));
+    }
+  }
+
   Future<void> _importCsv(BuildContext context) async {
     final user = ref.read(authStateProvider);
     if (user == null) {
@@ -535,8 +581,9 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     }
     final textCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  final ctx = context; // still used for dialogs while mounted
+    final ctx = context; // capture outer context
+    final messenger = ScaffoldMessenger.of(context);
+    // ignore: use_build_context_synchronously -- capturing messenger before awaits; dialog is safe
     final result = await showDialog<bool>(
       context: ctx,
       builder: (_) => AlertDialog(
@@ -567,7 +614,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     try {
       table = CsvUtils.csvToList(csv);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return; // context safety
       messenger.showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
       return;
     }
@@ -579,7 +626,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     final okHeaders = header.length == expected.length &&
         List.generate(expected.length, (i) => header[i] == expected[i]).every((x) => x);
     if (!okHeaders) {
-      if (!mounted) return;
+      if (!mounted) return; // context safety
       messenger.showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
       return;
     }
@@ -618,8 +665,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
         // Continue with next row on error
       }
     }
-  if (!mounted) return;
-  messenger.showSnackBar(SnackBar(content: Text('Imported $imported products')));
+    if (!mounted) return; // context safety after loop
+    messenger.showSnackBar(SnackBar(content: Text('Imported $imported products')));
   }
 
   void _requireSignInNotice() {

@@ -114,12 +114,15 @@ pw.Widget _totalsBlock(InvoiceData d) {
         _kv('Subtotal', d.subtotal),
         _kv('Discount', -d.discountTotal),
         _kv('GST Total', d.taxTotal),
+        if (d.redeemedValue > 0) _kv('Redeemed', -d.redeemedValue),
         pw.Divider(),
         _kv('Grand Total', d.grandTotal, bold: true),
         pw.SizedBox(height: 4),
   pw.Text('Paid via: ${d.paymentMode}', style: pw.TextStyle(fontSize: 9)),
         if (d.customerDiscountPercent > 0)
           pw.Text('Customer Discount: ${d.customerDiscountPercent.toStringAsFixed(0)}%', style: pw.TextStyle(fontSize: 9)),
+        if (d.redeemedPoints > 0)
+          pw.Text('Points Used: ${d.redeemedPoints.toStringAsFixed(0)}', style: pw.TextStyle(fontSize: 9)),
       ],
     ),
   );

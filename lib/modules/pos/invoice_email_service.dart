@@ -1,34 +1,65 @@
-import 'dart:typed_data';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:convert';
 
 class InvoiceEmailService {
-  final FirebaseStorage _storage;
   final FirebaseFunctions _functions;
-  InvoiceEmailService({FirebaseStorage? storage, FirebaseFunctions? functions})
-      : _storage = storage ?? FirebaseStorage.instance,
-        _functions = functions ?? FirebaseFunctions.instance;
+  InvoiceEmailService({FirebaseFunctions? functions})
+      : _functions = functions ?? FirebaseFunctions.instance;
 
-  /// Uploads PDF bytes to a temporary Storage path and calls a Cloud Function
-  /// named `sendInvoiceEmail` with metadata.
-  Future<void> sendInvoiceEmail({
-    required String invoiceNumber,
-    required Uint8List pdfBytes,
+  /// Sends structured invoice JSON (server builds HTML)
+  Future<void> sendInvoiceJson({
+    required Map<String, dynamic> invoiceJson,
     required String customerEmail,
     required String subject,
     required String body,
   }) async {
-    final path = 'invoices/$invoiceNumber.pdf';
-    final ref = _storage.ref(path);
-    await ref.putData(pdfBytes, SettableMetadata(contentType: 'application/pdf'));
-    final url = await ref.getDownloadURL();
     final callable = _functions.httpsCallable('sendInvoiceEmail');
     await callable.call({
-      'invoiceNumber': invoiceNumber,
-      'downloadUrl': url,
+      'invoiceNumber': invoiceJson['invoiceNumber'],
+      'invoiceData': invoiceJson,
       'to': customerEmail,
       'subject': subject,
       'body': body,
+    });
+  }
+
+  /// Sends pre-built HTML only (no JSON required).
+  Future<void> sendInvoiceHtml({
+    required String customerEmail,
+    required String invoiceHtml,
+    String? invoiceNumber,
+    String? subject,
+  }) async {
+    final callable = _functions.httpsCallable('sendInvoiceEmail');
+    await callable.call({
+      if (invoiceNumber != null) 'invoiceNumber': invoiceNumber,
+      'customerEmail': customerEmail,
+      'invoiceHtml': invoiceHtml,
+      if (subject != null) 'subject': subject,
+    });
+  }
+
+  /// Sends a PDF (base64) plus optional HTML or JSON for fallback.
+  Future<void> sendInvoicePdf({
+    required String customerEmail,
+    required String invoiceNumber,
+    required List<int> pdfBytes,
+    Map<String, dynamic>? invoiceJson,
+    String? subject,
+    String? body,
+    String? filename,
+    String? invoiceHtml,
+  }) async {
+    final callable = _functions.httpsCallable('sendInvoiceEmail');
+    await callable.call({
+      'customerEmail': customerEmail,
+      'invoiceNumber': invoiceNumber,
+      if (invoiceJson != null) 'invoiceData': invoiceJson,
+      if (subject != null) 'subject': subject,
+      if (body != null) 'body': body,
+      'pdfBase64': base64Encode(pdfBytes),
+      if (filename != null) 'pdfFilename': filename,
+      if (invoiceHtml != null) 'invoiceHtml': invoiceHtml,
     });
   }
 }
