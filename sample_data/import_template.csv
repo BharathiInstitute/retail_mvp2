@@ -1,0 +1,2 @@
+SKU,Name,Barcode,Unit Price,MRP,Cost Price,GST %,Variants,Description,Active,Stock Store,Stock Warehouse,Supplier,Batch1 Qty,Batch1 Location,Batch1 Expiry,Batch2 Qty,Batch2 Location,Batch2 Expiry
+SKU_DEMO1,Sample Product 1,8909999000001,100,120,70,12,Red;XL,Example product description,true,10,5,SUP123,10,Store,2026-01-15,5,Warehouse,2026-06-30

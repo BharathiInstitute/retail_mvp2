@@ -6,7 +6,7 @@
 			"type": "shell",
 			"command": "flutter analyze",
 			"problemMatcher": [
-				"$dart-buildmate"
+				"$dart-build_runner"
 			],
 			"group": "build"
 		},
