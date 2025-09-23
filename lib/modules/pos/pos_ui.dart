@@ -13,6 +13,7 @@ import 'invoice_pdf.dart'; // For PDF generation (email attachment only; downloa
 import 'invoice_email_service.dart';
 import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav.dart';
+import '../inventory/inventory_repository.dart';
 import 'pos_checkout.dart';
 
 class PosPage extends StatefulWidget {
@@ -134,10 +135,23 @@ class _PosPageState extends State<PosPage> {
         return [walkIn, ...list];
       });
 
-  // Printing functionality removed; Node backend demo will handle printing.
-  Future<void> _quickPrintFromPanel() async => _snack('Use new web printing demo backend.');
-  // (Legacy) Print settings popup removed
-  Future<void> _openPrintSettingsPopup() async => _snack('Print settings moved to backend demo.');
+  // Temporary local print settings dialog (backend printing TBD)
+  Future<void> _openPrintSettingsPopup() async {
+    await showDialog(
+      context: context,
+      builder: (_) => _PrintSettingsDialog(
+        onSave: (settings) {
+          Navigator.pop(context);
+          _snack('Settings saved');
+        },
+      ),
+    );
+  }
+
+  Future<void> _quickPrintFromPanel() async {
+    // Instead of printing, open settings if none configured
+    await _openPrintSettingsPopup();
+  }
   double get _customerPercent => selectedCustomer?.discountPercent ?? 0;
   double get discountValue {
     switch (discountType) {
@@ -307,7 +321,20 @@ class _PosPageState extends State<PosPage> {
   }
 
   // ---------------- Temporary placeholder cart/product helpers ----------------
-  Stream<List<Product>> get _productStream => Stream.value(_cacheProducts);
+  // Replace placeholder with live Firestore stream from inventory collection.
+  final InventoryRepository _inventoryRepo = InventoryRepository();
+  Stream<List<Product>> get _productStream => _inventoryRepo.streamProducts().map((docs) {
+        final list = docs.map((d) => Product(
+              sku: d.sku,
+              name: d.name,
+              price: d.unitPrice,
+              stock: d.totalStock,
+              taxPercent: (d.taxPct ?? 0).toInt(),
+              barcode: d.barcode.isEmpty ? null : d.barcode,
+              ref: FirebaseFirestore.instance.collection('inventory').doc(d.sku),
+            )).toList();
+        return list;
+      });
   void addToCart(Product p) { cart.update(p.sku, (ex) => ex.copyWith(qty: ex.qty + 1), ifAbsent: () => CartItem(product: p, qty: 1)); setState(() {}); }
   void changeQty(String sku, int delta) { final it = cart[sku]; if (it==null) return; final nq = it.qty + delta; if (nq<=0) { cart.remove(sku);} else { cart[sku]=it.copyWith(qty: nq);} setState(() {}); }
   void removeFromCart(String sku){ cart.remove(sku); setState(() {}); }
@@ -903,6 +930,62 @@ class _HeldOrdersDialog extends StatelessWidget {
         ),
       ),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+    );
+  }
+}
+
+// ---------------- Simple Print Settings Dialog (placeholder) ----------------
+class _PrintSettingsData {
+  bool thermal;
+  String paperWidth;
+  _PrintSettingsData({required this.thermal, required this.paperWidth});
+}
+
+class _PrintSettingsDialog extends StatefulWidget {
+  final void Function(_PrintSettingsData) onSave;
+  const _PrintSettingsDialog({required this.onSave});
+  @override
+  State<_PrintSettingsDialog> createState() => _PrintSettingsDialogState();
+}
+
+class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
+  bool _thermal = true;
+  String _width = '48mm';
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Print Settings'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SwitchListTile(
+            title: const Text('Thermal (receipt) mode'),
+            value: _thermal,
+            onChanged: (v) => setState(() => _thermal = v),
+          ),
+          DropdownButtonFormField<String>(
+            value: _width,
+            decoration: const InputDecoration(labelText: 'Paper Width'),
+            items: const [
+              DropdownMenuItem(value: '48mm', child: Text('48mm')),
+              DropdownMenuItem(value: '80mm', child: Text('80mm')),
+              DropdownMenuItem(value: 'A4', child: Text('A4 (full invoice)')),
+            ],
+            onChanged: (v) => setState(() => _width = v ?? _width),
+          ),
+          const SizedBox(height: 8),
+          const Text('Backend silent printing not yet wired. These settings are local only.', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            widget.onSave(_PrintSettingsData(thermal: _thermal, paperWidth: _width));
+          },
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
