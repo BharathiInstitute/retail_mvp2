@@ -789,7 +789,7 @@ class Product {
 class Customer {
   final String id; // empty id for Walk-in
   final String name;
-  Customer({required this.id, required this.name});
+  const Customer({required this.id, required this.name});
 
   factory Customer.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};

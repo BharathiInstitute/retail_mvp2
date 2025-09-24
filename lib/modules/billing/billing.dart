@@ -402,7 +402,7 @@ class _InvoiceEditorState extends State<_InvoiceEditor> {
 						Row(children: [
 							Expanded(
 								child: DropdownButtonFormField<BillingCustomer>(
-									value: customer,
+									initialValue: customer,
 									items: [for (final c in widget.customers) DropdownMenuItem(value: c, child: Text(c.name))],
 									onChanged: (v) => setState(() => customer = v),
 									decoration: const InputDecoration(labelText: 'Customer'),
@@ -528,7 +528,7 @@ class _NoteEditorState extends State<_NoteEditor> {
 					mainAxisSize: MainAxisSize.min,
 					children: [
 						DropdownButtonFormField<String>(
-							value: type,
+							initialValue: type,
 							items: const [DropdownMenuItem(value: 'credit', child: Text('Credit')), DropdownMenuItem(value: 'debit', child: Text('Debit'))],
 							onChanged: (v) => setState(() => type = v ?? 'credit'),
 							decoration: const InputDecoration(labelText: 'Type'),
