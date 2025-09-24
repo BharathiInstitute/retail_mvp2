@@ -7,6 +7,10 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import 'invoice_models.dart';
 import 'invoice_pdf.dart'; // For PDF generation (email attachment only; download removed)
@@ -75,10 +79,13 @@ class _PosPageState extends State<PosPage> {
   late final FocusNode _scannerFocusNode;
 
   String get invoiceNumber => 'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+  late final String _backendBase; // resolved at runtime to support web/LAN
+  bool _isPrinting = false; // UI guard for one-click print
 
   @override
   void initState() {
     super.initState();
+    _backendBase = _resolveBackendBase();
     selectedCustomer = customers.first;
     // Fix discount mode to Percent (discount type selector removed)
     discountType = DiscountType.percent;
@@ -93,6 +100,18 @@ class _PosPageState extends State<PosPage> {
       notify: () => setState(() {}),
       showMessage: _snack,
     );
+  }
+
+  String _resolveBackendBase() {
+    const envUrl = String.fromEnvironment('PRINTER_BACKEND_URL', defaultValue: '');
+    if (envUrl.isNotEmpty) return envUrl;
+    if (kIsWeb) {
+      final scheme = Uri.base.scheme == 'https' ? 'https' : 'http';
+      final host = Uri.base.host.isEmpty ? 'localhost' : Uri.base.host;
+      const port = 5005;
+      return '$scheme://$host:$port';
+    }
+    return 'http://localhost:5005';
   }
 
   Future<void> _loadCustomersOnce() async {
@@ -135,22 +154,126 @@ class _PosPageState extends State<PosPage> {
         return [walkIn, ...list];
       });
 
-  // Temporary local print settings dialog (backend printing TBD)
-  Future<void> _openPrintSettingsPopup() async {
-    await showDialog(
-      context: context,
-      builder: (_) => _PrintSettingsDialog(
-        onSave: (settings) {
-          Navigator.pop(context);
-          _snack('Settings saved');
-        },
-      ),
+  // Print Settings UI removed; printing now sends to backend default printer.
+  Future<void> _quickPrintFromPanel() async {
+    if (_isPrinting) return;
+    await _oneClickPrintCurrentCart();
+  }
+
+  Future<void> _oneClickPrintCurrentCart() async {
+    if (cart.isEmpty) {
+      _snack('Cart empty');
+      return;
+    }
+    setState(() => _isPrinting = true);
+    try {
+      final invoice = _buildTempInvoiceForPrint();
+      final pdfBytes = await _buildThermalPdf(invoice, widthMm: 48, marginMm: 4, density: 8);
+      final uri = Uri.parse('$_backendBase/print-pdf');
+      final req = http.MultipartRequest('POST', uri)
+        ..files.add(http.MultipartFile.fromBytes('file', pdfBytes, filename: 'pos_receipt.pdf'));
+      final streamed = await req.send();
+      final resp = await http.Response.fromStream(streamed);
+      if (resp.statusCode == 200) {
+        _snack('Printed');
+      } else {
+        _snack('Print failed: ${resp.statusCode}');
+      }
+    } catch (e) {
+      _snack('Print error: $e');
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
+  InvoiceData _buildTempInvoiceForPrint() {
+    final discounts = lineDiscounts;
+    final taxes = lineTaxes;
+    final taxesByRate = <int, double>{};
+    for (final it in cart.values) {
+      final tax = taxes[it.product.sku] ?? 0.0;
+      taxesByRate.update(it.product.taxPercent, (v) => v + tax, ifAbsent: () => tax);
+    }
+    final lines = cart.values.map((it) {
+      final lineSubtotal = it.product.price * it.qty;
+      final disc = discounts[it.product.sku] ?? 0.0;
+      final net = (lineSubtotal - disc).clamp(0, double.infinity);
+      final tax = taxes[it.product.sku] ?? 0.0;
+      final lineTotal = net + tax;
+      return InvoiceLine(
+        sku: it.product.sku,
+        name: it.product.name,
+        qty: it.qty,
+        unitPrice: it.product.price,
+        taxPercent: it.product.taxPercent,
+        lineSubtotal: lineSubtotal,
+        discount: disc,
+        tax: tax,
+        lineTotal: lineTotal,
+      );
+    }).toList();
+    return InvoiceData(
+      invoiceNumber: 'TEMP-${DateTime.now().millisecondsSinceEpoch}',
+      timestamp: DateTime.now(),
+      customerName: selectedCustomer?.name ?? 'Walk-in',
+      customerEmail: selectedCustomer?.email,
+      customerPhone: selectedCustomer?.phone,
+      customerId: selectedCustomer?.id,
+      lines: lines,
+      subtotal: subtotal,
+      discountTotal: discountValue,
+      taxTotal: totalTax,
+      grandTotal: grandTotal - redeemValue,
+      redeemedValue: redeemValue,
+      redeemedPoints: redeemedPoints,
+      taxesByRate: taxesByRate,
+      customerDiscountPercent: selectedCustomer?.discountPercent ?? 0,
+      paymentMode: selectedPaymentMode.label,
     );
   }
 
-  Future<void> _quickPrintFromPanel() async {
-    // Instead of printing, open settings if none configured
-    await _openPrintSettingsPopup();
+  Future<Uint8List> _buildThermalPdf(InvoiceData data, {double widthMm = 48, double marginMm = 4, int density = 8}) async {
+    final doc = pw.Document();
+    final fmtDate = '${data.timestamp.year.toString().padLeft(4,'0')}-${data.timestamp.month.toString().padLeft(2,'0')}-${data.timestamp.day.toString().padLeft(2,'0')}';
+    final fmtTime = '${data.timestamp.hour.toString().padLeft(2,'0')}:${data.timestamp.minute.toString().padLeft(2,'0')}:${data.timestamp.second.toString().padLeft(2,'0')}';
+    final pageFormat = PdfPageFormat(widthMm * PdfPageFormat.mm, double.maxFinite, marginAll: marginMm * PdfPageFormat.mm);
+    doc.addPage(pw.MultiPage(
+      pageFormat: pageFormat,
+      build: (ctx) {
+        final widgets = <pw.Widget>[];
+        widgets.add(pw.Center(child: pw.Text('RECEIPT', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('No: ${data.invoiceNumber}', style: const pw.TextStyle(fontSize: 8)));
+        widgets.add(pw.Text('Date: $fmtDate $fmtTime', style: const pw.TextStyle(fontSize: 8)));
+        widgets.add(pw.Text('Cust: ${data.customerName}', style: const pw.TextStyle(fontSize: 8)));
+        if ((data.customerPhone ?? '').isNotEmpty) widgets.add(pw.Text('Ph: ${data.customerPhone}', style: const pw.TextStyle(fontSize: 8)));
+        widgets.add(pw.Divider());
+        for (final l in data.lines) {
+          widgets.add(pw.Row(children:[
+            pw.Expanded(child: pw.Text(l.name, style: const pw.TextStyle(fontSize: 8))),
+            pw.Text('x${l.qty}', style: const pw.TextStyle(fontSize: 8)),
+          ]));
+          widgets.add(pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children:[
+            pw.Text('₹${l.unitPrice.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
+            if (l.discount>0) pw.Text('-${l.discount.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
+            pw.Text('₹${l.lineTotal.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
+          ]));
+        }
+        widgets.add(pw.Divider());
+        pw.Widget kv(String k, String v,{bool b=false}) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children:[pw.Text(k,style: pw.TextStyle(fontSize:8,fontWeight:b?pw.FontWeight.bold:pw.FontWeight.normal)), pw.Text(v,style: pw.TextStyle(fontSize:8,fontWeight:b?pw.FontWeight.bold:pw.FontWeight.normal))]);
+        widgets.add(kv('Subtotal','₹${data.subtotal.toStringAsFixed(2)}'));
+        widgets.add(kv('Discount','-₹${data.discountTotal.toStringAsFixed(2)}'));
+        if (data.redeemedValue>0) widgets.add(kv('Redeemed','-₹${data.redeemedValue.toStringAsFixed(2)}'));
+        widgets.add(kv('GST','₹${data.taxTotal.toStringAsFixed(2)}'));
+        widgets.add(pw.Divider());
+        widgets.add(kv('TOTAL','₹${data.grandTotal.toStringAsFixed(2)}', b:true));
+        widgets.add(kv('Paid', data.paymentMode));
+        widgets.add(pw.SizedBox(height:4));
+        widgets.add(pw.Text('Thank you!', style: const pw.TextStyle(fontSize: 8)));
+        return widgets;
+      }
+    ));
+    return doc.save();
   }
   double get _customerPercent => selectedCustomer?.discountPercent ?? 0;
   double get discountValue {
@@ -306,11 +429,36 @@ class _PosPageState extends State<PosPage> {
               title: const Text('Invoice Preview (GST)'),
               content: SizedBox(width: 480, child: summary),
               actions: [
-                // Print disabled (new backend-driven printing demo to be integrated)
+                // Email first
                 TextButton.icon(
                   onPressed: () => _emailInvoice(dialogCtx),
                   icon: const Icon(Icons.email),
                   label: const Text('Email'),
+                ),
+                // Print beside Email
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+                  onPressed: _isPrinting ? null : () async {
+                    setState(() => _isPrinting = true);
+                    try {
+                      final pdfBytes = await _buildThermalPdf(invoice, widthMm: 48, marginMm: 4, density: 8);
+                      final req = http.MultipartRequest('POST', Uri.parse('$_backendBase/print-pdf'))
+                        ..files.add(http.MultipartFile.fromBytes('file', pdfBytes, filename: 'invoice_${invoice.invoiceNumber}.pdf'));
+                      final streamed = await req.send();
+                      final resp = await http.Response.fromStream(streamed);
+                      if (resp.statusCode == 200) {
+                        _snack('Invoice printed');
+                      } else {
+                        _snack('Print failed: ${resp.statusCode}');
+                      }
+                    } catch (e) {
+                      _snack('Print error: $e');
+                    } finally {
+                      if (mounted) setState(() => _isPrinting = false);
+                    }
+                  },
+                  icon: _isPrinting ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,color: Colors.white)) : const Icon(Icons.print),
+                  label: const Text('Print'),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
@@ -662,8 +810,8 @@ class _PosPageState extends State<PosPage> {
             selectedPaymentMode: selectedPaymentMode,
             onPaymentModeChanged: (m) => setState(() => selectedPaymentMode = m),
             onQuickPrint: _quickPrintFromPanel,
-            onOpenPrintSettings: _openPrintSettingsPopup,
           ),
+          
         ),
       ],
     );
@@ -680,6 +828,7 @@ class _PosPageState extends State<PosPage> {
           onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
           onBarcodeSubmitted: _scan,
           onSearchChanged: () => setState(() {}),
+          
         ),
         const SizedBox(height: 8),
         SizedBox(
@@ -761,7 +910,6 @@ class _PosPageState extends State<PosPage> {
           selectedPaymentMode: selectedPaymentMode,
           onPaymentModeChanged: (m) => setState(() => selectedPaymentMode = m),
           onQuickPrint: _quickPrintFromPanel,
-          onOpenPrintSettings: _openPrintSettingsPopup,
         ),
       ],
     );
@@ -935,57 +1083,4 @@ class _HeldOrdersDialog extends StatelessWidget {
 }
 
 // ---------------- Simple Print Settings Dialog (placeholder) ----------------
-class _PrintSettingsData {
-  bool thermal;
-  String paperWidth;
-  _PrintSettingsData({required this.thermal, required this.paperWidth});
-}
-
-class _PrintSettingsDialog extends StatefulWidget {
-  final void Function(_PrintSettingsData) onSave;
-  const _PrintSettingsDialog({required this.onSave});
-  @override
-  State<_PrintSettingsDialog> createState() => _PrintSettingsDialogState();
-}
-
-class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
-  bool _thermal = true;
-  String _width = '48mm';
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Print Settings'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SwitchListTile(
-            title: const Text('Thermal (receipt) mode'),
-            value: _thermal,
-            onChanged: (v) => setState(() => _thermal = v),
-          ),
-          DropdownButtonFormField<String>(
-            value: _width,
-            decoration: const InputDecoration(labelText: 'Paper Width'),
-            items: const [
-              DropdownMenuItem(value: '48mm', child: Text('48mm')),
-              DropdownMenuItem(value: '80mm', child: Text('80mm')),
-              DropdownMenuItem(value: 'A4', child: Text('A4 (full invoice)')),
-            ],
-            onChanged: (v) => setState(() => _width = v ?? _width),
-          ),
-          const SizedBox(height: 8),
-          const Text('Backend silent printing not yet wired. These settings are local only.', style: TextStyle(fontSize: 12)),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: () {
-            widget.onSave(_PrintSettingsData(thermal: _thermal, paperWidth: _width));
-          },
-          child: const Text('Save'),
-        ),
-      ],
-    );
-  }
-}
+// Print Settings UI removed; printing now sends to backend default printer.

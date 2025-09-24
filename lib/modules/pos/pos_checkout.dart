@@ -23,8 +23,7 @@ class CheckoutPanel extends StatelessWidget {
   final Map<String, CartItem> cart;
   final Map<String, double> lineTaxes;
   final VoidCallback onCheckout;
-  final VoidCallback? onQuickPrint; // direct print using stored settings
-  final VoidCallback? onOpenPrintSettings; // open print settings popup
+  final VoidCallback? onQuickPrint; // direct print
   final PaymentMode selectedPaymentMode;
   final ValueChanged<PaymentMode> onPaymentModeChanged;
 
@@ -49,7 +48,6 @@ class CheckoutPanel extends StatelessWidget {
     required this.lineTaxes,
   required this.onCheckout,
   this.onQuickPrint,
-  this.onOpenPrintSettings,
     required this.selectedPaymentMode,
     required this.onPaymentModeChanged,
   });
@@ -110,7 +108,6 @@ class CheckoutPanel extends StatelessWidget {
                 children: [
                   InkWell(
                     onTap: onQuickPrint,
-                    onLongPress: onOpenPrintSettings,
                     borderRadius: BorderRadius.circular(24),
                     child: const Padding(
                       padding: EdgeInsets.all(6.0),

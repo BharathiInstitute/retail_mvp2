@@ -120,3 +120,47 @@ ABC123,Sample 1,120,5,Store,2025-12-31,8,Warehouse,2026-01-15
 ```
 
 If you need per-location defaulting or additional batch metadata fields, extend the repository batch map and import parsing similarly.
+
+## Printing Demo (Silent Thermal Backend)
+
+An end-to-end silent printing proof-of-concept is included.
+
+### Features
+- List system printers from backend (`/printers`).
+- Save default printer + basic page settings (`/set-default`).
+- Print raw text (`/print-text`).
+- Print uploaded PDF (`/print-pdf`).
+
+### Backend
+Location: `printer_backend/`
+
+Run:
+```powershell
+cd printer_backend
+npm install
+node server.js
+```
+Server default: `http://localhost:5005`.
+
+### Flutter Web
+Launch with backend URL:
+```powershell
+flutter run -d chrome --dart-define=PRINTER_BACKEND_URL=http://localhost:5005
+```
+Navigate to `PrintDemoPage` (add to a route or use a `Navigator.push` in dev).
+
+### Endpoints
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/printers` | GET | List printers |
+| `/set-default` | POST | Save default printer + settings |
+| `/print-text` | POST | Print plain text receipt |
+| `/print-pdf` | POST | Print uploaded PDF file |
+
+### Config Persistence
+Defaults stored in `printer_backend/config.json`.
+
+### Extending
+- Add `/print-escpos` for raw ESC/POS bytes if needed.
+- Enhance settings (density, cutter) mapping in backend.
+- Secure endpoints (API key / LAN only) before production.
