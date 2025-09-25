@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "retail-erp-dc742"
-  }
+    "default": "retail-erp-dc742",
+    "email": "retail-erp-dc742"
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -137,7 +137,12 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
             itemBuilder: (context,i){
               final c = list[i];
               final tier = _findTierForStatus(tiers, c.status);
-              final pts = (c.totalSpend/100.0)* (tier?.pointsPer100 ?? 1.0);
+              // Use stored loyaltyPoints directly (added to CrmCustomer model)
+              double pts = c.loyaltyPoints;
+              String fmtPts(){
+                final s = pts.toStringAsFixed(1);
+                return s.endsWith('.0')? s.substring(0,s.length-2): s;
+              }
               return ListTile(
                 leading: CircleAvatar(child: Text(c.initials)),
                 title: Text(c.name),
@@ -169,7 +174,7 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
                       }
                     },
                   ),
-                  Chip(label: Text('${pts.toStringAsFixed(1)} pts')),
+                  Chip(label: Text('${fmtPts()} pts')),
                   Chip(label: Text('${(tier?.discount ?? 0).toStringAsFixed(0)}%')),
                 ]),
               );

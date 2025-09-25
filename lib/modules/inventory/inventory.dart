@@ -1,36 +1,31 @@
-import 'package:flutter/material.dart';
 // ignore_for_file: use_build_context_synchronously
+// Rebuilt Inventory module root screen (clean version)
+
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../core/auth/auth.dart';
 import 'inventory_repository.dart';
 import 'csv_utils.dart';
-import 'download_helper_stub.dart'
-  if (dart.library.html) 'download_helper_web.dart';
+import 'download_helper_stub.dart' if (dart.library.html) 'download_helper_web.dart';
+import 'barcodes_pdf.dart';
+import 'import_products_screen.dart' show ImportProductsScreen;
+import 'suppliers_screen.dart';
+import 'alerts_screen.dart';
+import 'audit_screen.dart';
+import 'stock_movements_screen.dart';
+import 'transfers_screen.dart';
+import 'inventory_sheet_page.dart';
 
+// -------------------- Inventory Root Screen (Tabs) --------------------
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
   @override
-  State<InventoryScreen> createState() => _InventoryPageState();
+  State<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryPageState extends State<InventoryScreen> {
-  late List<Supplier> suppliers;
-  final List<StockMovement> ledger = [];
-  final List<TransferLog> transfers = [];
-  final Map<String, AuditItem> audit = {};
-
-  @override
-  void initState() {
-    super.initState();
-    suppliers = [
-      Supplier(name: 'FreshFoods Co', contact: '+91 90000 11111'),
-      Supplier(name: 'Daily Essentials', contact: '+91 90000 22222'),
-      Supplier(name: 'PersonalCare Pvt Ltd', contact: '+91 90000 33333'),
-    ];
-  }
-
-  void _snack(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
@@ -50,277 +45,30 @@ class _InventoryPageState extends State<InventoryScreen> {
         ),
         body: TabBarView(children: [
           _productsTab(),
-          _movementsTab(),
-          _transfersTab(),
+          const StockMovementsScreen(),
+          const TransfersScreen(),
           _suppliersTab(),
           _alertsTab(),
-          _auditTab(),
+          const AuditScreen(),
         ]),
       ),
     );
   }
 
-  // PRODUCTS TAB
+  // ---------- Tab Builders ----------
   Widget _productsTab() => const _CloudProductsView();
 
-  // MOVEMENTS TAB (placeholder + local ledger table)
-  Widget _movementsTab() {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Stock Movements', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Card(
-          child: ListTile(
-            title: const Text('Adjustments via Firestore coming soon'),
-            subtitle: const Text('This tab will post stock in/out and transfers against Firestore data.'),
-            trailing: Row(mainAxisSize: MainAxisSize.min, children: const [
-              Icon(Icons.circle, size: 10, color: Colors.green),
-              SizedBox(width: 6),
-              Text('POS Sync: Live'),
-            ]),
-          ),
-        ),
-        const Divider(),
-        Expanded(child: _ledgerTable()),
-      ]),
-    );
-  }
-
-  Widget _ledgerTable() {
-    return Card(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(columns: const [
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('SKU')),
-          DataColumn(label: Text('Product')),
-          DataColumn(label: Text('Type')),
-          DataColumn(label: Text('Location')),
-          DataColumn(label: Text('Qty')),
-          DataColumn(label: Text('Note')),
-        ], rows: [
-          for (final m in ledger)
-            DataRow(cells: [
-              DataCell(Text(_fmtDateTime(m.date))),
-              DataCell(Text(m.sku)),
-              DataCell(Text(m.name)),
-              DataCell(Text(m.type)),
-              DataCell(Text(m.location)),
-              DataCell(Text(m.qty.toString())),
-              DataCell(Text(m.note)),
-            ]),
-        ]),
-      ),
-    );
-  }
-
-  // TRANSFERS TAB (placeholder + local log table)
-  Widget _transfersTab() {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Transfers'),
-        const SizedBox(height: 8),
-        Card(child: ListTile(title: const Text('Transfers via Firestore coming soon'))),
-        const Divider(),
-        Expanded(
-          child: Card(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(columns: const [
-                DataColumn(label: Text('Date')),
-                DataColumn(label: Text('SKU')),
-                DataColumn(label: Text('Product')),
-                DataColumn(label: Text('From')),
-                DataColumn(label: Text('To')),
-                DataColumn(label: Text('Qty')),
-                DataColumn(label: Text('Note')),
-              ], rows: [
-                for (final t in transfers)
-                  DataRow(cells: [
-                    DataCell(Text(_fmtDateTime(t.date))),
-                    DataCell(Text(t.sku)),
-                    DataCell(Text(t.name)),
-                    DataCell(Text(t.from)),
-                    DataCell(Text(t.to)),
-                    DataCell(Text(t.qty.toString())),
-                    DataCell(Text(t.note)),
-                  ]),
-              ]),
-            ),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  // SUPPLIERS TAB
-  Widget _suppliersTab() {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Card(
-        child: ListView.separated(
-          itemCount: suppliers.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (_, i) {
-            final s = suppliers[i];
-            return ListTile(
-              title: Text(s.name),
-              subtitle: Text(s.contact),
-              trailing: IconButton(icon: const Icon(Icons.call), onPressed: () => _snack('Calling ${s.name}')),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  // ALERTS TAB
-  Widget _alertsTab() {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: ListView(children: const [
-        Text('Alerts'),
-        SizedBox(height: 8),
-        Card(child: ListTile(title: Text('Low stock & expiry alerts will appear here based on Firestore data.'))),
-      ]),
-    );
-  }
-
-  // AUDIT TAB
-  Widget _auditTab() {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Cycle Count / Audit'),
-        const SizedBox(height: 8),
-        Expanded(
-          child: Card(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(columns: const [
-                DataColumn(label: Text('SKU')),
-                DataColumn(label: Text('Product')),
-                DataColumn(label: Text('Expected')),
-                DataColumn(label: Text('Counted')),
-                DataColumn(label: Text('Status')),
-                DataColumn(label: Text('Actions')),
-              ], rows: [
-                for (final a in audit.values)
-                  DataRow(cells: [
-                    DataCell(Text(a.product.sku)),
-                    DataCell(Text(a.product.name)),
-                    DataCell(Text(a.expectedQty.toString())),
-                    DataCell(Text(a.countedQty.toString())),
-                    DataCell(Text(a.status.name.toUpperCase())),
-                    DataCell(Row(children: [
-                      IconButton(onPressed: () => setState(() => a.countedQty++), icon: const Icon(Icons.add)),
-                      IconButton(onPressed: () => setState(() => a.countedQty = (a.countedQty - 1).clamp(0, 9999)), icon: const Icon(Icons.remove)),
-                      IconButton(onPressed: () => setState(() => a.status = AuditStatus.review), icon: const Icon(Icons.flag)),
-                      IconButton(onPressed: () => setState(() => a.status = AuditStatus.ok), icon: const Icon(Icons.check)),
-                    ])),
-                  ]),
-              ]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(children: [
-          ElevatedButton(onPressed: () => _snack('Audit submitted for review'), child: const Text('Submit Audit')),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: () => setState(() {
-              for (final a in audit.values) {
-                a.countedQty = a.expectedQty;
-                a.status = AuditStatus.ok;
-              }
-            }),
-            child: const Text('Mark All OK'),
-          ),
-        ]),
-      ]),
-    );
-  }
+  Widget _suppliersTab() => const SuppliersScreen();
+  Widget _alertsTab() => const AlertsScreen();
+  // Extracted tabs already wired in TabBarView.
 }
 
-// MODELS (local demo for movements/transfers/audit)
-class Supplier {
-  final String name;
-  final String contact;
-  Supplier({required this.name, required this.contact});
-}
+// -------------------- Products Providers & Views --------------------
+final inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRepository());
+final tenantIdProvider = Provider<String?>((ref) { final user = ref.watch(authStateProvider); return user?.uid; });
+final productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) { final repo = ref.watch(inventoryRepoProvider); return repo.streamProducts(tenantId: null); });
 
-class Product {
-  final String sku;
-  final String name;
-  final double price;
-  final int taxPercent;
-  final List<String> variants;
-  final Supplier supplier;
-  final List<Batch> batches;
-  Product({required this.sku, required this.name, required this.price, required this.taxPercent, required this.variants, required this.supplier, required this.batches});
-  int get totalStock => batches.fold(0, (s, b) => s + b.qty);
-  int stockAt(String location) => batches.where((b) => b.location == location).fold(0, (s, b) => s + b.qty);
-}
-
-class Batch {
-  final String batchNo;
-  DateTime expiry;
-  int qty;
-  String location;
-  Batch({required this.batchNo, required this.expiry, required this.qty, required this.location});
-}
-
-class StockMovement {
-  final DateTime date;
-  final String type;
-  final String sku;
-  final String name;
-  final String location;
-  final int qty;
-  final String note;
-  StockMovement({required this.date, required this.type, required this.sku, required this.name, required this.location, required this.qty, required this.note});
-}
-
-class TransferLog {
-  final DateTime date;
-  final String sku;
-  final String name;
-  final String from;
-  final String to;
-  final int qty;
-  final String note;
-  TransferLog({required this.date, required this.sku, required this.name, required this.from, required this.to, required this.qty, required this.note});
-}
-
-enum AuditStatus { pending, review, ok }
-
-class AuditItem {
-  final Product product;
-  int expectedQty;
-  int countedQty;
-  AuditStatus status;
-  AuditItem({required this.product, required this.expectedQty, required this.countedQty, required this.status});
-  AuditItem copyWith({Product? product, int? expectedQty, int? countedQty, AuditStatus? status}) =>
-      AuditItem(product: product ?? this.product, expectedQty: expectedQty ?? this.expectedQty, countedQty: countedQty ?? this.countedQty, status: status ?? this.status);
-}
-
-String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-String _fmtDateTime(DateTime d) => '${_fmtDate(d)} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-
-// Firestore-backed products panel providers
-final _inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRepository());
-final _tenantIdProvider = Provider<String?>((ref) {
-  final user = ref.watch(authStateProvider);
-  // Return null to show all products to everyone when not signed in
-  return user?.uid;
-});
-final _productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) {
-  final repo = ref.watch(_inventoryRepoProvider);
-  // Show all products to everyone (no tenant filter)
-  return repo.streamProducts(tenantId: null);
-});
+// (Date formatting helpers for transfers were removed with extraction; not needed here.)
 
 class _CloudProductsView extends ConsumerStatefulWidget {
   const _CloudProductsView();
@@ -330,16 +78,82 @@ class _CloudProductsView extends ConsumerStatefulWidget {
 
 class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   List<ProductDoc> _currentProducts = const [];
+  String _search = '';
+  _ActiveFilter _activeFilter = _ActiveFilter.all;
+  int _gstFilter = -1; // -1 => All, otherwise 0/5/12/18
+
+  List<ProductDoc> _applyFilters(List<ProductDoc> src) {
+    Iterable<ProductDoc> it = src;
+    final q = _search.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      it = it.where((p) =>
+          p.sku.toLowerCase().contains(q) ||
+          p.name.toLowerCase().contains(q) ||
+          (p.barcode).toLowerCase().contains(q));
+    }
+    if (_activeFilter != _ActiveFilter.all) {
+      final want = _activeFilter == _ActiveFilter.active;
+      it = it.where((p) => p.isActive == want);
+    }
+    if (_gstFilter != -1) {
+      it = it.where((p) => (p.taxPct ?? 0) == _gstFilter);
+    }
+    return it.toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(_productsStreamProvider);
+  final async = ref.watch(productsStreamProvider);
     final user = ref.watch(authStateProvider);
     final bool isSignedIn = user != null;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
+          Transform.translate(
+            offset: const Offset(0, -4),
+            child: SizedBox(
+              width: 280,
+              child: TextField(
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  labelText: 'Search SKU/Name/Barcode',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                onChanged: (v) => setState(() => _search = v),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Transform.translate(
+            offset: const Offset(0, -4),
+            child: DropdownButton<_ActiveFilter>(
+              value: _activeFilter,
+              onChanged: (v) => setState(() => _activeFilter = v ?? _ActiveFilter.all),
+              items: const [
+                DropdownMenuItem(value: _ActiveFilter.all, child: Text('All')),
+                DropdownMenuItem(value: _ActiveFilter.active, child: Text('Active')),
+                DropdownMenuItem(value: _ActiveFilter.inactive, child: Text('Inactive')),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Transform.translate(
+            offset: const Offset(0, -4),
+            child: DropdownButton<int>(
+              value: _gstFilter,
+              onChanged: (v) => setState(() => _gstFilter = v ?? -1),
+              items: const [
+                DropdownMenuItem(value: -1, child: Text('GST: All')),
+                DropdownMenuItem(value: 0, child: Text('GST 0%')),
+                DropdownMenuItem(value: 5, child: Text('GST 5%')),
+                DropdownMenuItem(value: 12, child: Text('GST 12%')),
+                DropdownMenuItem(value: 18, child: Text('GST 18%')),
+              ],
+            ),
+          ),
+          const Spacer(),
           FilledButton.icon(
             onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
             icon: const Icon(Icons.add),
@@ -353,9 +167,30 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
           ),
           const SizedBox(width: 8),
           OutlinedButton.icon(
-            onPressed: isSignedIn ? () => _importCsv(context) : _requireSignInNotice,
+            onPressed: isSignedIn
+                ? () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ImportProductsScreen()),
+                    )
+                : _requireSignInNotice,
             icon: const Icon(Icons.file_upload_outlined),
             label: const Text('Import CSV'),
+          ),
+          const SizedBox(width: 8),
+          Builder(builder: (_) {
+            final hasData = !async.isLoading && async.hasValue && (async.valueOrNull?.isNotEmpty ?? false);
+            return OutlinedButton.icon(
+              onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('Barcodes PDF'),
+            );
+          }),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const InventorySheetPage()),
+            ),
+            icon: const Icon(Icons.grid_on_outlined),
+            label: const Text('Update Sheet'),
           ),
         ]),
         const SizedBox(height: 12),
@@ -366,30 +201,66 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                 if (list.isEmpty) {
                   return const Center(child: Text('No products found in Inventory.'));
                 }
-                _currentProducts = list; // cache for export
-                return ListView.separated(
-                  itemCount: list.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final p = list[i];
-                    return ListTile(
-                      title: Text('${p.name} • ${p.sku}'),
-                      subtitle: Text('Stock: Store ${p.stockAt('Store')} • Warehouse ${p.stockAt('Warehouse')} • Total ${p.totalStock}'),
-                      trailing: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        Text('₹${p.unitPrice.toStringAsFixed(2)} • GST ${p.taxPct ?? 0}%'),
-                        IconButton(
-                          tooltip: 'Edit',
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: isSignedIn ? () => _openEditDialog(context, p) : null,
+                final filtered = _applyFilters(list);
+                _currentProducts = filtered; // cache (export current view)
+                if (filtered.isEmpty) {
+                  return const Center(child: Text('No products match the filters.'));
+                }
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final table = DataTable(
+                        columns: const [
+                          DataColumn(label: Text('SKU')),
+                          DataColumn(label: Text('Name')),
+                          DataColumn(label: Text('Barcode')),
+                          DataColumn(label: Text('Unit Price')),
+                          DataColumn(label: Text('GST %')),
+                          DataColumn(label: Text('Store')),
+                          DataColumn(label: Text('Warehouse')),
+                          DataColumn(label: Text('Total')),
+                          DataColumn(label: Text('Active')),
+                          DataColumn(label: Text('Actions')),
+                        ],
+                        rows: [
+                          for (final p in filtered)
+                            DataRow(cells: [
+                              DataCell(Text(p.sku)),
+                              DataCell(Text(p.name)),
+                              DataCell(Text(p.barcode)),
+                              DataCell(Text('₹${p.unitPrice.toStringAsFixed(2)}')),
+                              DataCell(Text((p.taxPct ?? 0).toString())),
+                              DataCell(Text(p.stockAt('Store').toString())),
+                              DataCell(Text(p.stockAt('Warehouse').toString())),
+                              DataCell(Text(p.totalStock.toString())),
+                              DataCell(Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: p.isActive ? Colors.green : Colors.red)),
+                              DataCell(Wrap(spacing: 4, children: [
+                                IconButton(
+                                  tooltip: 'Edit',
+                                  icon: const Icon(Icons.edit_outlined),
+                                  onPressed: isSignedIn ? () => _openEditDialog(context, p) : null,
+                                ),
+                                IconButton(
+                                  tooltip: 'Delete',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: isSignedIn ? () => _confirmDelete(context, p) : null,
+                                ),
+                              ])),
+                            ]),
+                        ],
+                      );
+                      return SingleChildScrollView(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                            child: table,
+                          ),
                         ),
-                        IconButton(
-                          tooltip: 'Delete',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: isSignedIn ? () => _confirmDelete(context, p) : null,
-                        ),
-                      ]),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 );
               },
               error: (e, st) => _errorView(context, e),
@@ -400,6 +271,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       ]),
     );
   }
+
+  
 
   Widget _errorView(BuildContext context, Object e) => Center(
         child: Padding(
@@ -414,19 +287,21 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       _requireSignInNotice();
       return;
     }
+    // Capture messenger early
+    final messenger = ScaffoldMessenger.of(context);
     final result = await showDialog<_AddProductResult>(
       context: context,
+      useRootNavigator: false, // keep within branch navigator to avoid element reparenting
       builder: (_) => const _AddProductDialog(),
     );
     if (result == null) return;
-    final repo = ref.read(_inventoryRepoProvider);
-    final tenantId = ref.read(_tenantIdProvider);
+  final repo = ref.read(inventoryRepoProvider);
+  final tenantId = ref.read(tenantIdProvider);
     if (tenantId == null) {
       _requireSignInNotice();
       return;
     }
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  await repo.addProduct(
+    await repo.addProduct(
       tenantId: tenantId,
       sku: result.sku,
       name: result.name,
@@ -441,19 +316,19 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       storeQty: result.storeQty,
       warehouseQty: result.warehouseQty,
     );
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Product added')));
+    if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product added')));
   }
 
   Future<void> _openEditDialog(BuildContext context, ProductDoc p) async {
+    final messenger = ScaffoldMessenger.of(context);
     final result = await showDialog<_EditProductResult>(
       context: context,
+      useRootNavigator: false,
       builder: (_) => _EditProductDialog(product: p),
     );
     if (result == null) return;
-    final repo = ref.read(_inventoryRepoProvider);
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  await repo.updateProduct(
+  final repo = ref.read(inventoryRepoProvider);
+    await repo.updateProduct(
       sku: p.sku,
       name: result.name,
       unitPrice: result.unitPrice,
@@ -465,13 +340,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       costPrice: result.costPrice,
       isActive: result.isActive,
     );
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
+    if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
   }
 
   Future<void> _confirmDelete(BuildContext context, ProductDoc p) async {
+    final messenger = ScaffoldMessenger.of(context);
     final ok = await showDialog<bool>(
       context: context,
+      useRootNavigator: false,
       builder: (_) => AlertDialog(
         title: const Text('Delete Product'),
         content: Text('Are you sure you want to delete ${p.name} (${p.sku})?'),
@@ -482,18 +358,36 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       ),
     );
     if (ok != true) return;
-    final repo = ref.read(_inventoryRepoProvider);
-    final messenger = ScaffoldMessenger.of(context); // capture before async
+  final repo = ref.read(inventoryRepoProvider);
     await repo.deleteProduct(sku: p.sku);
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
+    if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
   }
 
   void _exportCsv() {
     final rows = <List<String>>[];
-    rows.add(CsvUtils.headers);
+    // Base columns
+    final baseHeader = [
+      'tenantId','sku','name','barcode','unitPrice','taxPct','mrpPrice','costPrice','variants','description','isActive'
+    ];
+    // Determine max batches among products
+    int maxBatches = 0;
     for (final p in _currentProducts) {
-      rows.add([
+      if (p.batches.length > maxBatches) maxBatches = p.batches.length;
+    }
+    final batchHeaderSegments = <String>[];
+    for (int i=0;i<maxBatches;i++) {
+      final n=i+1;
+      batchHeaderSegments.addAll(['Batch$n Qty','Batch$n Location','Batch$n Expiry']);
+    }
+    rows.add([
+      ...baseHeader,
+      'storeQty','warehouseQty','totalQty',
+      ...batchHeaderSegments,
+    ]);
+    for (final p in _currentProducts) {
+      final store = p.stockAt('Store');
+      final wh = p.stockAt('Warehouse');
+      final row = [
         p.tenantId,
         p.sku,
         p.name,
@@ -505,17 +399,29 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
         p.variants.join(';'),
         p.description ?? '',
         p.isActive ? 'true' : 'false',
-        p.stockAt('Store').toString(),
-        p.stockAt('Warehouse').toString(),
-      ]);
+        store.toString(),
+        wh.toString(),
+        p.totalStock.toString(),
+      ];
+      for (int i=0;i<maxBatches;i++) {
+        if (i < p.batches.length) {
+          final b = p.batches[i];
+          row.add((b.qty ?? 0).toString());
+          row.add(b.location ?? '');
+          row.add(b.expiry != null ? b.expiry!.toIso8601String().split('T').first : '');
+        } else {
+          row.addAll(['','','']);
+        }
+      }
+      rows.add(row);
     }
     final csv = CsvUtils.listToCsv(rows);
     final bytes = Uint8List.fromList(csv.codeUnits);
     // Try automatic download on web; fallback to dialog elsewhere or if failed.
-    final ctx = context;
+    final ctx = context; // capture for dialog
     downloadBytes(bytes, 'products_export.csv', 'text/csv').then((ok) {
       if (ok) return;
-      if (!mounted) return;
+      if (!mounted) return; // ensure still mounted before dialog
       showDialog(
         context: ctx,
         builder: (_) => AlertDialog(
@@ -527,100 +433,37 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     });
   }
 
-  Future<void> _importCsv(BuildContext context) async {
-    final user = ref.read(authStateProvider);
-    if (user == null) {
-      _requireSignInNotice();
-      return;
-    }
-    final textCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-  final messenger = ScaffoldMessenger.of(context); // capture before async
-  final ctx = context; // still used for dialogs while mounted
-    final result = await showDialog<bool>(
-      context: ctx,
-      builder: (_) => AlertDialog(
-        title: const Text('Import CSV'),
-        content: Form(
-          key: formKey,
-          child: SizedBox(
-            width: 700,
-            child: TextFormField(
-              controller: textCtrl,
-              maxLines: 16,
-              decoration: const InputDecoration(hintText: 'Paste CSV here with headers'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'CSV required' : null,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Import')),
-        ],
-      ),
-    );
-    if (result != true) return;
-    if (!(formKey.currentState?.validate() ?? false)) return;
-
-    final csv = textCtrl.text;
-    late final List<List<String>> table;
+  Future<void> _exportBarcodesPdf(BuildContext context) async {
+    if (_currentProducts.isEmpty) return;
+    final products = _currentProducts
+        .map((p) => BarcodeProduct(sku: p.sku, realBarcode: p.barcode))
+        .toList();
+    late final Uint8List bytes;
     try {
-      table = CsvUtils.csvToList(csv);
+      bytes = await buildBarcodesPdf(products);
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('CSV parse failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to build PDF: $e')));
       return;
     }
-    if (table.isEmpty) return;
-
-    // Validate headers
-    final header = table.first.map((s) => s.trim()).toList();
-    final expected = CsvUtils.headers;
-    final okHeaders = header.length == expected.length &&
-        List.generate(expected.length, (i) => header[i] == expected[i]).every((x) => x);
-    if (!okHeaders) {
-      if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Invalid headers. Please use the template from Export CSV.')));
-      return;
+    final ok = await downloadBytes(bytes, 'product_barcodes.pdf', 'application/pdf');
+    if (!mounted) return;
+    if (!ok) {
+      // Fallback: show simple dialog with note
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Barcodes PDF generated'),
+          content: const Text('Automatic download failed. Try again or check browser settings.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Barcodes PDF downloaded')));
     }
-
-    // Prepare batch import (simple loop calling addProduct)
-    final repo = ref.read(_inventoryRepoProvider);
-    final tenantId = ref.read(_tenantIdProvider);
-    if (tenantId == null) {
-      _requireSignInNotice();
-      return;
-    }
-    int imported = 0;
-    final rows = table.skip(1).where((r) => r.isNotEmpty && r.any((c) => c.trim().isNotEmpty));
-    for (final r in rows) {
-      try {
-        final sku = r[1].trim();
-        final name = r[2].trim();
-        if (sku.isEmpty || name.isEmpty) continue;
-        await repo.addProduct(
-          tenantId: tenantId,
-          sku: sku,
-          name: name,
-          unitPrice: double.tryParse(r[4].trim()) ?? 0,
-          taxPct: r[5].trim().isEmpty ? null : num.tryParse(r[5].trim()),
-          barcode: r[3].trim().isEmpty ? null : r[3].trim(),
-          description: r[9].trim().isEmpty ? null : r[9].trim(),
-          variants: r[8].split(';').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
-          mrpPrice: r[6].trim().isEmpty ? null : double.tryParse(r[6].trim()),
-          costPrice: r[7].trim().isEmpty ? null : double.tryParse(r[7].trim()),
-          isActive: (r[10].trim().toLowerCase() != 'false'),
-          storeQty: int.tryParse(r[11].trim()) ?? 0,
-          warehouseQty: int.tryParse(r[12].trim()) ?? 0,
-        );
-        imported++;
-      } catch (e) {
-        // Continue with next row on error
-      }
-    }
-  if (!mounted) return;
-  messenger.showSnackBar(SnackBar(content: Text('Imported $imported products')));
   }
+
+  // Old inline CSV import flow removed; now navigates to ImportProductsScreen
 
   void _requireSignInNotice() {
     if (!mounted) return;
@@ -714,9 +557,9 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                 TextFormField(controller: _name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
                 TextFormField(controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                 ]),
                 Row(children: [
                   Expanded(child: TextFormField(controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
@@ -891,3 +734,5 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     );
   }
 }
+
+enum _ActiveFilter { all, active, inactive }

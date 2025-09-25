@@ -6,9 +6,10 @@ import 'core/auth/auth.dart';
 
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
-import 'modules/pos/pos.dart';
+import 'modules/pos/pos_ui.dart';
 import 'modules/inventory/inventory.dart';
-import 'modules/billing/billing.dart';
+import 'modules/invoices/invoices.dart';
+import 'modules/invoices/invoices_tabs.dart';
 import 'modules/crm/crm.dart';
 import 'modules/accounting/accounting.dart';
 import 'modules/loyalty/loyalty.dart';
@@ -86,14 +87,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
-              path: '/billing',
-              name: 'billing',
-              pageBuilder: (context, state) => const NoTransitionPage(child: BillingListScreen()),
+              path: '/invoices',
+              name: 'invoices',
+              pageBuilder: (context, state) => const NoTransitionPage(child: InvoicesTabsScreen()),
               routes: [
                 GoRoute(
                   path: 'detail/:id',
                   name: 'invoice-detail',
-                  builder: (context, state) => BillingListScreen(invoiceId: state.pathParameters['id']),
+                  builder: (context, state) => InvoicesListScreen(invoiceId: state.pathParameters['id']),
                 ),
               ],
             ),
@@ -219,7 +220,8 @@ class AppShell extends ConsumerWidget {
     _NavItem('Dashboard', Icons.dashboard_outlined, '/dashboard', 0),
     _NavItem('POS', Icons.point_of_sale_outlined, '/pos', 1),
     _NavItem('Inventory', Icons.inventory_2_outlined, '/inventory', 2),
-    _NavItem('Billing', Icons.receipt_long_outlined, '/billing', 3),
+    // Renamed from Billing -> Invoices and route updated to /invoices
+    _NavItem('Invoices', Icons.receipt_long_outlined, '/invoices', 3),
     _NavItem('CRM', Icons.people_alt_outlined, '/crm', 4),
     _NavItem('Accounting', Icons.account_balance_outlined, '/accounting', 5),
     _NavItem('Loyalty', Icons.card_giftcard_outlined, '/loyalty', 6),

@@ -51,3 +51,116 @@ firebase deploy --only firestore:rules
 2) Run on any device/web
 
 Notes: Firebase is not initialized. Mock providers make the UI render without backend. Replace mocks gradually with real services.
+
+## CSV / XLSX Product Import & Export (Multi-Batch)
+
+The app now supports multi-batch inventory with optional expiry dates. You can import or export variable numbers of batches per product.
+
+### Base Columns (required / optional)
+Import expects at least these columns (order flexible; header matching is case/space insensitive):
+
+| Column | Required | Notes |
+|--------|----------|-------|
+| SKU | Yes | Unique (used as document id) |
+| Name | Yes | Product name |
+| Barcode | No | Must be numeric if present; unique across products |
+| Unit Price | Yes | Decimal >= Cost Price and <= MRP |
+| MRP | No | If blank defaults logic applies, must be >= Unit Price if provided |
+| Cost Price | No | Must be <= Unit Price if provided |
+| GST % | No | Allowed: 0,5,12,18 |
+| Variants | No | Semi-colon separated list (A;B;C) |
+| Description | No | Free text |
+| Active | No | true/false/yes/no (default true) |
+| Stock Store | No | Integer >=0 (used only if no batch columns supplied) |
+| Stock Warehouse | No | Integer >=0 (used only if no batch columns supplied) |
+| Supplier | No | Supplier identifier reference |
+
+### Dynamic Batch Columns (optional)
+
+Add any number of batches using repeating triplets:
+
+```
+Batch1 Qty, Batch1 Location, Batch1 Expiry, Batch2 Qty, Batch2 Location, Batch2 Expiry, ...
+```
+
+Rules:
+* BatchN Qty: integer > 0 (rows with invalid or empty qty are ignored for that batch).
+* BatchN Location: optional string (defaults to "Store" if blank).
+* BatchN Expiry: optional date in ISO `yyyy-MM-dd` format (e.g., 2025-12-31). If invalid, expiry is ignored.
+* If ANY BatchN columns are present for a row, the legacy Stock Store / Stock Warehouse fields are ignored for that row (batches drive the stock). If no batch columns appear or all batch qtys invalid, fallback to Store/Warehouse stock values.
+* Batches are written to Firestore in order of Batch number (Batch1, Batch2, ...). Batch numbers must be sequential; missing numbers are skipped but do not stop later batches from being processed.
+
+### Export Format
+
+Export now produces:
+
+```
+tenantId,sku,name,barcode,unitPrice,taxPct,mrpPrice,costPrice,variants,description,isActive,storeQty,warehouseQty,totalQty,Batch1 Qty,Batch1 Location,Batch1 Expiry,Batch2 Qty,...
+```
+
+The number of batch triplets depends on the maximum batches among the exported products. Empty placeholders are left blank for products with fewer batches.
+
+### Validation Summary
+* Duplicate SKUs in file: rejected.
+* Duplicate barcodes (in-file or existing different SKU in Firestore): rejected.
+* Negative or non-numeric stock / qty: rejected.
+* GST outside allowed set: rejected.
+* MRP < Unit Price or Unit Price < Cost Price: rejected.
+
+### Example Minimal File (no batches)
+```
+SKU,Name,Unit Price,Stock Store,Stock Warehouse
+ABC123,Sample 1,120,10,0
+```
+
+### Example With Batches & Expiry
+```
+SKU,Name,Unit Price,Batch1 Qty,Batch1 Location,Batch1 Expiry,Batch2 Qty,Batch2 Location,Batch2 Expiry
+ABC123,Sample 1,120,5,Store,2025-12-31,8,Warehouse,2026-01-15
+```
+
+If you need per-location defaulting or additional batch metadata fields, extend the repository batch map and import parsing similarly.
+
+## Printing Demo (Silent Thermal Backend)
+
+An end-to-end silent printing proof-of-concept is included.
+
+### Features
+- List system printers from backend (`/printers`).
+- Save default printer + basic page settings (`/set-default`).
+- Print raw text (`/print-text`).
+- Print uploaded PDF (`/print-pdf`).
+
+### Backend
+Location: `printer_backend/`
+
+Run:
+```powershell
+cd printer_backend
+npm install
+node server.js
+```
+Server default: `http://localhost:5005`.
+
+### Flutter Web
+Launch with backend URL:
+```powershell
+flutter run -d chrome --dart-define=PRINTER_BACKEND_URL=http://localhost:5005
+```
+Navigate to `PrintDemoPage` (add to a route or use a `Navigator.push` in dev).
+
+### Endpoints
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/printers` | GET | List printers |
+| `/set-default` | POST | Save default printer + settings |
+| `/print-text` | POST | Print plain text receipt |
+| `/print-pdf` | POST | Print uploaded PDF file |
+
+### Config Persistence
+Defaults stored in `printer_backend/config.json`.
+
+### Extending
+- Add `/print-escpos` for raw ESC/POS bytes if needed.
+- Enhance settings (density, cutter) mapping in backend.
+- Secure endpoints (API key / LAN only) before production.
