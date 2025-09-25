@@ -1,37 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/auth/auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // --- Inlined Supplier model & repository (moved from supplier_repository.dart) ---
 class SupplierDoc {
-  final String id; final String tenantId; final String name; final String address; final String phone; final String email;
-  SupplierDoc({required this.id,required this.tenantId,required this.name,required this.address,required this.phone,required this.email});
+  final String id; final String name; final String address; final String phone; final String email;
+  SupplierDoc({required this.id,required this.name,required this.address,required this.phone,required this.email});
   factory SupplierDoc.fromSnap(DocumentSnapshot<Map<String,dynamic>> d){
     final m=d.data()??const{}; return SupplierDoc(
       id:d.id,
-      tenantId:(m['tenantId']??'') as String,
       name:(m['name']??'') as String,
       address:(m['address']??'') as String,
       phone:(m['phone']??'') as String,
       email:(m['email']??'') as String,
     );
   }
-  Map<String,dynamic> toMap()=>{'tenantId':tenantId,'name':name,'address':address,'phone':phone,'email':email};
+  Map<String,dynamic> toMap()=>{'name':name,'address':address,'phone':phone,'email':email};
 }
 
 class SupplierRepository {
   SupplierRepository({FirebaseFirestore? firestore}):_db=firestore??FirebaseFirestore.instance; final FirebaseFirestore _db;
-  CollectionReference<Map<String,dynamic>> _col(String tenantId)=>_db.collection('suppliers-$tenantId');
-  Stream<List<SupplierDoc>> streamSuppliers(String tenantId)=>_col(tenantId).orderBy('name').snapshots().map((snap)=>snap.docs.map((d)=>SupplierDoc.fromSnap(d)).toList());
-  Future<void> addSupplier({required String tenantId,required String name,required String address,required String phone,required String email}) async{
-    await _col(tenantId).add({'tenantId':tenantId,'name':name,'address':address,'phone':phone,'email':email,'createdAt':FieldValue.serverTimestamp()});
+  CollectionReference<Map<String,dynamic>> get _col=>_db.collection('suppliers');
+  Stream<List<SupplierDoc>> streamSuppliers()=>_col.orderBy('name').snapshots().map((snap)=>snap.docs.map((d)=>SupplierDoc.fromSnap(d)).toList());
+  Future<void> addSupplier({required String name,required String address,required String phone,required String email}) async{
+    await _col.add({'name':name,'address':address,'phone':phone,'email':email,'createdAt':FieldValue.serverTimestamp()});
   }
-  Future<void> updateSupplier({required String tenantId,required String id,required String name,required String address,required String phone,required String email}) async{
-    await _col(tenantId).doc(id).update({'name':name,'address':address,'phone':phone,'email':email,'updatedAt':FieldValue.serverTimestamp()});
+  Future<void> updateSupplier({required String id,required String name,required String address,required String phone,required String email}) async{
+    await _col.doc(id).update({'name':name,'address':address,'phone':phone,'email':email,'updatedAt':FieldValue.serverTimestamp()});
   }
-  Future<void> deleteSupplier({required String tenantId,required String id}) async{ await _col(tenantId).doc(id).delete(); }
+  Future<void> deleteSupplier({required String id}) async{ await _col.doc(id).delete(); }
 }
 
 /// Repository provider for suppliers (scoped for reuse if needed elsewhere)
@@ -39,10 +37,8 @@ final supplierRepoProvider = Provider<SupplierRepository>((ref) => SupplierRepos
 
 /// Stream provider for suppliers list.
 final supplierStreamProvider = StreamProvider.autoDispose<List<SupplierDoc>>((ref) {
-  final user = ref.watch(authStateProvider);
-  if (user == null) return const Stream.empty();
   final repo = ref.watch(supplierRepoProvider);
-  return repo.streamSuppliers(user.uid);
+  return repo.streamSuppliers();
 });
 
 /// Public Suppliers screen widget (moved out of inventory.dart)
@@ -68,8 +64,6 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(supplierStreamProvider);
-    final user = ref.watch(authStateProvider);
-    final isSignedIn = user != null;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(
@@ -88,7 +82,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
             ),
             const SizedBox(width: 12),
             FilledButton.icon(
-              onPressed: isSignedIn ? _openAddDialog : () => _requireSignIn(context),
+              onPressed: _openAddDialog,
               icon: const Icon(Icons.add),
               label: const Text('Add Supplier'),
             ),
@@ -98,9 +92,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
             child: Card(
               child: async.when(
                 data: (list) {
-                  if (!isSignedIn) {
-                    return const Center(child: Text('Sign in to manage suppliers.'));
-                  }
+                  // Sign-in requirement removed.
                   if (list.isEmpty) {
                     return const Center(child: Text('No suppliers found.'));
                   }
@@ -174,54 +166,32 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
     );
   }
 
-  void _requireSignIn(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in first.')));
-  }
 
   Future<void> _openAddDialog() async {
-    final user = ref.read(authStateProvider);
-    if (user == null) return _requireSignIn(context);
     final repo = ref.read(supplierRepoProvider);
     final result = await showDialog<_SupplierEditResult>(
       context: context,
       builder: (_) => const _SupplierEditDialog(),
     );
     if (result == null) return;
-    await repo.addSupplier(
-      tenantId: user.uid,
-      name: result.name,
-      address: result.address,
-      phone: result.phone,
-      email: result.email,
-    );
+    await repo.addSupplier(name: result.name,address: result.address,phone: result.phone,email: result.email);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier added')));
   }
 
   Future<void> _openEditDialog(SupplierDoc doc) async {
-    final user = ref.read(authStateProvider);
-    if (user == null) return _requireSignIn(context);
     final repo = ref.read(supplierRepoProvider);
     final result = await showDialog<_SupplierEditResult>(
       context: context,
       builder: (_) => _SupplierEditDialog(existing: doc),
     );
     if (result == null) return;
-    await repo.updateSupplier(
-      tenantId: user.uid,
-      id: doc.id,
-      name: result.name,
-      address: result.address,
-      phone: result.phone,
-      email: result.email,
-    );
+    await repo.updateSupplier(id: doc.id,name: result.name,address: result.address,phone: result.phone,email: result.email);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier updated')));
   }
 
   Future<void> _deleteSupplier(BuildContext context, String id) async {
-    final user = ref.read(authStateProvider);
-    if (user == null) return _requireSignIn(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -234,8 +204,8 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
       ),
     );
     if (ok != true) return;
-    final repo = ref.read(supplierRepoProvider);
-    await repo.deleteSupplier(tenantId: user.uid, id: id);
+  final repo = ref.read(supplierRepoProvider);
+  await repo.deleteSupplier(id: id);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier deleted')));
   }
