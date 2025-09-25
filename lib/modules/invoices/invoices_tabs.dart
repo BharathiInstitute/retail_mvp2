@@ -104,8 +104,8 @@ class _PurchasesList extends StatelessWidget {
             titleParts.add(supplier.isEmpty ? 'Unknown Supplier' : supplier);
             return ListTile(
               leading: const Icon(Icons.receipt_long),
-              title: Text('${titleParts.join(' • ')}'),
-              subtitle: Text('${type} • ₹${grand.toStringAsFixed(2)} • $dateStr'),
+              title: Text(titleParts.join(' • ')),
+              subtitle: Text('$type • ₹${grand.toStringAsFixed(2)} • $dateStr'),
               onTap: () => _showPurchaseDetails(context, docs[i].id, data),
             );
           },

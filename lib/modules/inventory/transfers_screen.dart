@@ -365,14 +365,17 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     );
                     final after = await repo.getProduct(_selected!.sku);
                     final firestore = FirebaseFirestore.instance;
+                    final noteVal = _noteCtrl.text.trim();
+                    final skuVal = _selected!.sku;
+                    final nameVal = _selected!.name;
                     await firestore.collection('inventory_transfers').add({
                       'createdAt': FieldValue.serverTimestamp(),
-                      'sku': _selected!.sku,
-                      'name': _selected!.name,
+                      'sku': skuVal,
+                      'name': nameVal,
                       'from': _from,
                       'to': _to,
                       'qty': qty,
-                      'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                      'note': noteVal.isEmpty ? null : noteVal,
                       'storeAfter': after?.stockAt('Store'),
                       'warehouseAfter': after?.stockAt('Warehouse'),
                       'totalAfter': after == null ? null : (after.stockAt('Store') + after.stockAt('Warehouse')),
@@ -386,9 +389,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     setState(() => _submitting = false);
                     return;
                   }
-                  if (mounted) {
-                    Navigator.pop(context); // stream refresh
-                  }
+                  if (!mounted) return;
+                  Navigator.pop(context); // stream refresh
                 },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

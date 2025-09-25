@@ -775,7 +775,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
         if (current.isNotEmpty && !items.contains(current)) items.add(current);
         return DropdownButtonFormField<String>(
           isExpanded: true,
-            value: current.isEmpty ? null : current,
+            initialValue: current.isEmpty ? null : current,
             items: items
                 .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                 .toList(),

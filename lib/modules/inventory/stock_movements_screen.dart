@@ -345,58 +345,58 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
             final user = ref.read(authStateProvider);
             final delta = _parseDelta();
             setState(() => _submitting = true);
+            // Capture values needed across async gaps
+            final sku = _selected!.sku;
+            final name = _selected!.name;
+            final noteVal = _noteCtrl.text.trim();
             ProductDoc? after;
             try {
-              // Persist change
               await repo.applyStockMovement(
-                sku: _selected!.sku,
+                sku: sku,
                 location: _location,
                 deltaQty: delta,
                 type: _type,
-                note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                note: noteVal.isEmpty ? null : noteVal,
                 updatedBy: user?.email,
               );
-              after = await repo.getProduct(_selected!.sku);
-              // Store movement history document
+              after = await repo.getProduct(sku);
               final firestore = FirebaseFirestore.instance;
               await firestore.collection('inventory_movements').add({
                 'createdAt': FieldValue.serverTimestamp(),
                 'type': _type,
-                'sku': _selected!.sku,
-                'name': _selected!.name,
+                'sku': sku,
+                'name': name,
                 'location': _location,
                 'deltaQty': delta,
                 'storeAfter': after?.stockAt('Store'),
                 'warehouseAfter': after?.stockAt('Warehouse'),
-                'totalAfter': after?.totalStock,
-                'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                'totalAfter': after == null ? null : after.stockAt('Store') + after.stockAt('Warehouse'),
+                'note': noteVal.isEmpty ? null : noteVal,
                 'updatedAt': after?.updatedAt,
                 'updatedBy': after?.updatedBy,
               });
             } catch (err) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
-              }
+              if (!mounted) return; // abort if unmounted
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
               setState(() => _submitting = false);
               return;
             }
+            if (!mounted) return;
             final record = MovementRecord(
               date: DateTime.now(),
               type: _type,
-              sku: _selected!.sku,
-              name: _selected!.name,
+              sku: sku,
+              name: name,
               location: _location,
               deltaQty: delta,
-              storeAfter: after?.stockAt('Store'),
-              warehouseAfter: after?.stockAt('Warehouse'),
-              totalAfter: after?.totalStock,
-              note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+              storeAfter: after?.stockAt('Store') ?? 0,
+              warehouseAfter: after?.stockAt('Warehouse') ?? 0,
+              totalAfter: after == null ? 0 : after.stockAt('Store') + after.stockAt('Warehouse'),
+              note: noteVal.isEmpty ? null : noteVal,
               updatedAt: after?.updatedAt,
               updatedBy: after?.updatedBy,
             );
-            if (mounted) {
-              Navigator.pop(context, record);
-            }
+            Navigator.pop(context, record);
           },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
