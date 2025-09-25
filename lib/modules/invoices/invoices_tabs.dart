@@ -115,10 +115,10 @@ class _PurchasesList extends StatelessWidget {
   }
 }
 
-void _showPurchaseDetails(BuildContext context, String docId, Map<String, dynamic> data) {
+void _showPurchaseDetails(BuildContext listContext, String docId, Map<String, dynamic> data) {
   showDialog(
-    context: context,
-    builder: (_) {
+    context: listContext,
+    builder: (dialogCtx) {
       final items = (data['items'] as List?)?.whereType<Map>().toList() ?? const <Map>[];
       final summary = (data['summary'] as Map?) ?? const {};
       final payment = (data['payment'] as Map?) ?? const {};
@@ -204,16 +204,12 @@ void _showPurchaseDetails(BuildContext context, String docId, Map<String, dynami
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Close')),
           FilledButton.icon(
             onPressed: () {
-              final rootNavigator = Navigator.of(context, rootNavigator: true);
-              final rootCtx = rootNavigator.context;
-              Navigator.pop(context);
-              // Defer opening the edit dialog to next frame to ensure previous dialog fully removed
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                showEditPurchaseInvoiceDialog(rootCtx, docId, data);
-              });
+              // Close details then open edit dialog using original list context (prevents blank flash)
+              Navigator.of(dialogCtx).pop();
+              Future.microtask(() => showEditPurchaseInvoiceDialog(listContext, docId, data));
             },
             icon: const Icon(Icons.edit),
             label: const Text('Edit'),
