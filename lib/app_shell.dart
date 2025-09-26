@@ -9,11 +9,12 @@ import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
 import 'modules/inventory/inventory.dart';
 import 'modules/invoices/invoices.dart';
-import 'modules/invoices/invoices_tabs.dart';
 import 'modules/crm/crm.dart';
 import 'modules/accounting/accounting.dart';
 import 'modules/loyalty/loyalty.dart';
 import 'modules/admin/admin.dart';
+// Simple invoice flow (lightweight demo)
+import 'simple_flow/upload_screen.dart';
 // Auth screens
 import 'modules/auth/login_screen.dart';
 import 'modules/auth/register_screen.dart';
@@ -89,7 +90,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/invoices',
               name: 'invoices',
-              pageBuilder: (context, state) => const NoTransitionPage(child: InvoicesTabsScreen()),
+              pageBuilder: (context, state) => const NoTransitionPage(child: InvoicesListScreen()),
               routes: [
                 GoRoute(
                   path: 'detail/:id',
@@ -248,6 +249,14 @@ class AppShell extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Retail ERP MVP'),
         actions: [
+          // Quick entry to simplified invoice upload flow
+          IconButton(
+            tooltip: 'Simple Invoice Flow',
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _SimpleFlowEntry()));
+            },
+            icon: const Icon(Icons.document_scanner_outlined),
+          ),
           IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
           IconButton(onPressed: () {}, icon: const Icon(Icons.brightness_6)),
           if (user != null)
@@ -323,6 +332,15 @@ class AppShell extends ConsumerWidget {
               onDestinationSelected: (i) => _goBranch(context, items[i].branchIndex),
             ),
     );
+  }
+}
+
+// Lightweight launcher page hosting the simple flow upload screen inside existing shell.
+class _SimpleFlowEntry extends StatelessWidget {
+  const _SimpleFlowEntry();
+  @override
+  Widget build(BuildContext context) {
+    return const UploadInvoiceScreen();
   }
 }
 

@@ -1,8 +1,12 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
+const vision = require('@google-cloud/vision');
+const { VertexAI } = require('@google-cloud/vertexai');
 
 admin.initializeApp();
+// Load additional simple invoice workflow functions (added separately)
+try { require('./invoice_simple'); } catch (e) { console.warn('invoice_simple not loaded', e?.message || e); }
 
 /* Environment config options:
  * Generic SMTP:
@@ -132,5 +136,102 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data) => {
 
 	await transporter.sendMail(mailOptions);
 	return { status: 'sent', mode: pdfBase64 ? 'pdf-attach' : (invoiceHtml ? 'html-direct' : 'json-build') };
+});
+
+// Stateless invoice analysis: OCR (Vision) + Gemini JSON extraction
+exports.analyzeInvoice = functions.region('us-central1').https.onCall(async (data, context) => {
+		try {
+			const { fileName, mimeType, bytesB64 } = data || {};
+			if (!bytesB64 || !mimeType) {
+				throw new functions.https.HttpsError('invalid-argument', 'bytesB64 and mimeType required');
+			}
+
+			const imgBuffer = Buffer.from(bytesB64, 'base64');
+				let ocrText = '';
+				let ocrNote;
+					const cfgUseVision = (cfg && cfg.analyze && typeof cfg.analyze.use_vision !== 'undefined') ? String(cfg.analyze.use_vision) : '';
+					const useVision = (
+						(process.env.USE_VISION || '').toString().toLowerCase() === '1' ||
+						(process.env.USE_VISION || '').toString().toLowerCase() === 'true' ||
+						cfgUseVision.toLowerCase() === '1' || cfgUseVision.toLowerCase() === 'true'
+					);
+				if (useVision) {
+					// Try OCR with Vision but don't fail overall if Vision is disabled
+					try {
+						const client = new vision.ImageAnnotatorClient();
+						const [result] = await client.documentTextDetection({ image: { content: imgBuffer } });
+						ocrText = (result.fullTextAnnotation && result.fullTextAnnotation.text) || '';
+						if (!ocrText.trim()) {
+							ocrNote = 'Vision OCR returned no text';
+						}
+					} catch (visionErr) {
+						console.warn('Vision OCR unavailable, will use Gemini-only parse', visionErr?.message || visionErr);
+						ocrNote = 'Vision OCR unavailable; parsing directly with Gemini';
+					}
+				} else {
+					ocrNote = 'Vision OCR disabled; parsing directly with Gemini';
+				}
+
+			// Gemini via Vertex AI (with graceful fallback)
+				try {
+				const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+				const location = process.env.VERTEX_LOCATION || 'us-central1';
+				const vertex = new VertexAI({ project, location });
+				const model = vertex.getGenerativeModel({ model: 'gemini-1.5-flash' });
+					const prompt = [
+						'You are a precise invoice parser. Extract line items as an array of objects with keys:',
+						'itemName (string)',
+						'quantity (number)',
+						'price (number, unit price)',
+						'gst (number, percent if available else 0)',
+						'Return ONLY strict JSON of shape {"items": [{"itemName":"...","quantity":1,"price":0,"gst":0}], "meta": {"vendor": "?", "invoiceNumber": "?", "date": "?"}} without prose.',
+						'',
+						(ocrText ? 'Use this OCR text as reference.' : 'No OCR text available; read from image input.'),
+						ocrText ? 'OCR TEXT START\n' + ocrText.slice(0, 150000) + '\nOCR TEXT END' : '',
+					].join('\n');
+
+					const parts = [{ text: prompt }];
+					// Include the image for Gemini so it can do its own reading when OCR is missing
+					parts.push({ inlineData: { mimeType, data: imgBuffer.toString('base64') } });
+
+					const gen = await model.generateContent({
+						contents: [{ role: 'user', parts }],
+						generationConfig: { responseMimeType: 'application/json' },
+					});
+				const response = gen.response ? (await gen.response) : gen;
+				const candidate = response?.candidates?.[0];
+				const jsonText = candidate?.content?.parts?.map((p) => p.text).join('') || '{}';
+				let parsed;
+				try {
+					parsed = JSON.parse(jsonText);
+				} catch (_) {
+					parsed = { items: [], meta: { raw: jsonText } };
+				}
+				// Normalize shape
+				if (!parsed || typeof parsed !== 'object') parsed = { items: [], meta: {} };
+				if (!Array.isArray(parsed.items)) parsed.items = [];
+				if (!parsed.meta || typeof parsed.meta !== 'object') parsed.meta = {};
+				const m = parsed.meta;
+				if (typeof m.vendor === 'undefined') m.vendor = '';
+				if (typeof m.invoiceNumber === 'undefined') m.invoiceNumber = '';
+				if (typeof m.date === 'undefined') m.date = '';
+				if (ocrText && typeof m.ocrText === 'undefined') m.ocrText = ocrText;
+				parsed.meta = m;
+				return parsed;
+			} catch (gemErr) {
+				console.error('Gemini parse failed, returning OCR-only result', gemErr);
+				return { items: [], meta: { vendor: '', invoiceNumber: '', date: '', ocrText, note: 'Gemini unavailable; showing OCR text only' } };
+			}
+	} catch (err) {
+			console.error('analyzeInvoice error', err);
+			if (err instanceof functions.https.HttpsError) throw err;
+			// Provide clearer hints for common setup issues
+			const msg = (err && err.message) ? err.message : String(err);
+			// Identify API not enabled or permission errors
+			const hint = /permission|PERMISSION|not enabled|Enable the API/i.test(msg)
+				? 'Verify Cloud Vision API and Vertex AI are enabled, and the Cloud Functions service account has access.'
+				: undefined;
+			throw new functions.https.HttpsError('internal', hint ? `${msg} — ${hint}` : msg);
+	}
 });
 

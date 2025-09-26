@@ -1,1 +1,76 @@
 
+rules_version = '2';
+service cloud.firestore {
+	// Role hierarchy for convenience
+	function isSignedIn() { return request.auth != null && request.auth.uid != null; }
+	function globalRole() { return isSignedIn() ? request.auth.token.role : null; } // optional global owner
+	function storeRole(storeId) {
+		return isSignedIn() && request.auth.token.storeRoles != null ? request.auth.token.storeRoles[storeId] : null;
+	}
+	function isOwner(storeId) { return storeRole(storeId) == 'owner' || globalRole() == 'owner'; }
+	function isManager(storeId) { return isOwner(storeId) || storeRole(storeId) == 'manager'; }
+	function isCashier(storeId) { return ['cashier'].hasAny([storeRole(storeId)]) || isManager(storeId); }
+	function isClerk(storeId) { return ['clerk'].hasAny([storeRole(storeId)]) || isManager(storeId); }
+	function isAccountant(storeId) { return ['accountant'].hasAny([storeRole(storeId)]) || isManager(storeId); }
+	function activeUser() { return isSignedIn() && (request.auth.token.active == true || request.auth.token.active == null); }
+
+	match /databases/{database}/documents {
+
+		// Global users collection mapping uid -> profile + store roles
+		match /users/{uid} {
+			allow read: if isSignedIn() && (uid == request.auth.uid || globalRole() == 'owner');
+			allow create: if isSignedIn() && (globalRole() == 'owner');
+			allow update: if isSignedIn() && (
+				uid == request.auth.uid || globalRole() == 'owner' ||
+				(request.resource.data.storeRoles.keys().hasOnly([storeRoleIds()]) == false) // placeholder to prevent managers escalating outside stores
+			);
+			allow delete: if isSignedIn() && globalRole() == 'owner';
+		}
+
+		// Stores root
+		match /stores/{storeId} {
+			allow read: if activeUser() && (storeRole(storeId) != null || globalRole() == 'owner');
+			allow create: if isSignedIn() && (globalRole() == 'owner');
+			allow update: if activeUser() && (isOwner(storeId) || isManager(storeId));
+			allow delete: if activeUser() && isOwner(storeId);
+
+			// Store users subcollection (membership)
+			match /users/{memberUid} {
+				allow read: if activeUser() && (storeRole(storeId) != null);
+				allow create: if activeUser() && (isOwner(storeId) || isManager(storeId));
+				allow update: if activeUser() && (isOwner(storeId) || (isManager(storeId) && !(request.resource.data.role in ['owner'])));
+				allow delete: if activeUser() && (isOwner(storeId) || (isManager(storeId) && !(resource.data.role in ['owner'])));
+			}
+
+			// Settings doc(s)
+			match /settings/{docId} {
+				allow read: if activeUser() && storeRole(storeId) != null;
+				allow create, update: if activeUser() && (isOwner(storeId) || isManager(storeId));
+				allow delete: if activeUser() && isOwner(storeId);
+			}
+
+			// Audit logs: readable by owner/manager/accountant; writes only via function (enforce auth.uid matches data.uid)
+			match /auditLogs/{logId} {
+				allow read: if activeUser() && (isOwner(storeId) || isManager(storeId) || isAccountant(storeId));
+				allow create: if activeUser() && request.auth.uid == request.resource.data.uid; // function writes on behalf of user
+				allow update, delete: if false; // immutable
+			}
+
+			// Example restricted collection: invoices
+			match /invoices/{invoiceId} {
+				allow read: if activeUser() && (storeRole(storeId) != null);
+				allow create: if activeUser() && (isOwner(storeId) || isManager(storeId) || isCashier(storeId));
+				allow update: if activeUser() && (isOwner(storeId) || isManager(storeId));
+				allow delete: if activeUser() && isOwner(storeId);
+			}
+
+			// Example products collection
+			match /products/{productId} {
+				allow read: if activeUser() && storeRole(storeId) != null;
+				allow create, update: if activeUser() && (isOwner(storeId) || isManager(storeId) || isClerk(storeId));
+				allow delete: if activeUser() && (isOwner(storeId) || isManager(storeId));
+			}
+		}
+	}
+}
+

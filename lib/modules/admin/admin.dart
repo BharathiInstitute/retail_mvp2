@@ -2,14 +2,17 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'providers/store_context_provider.dart';
+import 'providers/capabilities_provider.dart';
 
-class AdminModuleScreen extends StatefulWidget {
+class AdminModuleScreen extends ConsumerStatefulWidget {
 	const AdminModuleScreen({super.key});
 	@override
-	State<AdminModuleScreen> createState() => _AdminModuleScreenState();
+	ConsumerState<AdminModuleScreen> createState() => _AdminModuleScreenState();
 }
 
-class _AdminModuleScreenState extends State<AdminModuleScreen> {
+class _AdminModuleScreenState extends ConsumerState<AdminModuleScreen> {
 	final List<_SettingItem> _settings = [
 		_SettingItem(icon: Icons.storefront_outlined, title: 'Store Info', subtitle: 'Name, address, GSTIN'),
 		_SettingItem(icon: Icons.group_outlined, title: 'Users & Roles', subtitle: 'Manage staff access'),
@@ -96,6 +99,35 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
 		messenger.showSnackBar(const SnackBar(content: Text('Token refreshed')));
 	}
 
+	Widget _storeSelector(BuildContext context) {
+		return InkWell(
+			onTap: () async {
+				final storesSnap = await FirebaseFirestore.instance.collection('stores').get();
+				if (!mounted) return;
+				showModalBottomSheet(context: context, builder: (_) {
+					return ListView(
+						children: [
+							const ListTile(title: Text('Select Store', style: TextStyle(fontWeight: FontWeight.bold))),
+							...storesSnap.docs.map((d) => ListTile(
+								title: Text(d.data()['name'] ?? d.id),
+								subtitle: Text(d.id),
+								onTap: () { ref.read(selectedStoreIdProvider.notifier).setStore(d.id); Navigator.pop(context); },
+							)),
+						],
+					);
+				});
+			},
+			child: Row(mainAxisSize: MainAxisSize.min, children: [
+				const Icon(Icons.storefront_outlined, size: 18), const SizedBox(width:4),
+				Consumer(builder: (_, ref, __) {
+					final id = ref.watch(selectedStoreIdProvider);
+					return Text(id ?? 'Select Store', style: const TextStyle(fontWeight: FontWeight.w500));
+				}),
+				const Icon(Icons.expand_more, size: 18),
+			]),
+		);
+	}
+
 	@override
 	Widget build(BuildContext context) {
 		if (!_authReady) return const Center(child: CircularProgressIndicator());
@@ -114,9 +146,13 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
 			);
 		}
 		final filtered = _settings.where((s) => s.title.toLowerCase().contains(_search.toLowerCase())).toList();
+		final caps = ref.watch(capabilitiesProvider);
+		final storeId = ref.watch(selectedStoreIdProvider);
 		return Padding(
 			padding: const EdgeInsets.all(16),
 			child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+				Row(children:[ _storeSelector(context), const SizedBox(width:16), if(storeId!=null) _RoleCapabilityChips(caps: caps) ]),
+				const SizedBox(height: 12),
 				Row(children: [
 					Expanded(child: TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search settings'), onChanged: (v) => setState(() => _search = v))),
 					const SizedBox(width: 12),
@@ -125,7 +161,7 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
 					OutlinedButton.icon(onPressed: () => setState(()=> _showUsers = !_showUsers), icon: Icon(_showUsers ? Icons.admin_panel_settings : Icons.people_alt_outlined), label: Text(_showUsers ? 'Hide Users' : 'Show Users')),
 				]),
 				const SizedBox(height: 16),
-				if (_showUsers) _AdminUsersCard(stream: _userStream(), onToggle: _toggleAdmin),
+				if (_showUsers && caps.manageUsers) _AdminUsersCard(stream: _userStream(), onToggle: _toggleAdmin),
 				if (_showUsers) const SizedBox(height: 16),
 				Expanded(
 					child: Card(
@@ -154,14 +190,18 @@ class _AdminModuleScreenState extends State<AdminModuleScreen> {
 	}
 
 	Future<void> _openSetting(BuildContext context, _SettingItem s) async {
-		await showDialog(
-			context: context,
-			builder: (context) => AlertDialog(
-				title: Text(s.title),
-				content: Text('This is a placeholder for "${s.title}" configuration UI.'),
-				actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-			),
-		);
+		Widget body;
+		switch(s.title){
+			case 'Store Info': body = _StoreInfoSettings(storeId: ref.read(selectedStoreIdProvider)); break;
+			case 'Policies': body = _PoliciesSettings(storeId: ref.read(selectedStoreIdProvider)); break;
+			case 'Users & Roles': body = const Text('Open User Management panel above.'); break;
+			default: body = Text('No UI yet for ${s.title}');
+		}
+		await showDialog(context: context, builder: (_) => AlertDialog(
+			title: Text(s.title),
+			content: SizedBox(width: 520, child: body),
+			actions: [TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Close'))],
+		));
 	}
 }
 
@@ -273,6 +313,53 @@ class _AboutCard extends StatelessWidget {
 class _SettingItem {
 	final IconData icon; final String title; final String subtitle;
 	_SettingItem({required this.icon, required this.title, required this.subtitle});
+}
+
+class _RoleCapabilityChips extends StatelessWidget {
+	final Capabilities caps; const _RoleCapabilityChips({required this.caps});
+	Widget _chip(String label, bool ok){
+		return Container(margin: const EdgeInsets.only(right:6), padding: const EdgeInsets.symmetric(horizontal:8, vertical:4), decoration: BoxDecoration(
+			color: ok ? Colors.green.withOpacity(.15) : Colors.grey.withOpacity(.15),
+			borderRadius: BorderRadius.circular(12), border: Border.all(color: ok? Colors.green: Colors.grey)), child: Text(label, style: TextStyle(fontSize:11, color: ok? Colors.green[800]: Colors.grey[700])));
+	}
+	@override
+	Widget build(BuildContext context){
+		return Wrap(children:[
+			_chip('Users', caps.manageUsers),
+			_chip('Settings', caps.editSettings),
+			_chip('Audit', caps.viewAudit),
+			_chip('POS', caps.createInvoice),
+			_chip('Products', caps.editProducts),
+			_chip('Stock', caps.adjustStock),
+			_chip('Finance', caps.viewFinance),
+		]);
+	}
+}
+
+class _StoreInfoSettings extends StatelessWidget {
+	final String? storeId; const _StoreInfoSettings({required this.storeId});
+	@override
+	Widget build(BuildContext context) {
+		if (storeId == null) return const Text('Select a store first.');
+		return Column(mainAxisSize: MainAxisSize.min, children:[
+			Text('Editing store: $storeId'),
+			const SizedBox(height:12),
+			const Text('Implement form: name, address, GSTIN, currency, save with diff preview.'),
+		]);
+	}
+}
+
+class _PoliciesSettings extends StatelessWidget {
+	final String? storeId; const _PoliciesSettings({required this.storeId});
+	@override
+	Widget build(BuildContext context) {
+		if (storeId == null) return const Text('Select a store first.');
+		return Column(mainAxisSize: MainAxisSize.min, children:[
+			Text('Policies for: $storeId'),
+			const SizedBox(height:12),
+			const Text('Return days, discount caps, exchange toggle etc.'),
+		]);
+	}
 }
 
 class _BuildAuthDebugInfo extends StatelessWidget {
