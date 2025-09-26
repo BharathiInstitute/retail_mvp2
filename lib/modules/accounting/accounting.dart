@@ -1,85 +1,136 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:rxdart/rxdart.dart';
+import 'gstr3b_service.dart';
 
 // Consolidated Accounting module in a single file.
 // This merges prior UI screens and keeps placeholders for models/services.
 
 // ===== Accounting Module (main screen) =====
 class AccountingModuleScreen extends StatefulWidget {
-	const AccountingModuleScreen({super.key});
-	@override
-	State<AccountingModuleScreen> createState() => _AccountingModuleScreenState();
+  const AccountingModuleScreen({super.key});
+  @override
+  State<AccountingModuleScreen> createState() => _AccountingModuleScreenState();
 }
 
-class _AccountingModuleScreenState extends State<AccountingModuleScreen> with SingleTickerProviderStateMixin {
-	final Map<String, double> _salesByMode = {
-		'Cash': 12500,
-		'UPI': 18250,
-		'Card': 9400,
-	};
+class _AccountingModuleScreenState extends State<AccountingModuleScreen> {
 
-	final List<_GstRow> _gstr1 = const [
-		_GstRow(section: 'B2B', invoiceCount: 8, taxable: 145000, tax: 26100),
-		_GstRow(section: 'B2C', invoiceCount: 42, taxable: 210000, tax: 37800),
-	];
-	final List<_GstRow> _gstr3b = const [
-		_GstRow(section: 'Outward Supplies', invoiceCount: 50, taxable: 355000, tax: 63900),
-		_GstRow(section: 'Zero-rated', invoiceCount: 2, taxable: 12000, tax: 0),
-	];
+// Static GST rows removed; replaced with dynamic computation card.
 
 	double revenue = 480000;
 	double expenses = 325000;
 
-	final List<_Expense> _expenses = [
-		_Expense(date: DateTime.now().subtract(const Duration(days: 1)), category: 'Rent', amount: 35000, notes: 'September'),
-		_Expense(date: DateTime.now().subtract(const Duration(days: 2)), category: 'Utilities', amount: 6500, notes: 'Electricity'),
-		_Expense(date: DateTime.now().subtract(const Duration(days: 2)), category: 'Supplies', amount: 12000, notes: 'Packaging'),
-	];
-
 	final _TaxSummary taxSummary = const _TaxSummary(gstPayable: 68000, itc: 42000);
 
-	final List<_Credit> _credits = [
-		_Credit(customer: 'Alice', invoiceId: 'INV-1024', amount: 5400, dueDate: DateTime.now().add(const Duration(days: 7))),
-		_Credit(customer: 'Bob', invoiceId: 'INV-1027', amount: 8300, dueDate: DateTime.now().add(const Duration(days: 10))),
-	];
+late final Stream<List<_LedgerEntry>> _ledgerStream;
+Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError on hot reload
 
-	final List<_LedgerEntry> _ledger = [
-		_LedgerEntry(date: DateTime.now().subtract(const Duration(days: 2)), desc: 'Opening Balance', inAmt: 50000, outAmt: 0),
-		_LedgerEntry(date: DateTime.now().subtract(const Duration(days: 2)), desc: 'Sales (Cash)', inAmt: 8200, outAmt: 0),
-		_LedgerEntry(date: DateTime.now().subtract(const Duration(days: 1)), desc: 'Purchase', inAmt: 0, outAmt: 12000),
-		_LedgerEntry(date: DateTime.now().subtract(const Duration(days: 1)), desc: 'Sales (Cash)', inAmt: 11200, outAmt: 0),
-		_LedgerEntry(date: DateTime.now(), desc: 'Rent', inAmt: 0, outAmt: 35000),
-		_LedgerEntry(date: DateTime.now(), desc: 'Sales (Cash)', inAmt: 9300, outAmt: 0),
-	];
-
-	late TabController _tabController;
 	@override
-	void initState() { super.initState(); _tabController = TabController(length: 2, vsync: this); }
-	@override
-	void dispose() { _tabController.dispose(); super.dispose(); }
-
-	double get _todayTotal => _salesByMode.values.fold(0.0, (a, b) => a + b);
-	bool get _reconciled => true;
-
-	void _addDummyExpense() {
-		setState(() {
-			_expenses.insert(0, _Expense(date: DateTime.now(), category: 'Misc', amount: 2500, notes: 'Added manually (demo)'));
-		});
-		ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Expense added (demo)')));
+	void initState() {
+		super.initState();
+		_ledgerStream = _buildLedgerStream().asBroadcastStream();
+		_stockValueStream = _buildStockValueStream().asBroadcastStream();
 	}
+
+	Stream<List<_LedgerEntry>> _salesStream() {
+		final col = FirebaseFirestore.instance.collection('invoices').orderBy('timestampMs', descending: false);
+		return col.snapshots().map((snap) => snap.docs.map((d) {
+			final data = d.data();
+			final tsMs = (data['timestampMs'] is int) ? data['timestampMs'] as int : DateTime.now().millisecondsSinceEpoch;
+			final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
+			final total = () {
+				final lines = (data['lines'] as List?)?.whereType<Map>().toList() ?? const <Map>[];
+				double sum = 0;
+				for (final l in lines) {
+					final unit = (l['unitPrice'] is num) ? (l['unitPrice'] as num).toDouble() : double.tryParse('${l['unitPrice']}') ?? 0;
+					final qty = (l['qty'] is num) ? (l['qty'] as num).toDouble() : double.tryParse('${l['qty']}') ?? 1;
+					final taxPct = (l['taxPercent'] is num) ? (l['taxPercent'] as num).toDouble() : double.tryParse('${l['taxPercent']}') ?? 0;
+					final base = unit / (1 + taxPct / 100);
+					final tax = base * taxPct / 100;
+					sum += (base + tax) * qty;
+				}
+				return sum;
+			}();
+			return _LedgerEntry(
+				date: dt,
+				desc: 'Sale #${data['invoiceNumber'] ?? data['invoiceNo'] ?? ''}'.trim(),
+				inAmt: total,
+				outAmt: 0,
+				paymentMethod: (data['paymentMode'] ?? 'Unknown').toString(),
+			);
+		}).toList());
+	}
+
+	Stream<List<_LedgerEntry>> _purchaseStream() {
+		final col = FirebaseFirestore.instance.collection('purchase_invoices').orderBy('timestampMs', descending: false);
+		return col.snapshots().map((snap) => snap.docs.map((d) {
+			final data = d.data();
+			final tsMs = (data['timestampMs'] is int) ? data['timestampMs'] as int : DateTime.now().millisecondsSinceEpoch;
+			final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
+			final summary = (data['summary'] as Map?) ?? const {};
+			final grand = () {
+				final g = summary['grandTotal'];
+				if (g is num) return g.toDouble();
+				return double.tryParse(g?.toString() ?? '0') ?? 0;
+			}();
+			return _LedgerEntry(
+				date: dt,
+				desc: 'Purchase ${data['invoiceNo'] ?? ''}'.trim(),
+				inAmt: 0,
+				outAmt: grand,
+				paymentMethod: (data['paymentMode'] ?? (data['payment']?['mode'] ?? 'Unknown')).toString(),
+			);
+		}).toList());
+	}
+
+	Stream<List<_LedgerEntry>> _buildLedgerStream() {
+		return Rx.combineLatest2<List<_LedgerEntry>, List<_LedgerEntry>, List<_LedgerEntry>>(
+			_salesStream(), _purchaseStream(), (sales, purchases) {
+				final all = [...sales, ...purchases];
+				all.sort((a, b) => a.date.compareTo(b.date));
+				return all;
+			},
+		);
+	}
+
+	Stream<double> _buildStockValueStream() {
+		final col = FirebaseFirestore.instance.collection('inventory');
+		return col.snapshots().map((snap) {
+			double total = 0;
+			for (final d in snap.docs) {
+				final data = d.data();
+				double unitPrice = 0;
+				final up = data['unitPrice'];
+				if (up is num) {
+				  unitPrice = up.toDouble();
+				} else if (up != null) unitPrice = double.tryParse(up.toString()) ?? 0;
+				final batches = (data['batches'] as List?)?.whereType<Map>().toList() ?? const <Map>[];
+				int qty = 0;
+				for (final b in batches) {
+					final q = b['qty'];
+					if (q is int) {
+					  qty += q;
+					} else if (q is num) qty += q.toInt(); else if (q != null) qty += int.tryParse(q.toString()) ?? 0;
+				}
+				total += unitPrice * qty;
+			}
+			return total;
+		});
+	}
+	@override
+	void dispose() { super.dispose(); }
 
 	@override
 	Widget build(BuildContext context) {
 		final isWide = MediaQuery.of(context).size.width >= 1000;
 		final netProfit = revenue - expenses;
 
-		final salesCard = _DailySalesCard(salesByMode: _salesByMode, total: _todayTotal, reconciled: _reconciled);
-		final gstrCard = _GstReportsCard(tabController: _tabController, gstr1: _gstr1, gstr3b: _gstr3b);
+		final salesCard = _TotalSummaryCard(ledgerStream: _ledgerStream, stockValueStream: _stockValueStream);
+		final gstrCard = _DynamicGstReportsCard();
 		final pnlCard = _PnLCard(revenue: revenue, expenses: expenses, netProfit: netProfit);
-		final expensesCard = _ExpensesCard(expenses: _expenses, onAdd: _addDummyExpense);
 		final taxCard = _TaxSummaryCard(summary: taxSummary);
 		final exportCard = const _ExportCard();
-		final creditsCard = _OutstandingCreditsCard(credits: _credits);
-	final cashBookCard = _CashBookCard(entries: _ledger);
+		final cashBookCard = _CashBookCard(stream: _ledgerStream);
 
 		if (isWide) {
 			return Padding(
@@ -96,7 +147,7 @@ class _AccountingModuleScreenState extends State<AccountingModuleScreen> with Si
 					Expanded(
 						flex: 3,
 						child: ListView(children: [
-							expensesCard, const SizedBox(height: 12), creditsCard, const SizedBox(height: 12), cashBookCard,
+							cashBookCard,
 						]),
 					),
 				]),
@@ -105,8 +156,7 @@ class _AccountingModuleScreenState extends State<AccountingModuleScreen> with Si
 
 		return ListView(padding: const EdgeInsets.all(16), children: [
 			salesCard, const SizedBox(height: 12), gstrCard, const SizedBox(height: 12), pnlCard, const SizedBox(height: 12),
-			taxCard, const SizedBox(height: 12), exportCard, const SizedBox(height: 12), expensesCard, const SizedBox(height: 12),
-			creditsCard, const SizedBox(height: 12), cashBookCard,
+			taxCard, const SizedBox(height: 12), exportCard, const SizedBox(height: 12), cashBookCard,
 		]);
 	}
 }
@@ -132,9 +182,9 @@ class AccountingReportsScreen extends StatelessWidget {
 }
 
 // ===== Reused UI from original file =====
-class _DailySalesCard extends StatelessWidget {
-	final Map<String, double> salesByMode; final double total; final bool reconciled;
-	const _DailySalesCard({required this.salesByMode, required this.total, required this.reconciled});
+class _TotalSummaryCard extends StatelessWidget {
+	final Stream<List<_LedgerEntry>> ledgerStream; final Stream<double>? stockValueStream;
+	const _TotalSummaryCard({required this.ledgerStream, required this.stockValueStream});
 	@override
 	Widget build(BuildContext context) {
 		return Card(
@@ -142,51 +192,69 @@ class _DailySalesCard extends StatelessWidget {
 				padding: const EdgeInsets.all(16),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-						Text("Today's Sales Summary", style: Theme.of(context).textTheme.titleMedium),
-						Chip(
-							avatar: Icon(reconciled ? Icons.verified_outlined : Icons.error_outline, size: 16, color: reconciled ? Colors.green : Colors.red),
-							label: Text(reconciled ? 'Reconciled' : 'Unreconciled'),
-							side: BorderSide(color: (reconciled ? Colors.green : Colors.red).withValues(alpha: .4)),
-						),
+						Text('Total Summary', style: Theme.of(context).textTheme.titleMedium),
+						const Chip(avatar: Icon(Icons.sync, size: 16, color: Colors.green), label: Text('Live')),
 					]),
 					const SizedBox(height: 12),
-					Wrap(spacing: 12, runSpacing: 12, children: [
-						for (final e in salesByMode.entries)
-							_MetricTile(title: e.key, value: '₹${e.value.toStringAsFixed(0)}', icon: e.key == 'Cash' ? Icons.currency_rupee : (e.key == 'UPI' ? Icons.qr_code_scanner : Icons.credit_card)),
-						_MetricTile(title: 'Total', value: '₹${total.toStringAsFixed(0)}', icon: Icons.summarize_outlined),
-					]),
+					StreamBuilder<List<_LedgerEntry>>(
+						stream: ledgerStream,
+						builder: (context, ledgerSnap) {
+							if (ledgerSnap.hasError) return Text('Error: ${ledgerSnap.error}');
+							if (!ledgerSnap.hasData) return const SizedBox(height: 80, child: Center(child: CircularProgressIndicator()));
+							// If stock stream not yet initialized (hot reload scenario) show zero placeholder
+							final effectiveStockStream = stockValueStream ?? Stream<double>.value(0);
+							return StreamBuilder<double>(
+								stream: effectiveStockStream,
+								builder: (context, stockSnap) {
+									if (stockSnap.hasError) return Text('Stock error: ${stockSnap.error}');
+									if (!stockSnap.hasData) return const SizedBox(height: 80, child: Center(child: CircularProgressIndicator()));
+
+									final entries = ledgerSnap.data!;
+									final stockValue = stockSnap.data!;
+
+									// Compute net by payment method (sales in - purchases out)
+									final Map<String, double> netByMethod = {};
+									for (final e in entries) {
+										final m = (e.paymentMethod ?? 'Unknown').isEmpty ? 'Unknown' : e.paymentMethod!;
+										final delta = e.inAmt - e.outAmt;
+										netByMethod[m] = (netByMethod[m] ?? 0) + delta;
+									}
+									for (final k in ['Cash','UPI','Card']) { netByMethod.putIfAbsent(k, () => 0); }
+									final methodsTotal = netByMethod.values.fold(0.0, (a,b)=>a+b);
+									final grandTotal = methodsTotal + stockValue;
+
+									return Wrap(spacing: 12, runSpacing: 12, children: [
+										for (final e in netByMethod.entries)
+											_MetricTile(
+												title: e.key,
+												value: '₹${e.value.toStringAsFixed(0)}',
+												icon: e.key == 'Cash' ? Icons.currency_rupee : (e.key == 'UPI' ? Icons.qr_code_scanner : Icons.credit_card),
+											),
+										_MetricTile(title: 'Stock Value', value: '₹${stockValue.toStringAsFixed(0)}', icon: Icons.inventory_2_outlined),
+										_MetricTile(title: 'Total (Methods)', value: '₹${methodsTotal.toStringAsFixed(0)}', icon: Icons.summarize_outlined),
+										_MetricTile(title: 'Grand Total', value: '₹${grandTotal.toStringAsFixed(0)}', icon: Icons.account_balance_outlined),
+									]);
+								},
+							);
+						},
+					),
 				]),
 			),
 		);
 	}
 }
 
-class _GstReportsCard extends StatelessWidget {
-	final TabController tabController; final List<_GstRow> gstr1; final List<_GstRow> gstr3b;
-	const _GstReportsCard({required this.tabController, required this.gstr1, required this.gstr3b});
-	DataTable _table(List<_GstRow> rows) {
-		return DataTable(columns: const [
-			DataColumn(label: Text('Section')), DataColumn(label: Text('Invoices')),
-			DataColumn(label: Text('Taxable Value')), DataColumn(label: Text('Tax Amount')),
-		], rows: [ for (final r in rows) DataRow(cells: [
-			DataCell(Text(r.section)), DataCell(Text('${r.invoiceCount}')),
-			DataCell(Text('₹${r.taxable.toStringAsFixed(0)}')), DataCell(Text('₹${r.tax.toStringAsFixed(0)}')),
-		]) ]);
-	}
-	@override
-	Widget build(BuildContext context) {
-		return Card(
-			child: Padding(
-				padding: const EdgeInsets.all(12),
-				child: Column(children: [
-					TabBar(controller: tabController, labelColor: Theme.of(context).colorScheme.primary, tabs: const [Tab(text: 'GSTR-1'), Tab(text: 'GSTR-3B')]),
-					SizedBox(height: 220, child: TabBarView(controller: tabController, children: [
-						SingleChildScrollView(child: _table(gstr1)), SingleChildScrollView(child: _table(gstr3b)),
-					])),
-				]),
-			),
-		);
-	}
+class _DynamicGstReportsCard extends StatefulWidget { const _DynamicGstReportsCard(); @override State<_DynamicGstReportsCard> createState()=>_DynamicGstReportsCardState(); }
+class _DynamicGstReportsCardState extends State<_DynamicGstReportsCard> with SingleTickerProviderStateMixin {
+	late TabController _tab; DateTimeRange? _range; String _paymentModeFilter = 'All'; bool _loading = false; Gstr1Summary? _g1; Gstr3bSummary? _g3b;
+	@override void initState(){super.initState();_tab=TabController(length:2,vsync:this);_range=_currentMonth();_compute();}
+	DateTimeRange _currentMonth(){final now=DateTime.now();final start=DateTime(now.year,now.month,1);final end=DateTime(now.year,now.month+1,0,23,59,59);return DateTimeRange(start:start,end:end);}
+	Future<void> _pickRange() async {final picked=await showDateRangePicker(context:context, firstDate:DateTime(2023,1,1), lastDate:DateTime(2099)); if(picked!=null){setState(()=>_range=picked); _compute();}}
+	Future<void> _compute() async { if(_range==null)return; setState(()=>_loading=true); try { final svc=Gstr3bService(); final pm = _paymentModeFilter=='All'? null : _paymentModeFilter; _g1=await svc.computeGstr1(from:_range!.start,to:_range!.end,paymentMode:pm); _g3b=await svc.compute(from:_range!.start,to:_range!.end,paymentMode:pm);} catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('GST calc error: $e')));} finally { if(mounted) setState(()=>_loading=false);} }
+	Widget _gstr1Table(){ final g=_g1; if(g==null) return const SizedBox.shrink(); return DataTable(columns: const [ DataColumn(label: Text('Section')), DataColumn(label: Text('Invoices')), DataColumn(label: Text('Taxable Value')), DataColumn(label: Text('Tax Amount')), ], rows: [ DataRow(cells:[const DataCell(Text('B2B')), DataCell(Text('${g.b2bCount}')), DataCell(Text('₹${g.b2bTaxable.toStringAsFixed(0)}')), DataCell(Text('—'))]), DataRow(cells:[const DataCell(Text('B2C')), DataCell(Text('${g.b2cCount}')), DataCell(Text('₹${g.b2cTaxable.toStringAsFixed(0)}')), DataCell(Text('—'))]), DataRow(cells:[const DataCell(Text('Zero Rated')), DataCell(Text('${g.zeroCount}')), DataCell(Text('₹${g.zeroRated.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('Exempt / Nil')), DataCell(Text('${g.exemptCount}')), DataCell(Text('₹${g.exempt.toStringAsFixed(0)}')), const DataCell(Text('0'))]), ]); }
+	Widget _gstr3bTable(){ final g=_g3b; if(g==null) return const SizedBox.shrink(); return SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [ DataColumn(label: Text('3.1 Section')), DataColumn(label: Text('Taxable Value')), DataColumn(label: Text('Tax')) ], rows: [ DataRow(cells:[const DataCell(Text('Outward Taxable')), DataCell(Text('₹${g.outwardTaxable.toStringAsFixed(0)}')), DataCell(Text('₹${g.taxOnOutward.toStringAsFixed(0)}'))]), DataRow(cells:[const DataCell(Text('Zero Rated')), DataCell(Text('₹${g.outwardZeroRated.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('Exempt/Nil')), DataCell(Text('₹${g.outwardExemptNil.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('RCM Inward Taxable')), DataCell(Text('₹${g.inwardReverseChargeTaxable.toStringAsFixed(0)}')), DataCell(Text('₹${g.taxOnRCM.toStringAsFixed(0)}'))]), DataRow(cells:[const DataCell(Text('Eligible ITC')), DataCell(Text('₹${g.totalEligibleITC.toStringAsFixed(0)}')), const DataCell(Text('-'))]), DataRow(cells:[const DataCell(Text('Ineligible ITC')), DataCell(Text('₹${g.itcIneligible.toStringAsFixed(0)}')), const DataCell(Text('-'))]), ])); }
+	@override Widget build(BuildContext context){ return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[ Row(children:[ const Icon(Icons.assignment_outlined), const SizedBox(width:8), Text('GST Reports', style: Theme.of(context).textTheme.titleMedium), const Spacer(), DropdownButton<String>(value:_paymentModeFilter, items: const ['All','Cash','UPI','Card'].map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(), onChanged:(v){ if(v!=null){ setState(()=>_paymentModeFilter=v); _compute();}}), const SizedBox(width:8), OutlinedButton.icon(onPressed:_pickRange, icon: const Icon(Icons.date_range), label: Text(_range==null? 'Select Range' : '${_range!.start.toString().split(' ').first} → ${_range!.end.toString().split(' ').first}')), const SizedBox(width:8), IconButton(onPressed:_compute, tooltip:'Refresh', icon: const Icon(Icons.refresh)), ]), const SizedBox(height:8), TabBar(controller:_tab, labelColor: Theme.of(context).colorScheme.primary, tabs: const [Tab(text:'GSTR-1'), Tab(text:'GSTR-3B')]), SizedBox(height:260, child: _loading ? const Center(child:CircularProgressIndicator()) : TabBarView(controller:_tab, children:[ SingleChildScrollView(child:_gstr1Table()), SingleChildScrollView(child:_gstr3bTable()) ])), ]))); }
+	@override void dispose(){ _tab.dispose(); super.dispose(); }
 }
 
 class _PnLCard extends StatelessWidget {
@@ -223,36 +291,6 @@ class _PnLCard extends StatelessWidget {
 	}
 }
 
-class _ExpensesCard extends StatelessWidget {
-	final List<_Expense> expenses; final VoidCallback onAdd;
-	const _ExpensesCard({required this.expenses, required this.onAdd});
-	@override
-	Widget build(BuildContext context) {
-		return Card(
-			child: Padding(
-				padding: const EdgeInsets.all(12),
-				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-						Text('Manual Expenses', style: Theme.of(context).textTheme.titleMedium),
-						FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Add Expense')),
-					]),
-					const SizedBox(height: 8),
-					ListView.separated(
-						itemCount: expenses.length, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-						separatorBuilder: (_, __) => const Divider(height: 1),
-						itemBuilder: (context, i) { final e = expenses[i]; return ListTile(
-							leading: const Icon(Icons.receipt_long_outlined),
-							title: Text('${e.category} • ₹${e.amount.toStringAsFixed(0)}'),
-							subtitle: Text('${e.date.toLocal()} — ${e.notes}'),
-						); },
-					),
-					const SizedBox(height: 8),
-					Text('Demo only — no backend writes.', style: Theme.of(context).textTheme.bodySmall),
-				]),
-			),
-		);
-	}
-}
 
 class _TaxSummaryCard extends StatelessWidget {
 	final _TaxSummary summary; const _TaxSummaryCard({required this.summary});
@@ -295,62 +333,51 @@ class _ExportCard extends StatelessWidget {
 	}
 }
 
-class _OutstandingCreditsCard extends StatelessWidget {
-	final List<_Credit> credits; const _OutstandingCreditsCard({required this.credits});
-	@override
-	Widget build(BuildContext context) {
-		return Card(
-			child: Padding(
-				padding: const EdgeInsets.all(12),
-				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Outstanding Credits', style: Theme.of(context).textTheme.titleMedium),
-					const SizedBox(height: 8),
-					ListView.separated(
-						itemCount: credits.length, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-						separatorBuilder: (_, __) => const Divider(height: 1),
-						itemBuilder: (context, i) { final c = credits[i]; return ListTile(
-							leading: const Icon(Icons.person_outline),
-							title: Text('${c.customer} — ₹${c.amount.toStringAsFixed(0)}'),
-							subtitle: Text('Invoice: ${c.invoiceId} | Due: ${c.dueDate.toLocal()}'),
-						); },
-					),
-				]),
-			),
-		);
-	}
-}
 
 class _CashBookCard extends StatelessWidget {
-	final List<_LedgerEntry> entries;
-	const _CashBookCard({required this.entries});
+	final Stream<List<_LedgerEntry>> stream;
+	const _CashBookCard({required this.stream});
 	@override
 	Widget build(BuildContext context) {
-		double running = 0;
 		return Card(
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Cash Book', style: Theme.of(context).textTheme.titleMedium),
+					Text('Balance Sheet', style: Theme.of(context).textTheme.titleMedium),
 					const SizedBox(height: 8),
-					DataTable(columns: const [
-						DataColumn(label: Text('Date')),
-						DataColumn(label: Text('Description')),
-						DataColumn(label: Text('In')),
-						DataColumn(label: Text('Out')),
-						DataColumn(label: Text('Balance')),
-					], rows: [
-						for (final e in entries)
-							() {
-								running += e.inAmt - e.outAmt;
-								return DataRow(cells: [
-									DataCell(Text(e.date.toLocal().toString().split(' ').first)),
-									DataCell(Text(e.desc)),
-									DataCell(Text(e.inAmt == 0 ? '-' : '₹${e.inAmt.toStringAsFixed(0)}')),
-									DataCell(Text(e.outAmt == 0 ? '-' : '₹${e.outAmt.toStringAsFixed(0)}')),
-									DataCell(Text('₹${running.toStringAsFixed(0)}')),
-								]);
-							}(),
-					]),
+					StreamBuilder<List<_LedgerEntry>>(
+						stream: stream,
+						builder: (context, snap) {
+							if (snap.hasError) return Text('Error: ${snap.error}');
+							if (!snap.hasData) return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
+							final entries = snap.data!;
+							double running = 0;
+							return SingleChildScrollView(
+								scrollDirection: Axis.horizontal,
+								child: DataTable(columns: const [
+									DataColumn(label: Text('Date')),
+									DataColumn(label: Text('Description')),
+									DataColumn(label: Text('Payment Method')),
+									DataColumn(label: Text('In')),
+									DataColumn(label: Text('Out')),
+									DataColumn(label: Text('Balance')),
+								], rows: [
+									for (final e in entries)
+										() {
+											running += e.inAmt - e.outAmt;
+											return DataRow(cells: [
+												DataCell(Text(e.date.toLocal().toString().split(' ').first)),
+												DataCell(Text(e.desc)),
+												DataCell(Text(e.paymentMethod ?? '-')),
+												DataCell(Text(e.inAmt == 0 ? '-' : '₹${e.inAmt.toStringAsFixed(0)}')),
+												DataCell(Text(e.outAmt == 0 ? '-' : '₹${e.outAmt.toStringAsFixed(0)}')),
+												DataCell(Text('₹${running.toStringAsFixed(0)}')),
+											]);
+									}(),
+								]),
+							);
+						},
+					),
 				]),
 			),
 		);
@@ -394,15 +421,14 @@ class _Bar extends StatelessWidget {
 }
 
 // ===== Demo data classes =====
-class _GstRow { final String section; final int invoiceCount; final double taxable; final double tax;
-	const _GstRow({required this.section, required this.invoiceCount, required this.taxable, required this.tax}); }
-class _Expense { final DateTime date; final String category; final double amount; final String notes;
-	_Expense({required this.date, required this.category, required this.amount, required this.notes}); }
+// Legacy _GstRow model removed (dynamic card now computes live values).
+// Removed _Expense and _Credit models along with related UI cards to fulfill
+// requirement: eliminate Manual Expenses and Outstanding Credits sections.
 class _TaxSummary { final double gstPayable; final double itc; const _TaxSummary({required this.gstPayable, required this.itc}); }
-class _Credit { final String customer; final String invoiceId; final double amount; final DateTime dueDate;
-	_Credit({required this.customer, required this.invoiceId, required this.amount, required this.dueDate}); }
-class _LedgerEntry { final DateTime date; final String desc; final double inAmt; final double outAmt;
-	_LedgerEntry({required this.date, required this.desc, required this.inAmt, required this.outAmt}); }
+class _LedgerEntry {
+	final DateTime date; final String desc; final double inAmt; final double outAmt; final String? paymentMethod;
+	_LedgerEntry({required this.date, required this.desc, required this.inAmt, required this.outAmt, this.paymentMethod});
+}
 
 // ===== TODO placeholders (models/services) =====
 // Models would live here if needed in the future.

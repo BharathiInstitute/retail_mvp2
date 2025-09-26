@@ -1,3 +1,6 @@
+// NOTE: Temporary isolation of invoices UI & models to avoid name shadowing issues reported by analyzer.
+// The standard Flutter widgets like SizedBox, IconButton, etc. were being reported as if redefined here.
+// We keep only required imports and ensure no symbol clashes.
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -140,10 +143,18 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (_, i) {
         final inv = list[i];
+        final pm = (inv is InvoiceWithMode) ? inv.paymentMode : null;
+        final subtitle = StringBuffer()
+          ..write(_fmtDate(inv.date))
+          ..write(' • ₹')
+          ..write(inv.total(taxInclusive: taxInclusive).toStringAsFixed(2));
+        if (pm != null && pm.isNotEmpty) {
+          subtitle..write(' • ')..write(pm);
+        }
         return ListTile(
           onTap: () => _showInvoiceDetails(inv),
           title: Text('Invoice #${inv.invoiceNo} • ${inv.customer.name}'),
-          subtitle: Text('${_fmtDate(inv.date)} • ₹${inv.total(taxInclusive: taxInclusive).toStringAsFixed(2)}'),
+          subtitle: Text(subtitle.toString()),
           trailing: _statusChip(inv.status),
         );
       },
@@ -165,7 +176,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
           ),
         );
       },
-    );
+    ); // end showDialog
   }
 
   Widget _invoiceDetailsContent(Invoice inv, BuildContext dialogCtx) {
@@ -308,233 +319,13 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
   }
 
   Future<void> _showEditSalesInvoice(Invoice inv, BuildContext dialogCtx) async {
-    // Load the underlying Firestore document by invoiceNumber (assumes doc id == invoiceNumber used in POS save logic)
-    final docRef = FirebaseFirestore.instance.collection('invoices').doc(inv.invoiceNo);
-    final docSnap = await docRef.get();
-    if (!docSnap.exists) {
-      ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Original document not found')));
-      return;
-    }
-
-    // Controllers & mutable working copy
-    final customerController = TextEditingController(text: inv.customer.name);
-    String status = inv.status;
-    final items = inv.items.map((e) => e).toList(); // shallow copy
-
-    // For each line make qty & price editable via TextEditingController lists
-    final qtyControllers = [for (final it in items) TextEditingController(text: it.qty.toString())];
-    final priceControllers = [for (final it in items) TextEditingController(text: it.product.price.toStringAsFixed(2))];
-
-    double computeGrandTotal() {
-      double total = 0;
-      for (int i = 0; i < items.length; i++) {
-        final qty = int.tryParse(qtyControllers[i].text.trim()) ?? items[i].qty;
-        final price = double.tryParse(priceControllers[i].text.trim()) ?? items[i].product.price;
-        final taxPercent = items[i].product.taxPercent;
-        final base = price / (1 + taxPercent / 100);
-        final lineSubtotal = base * qty;
-        final lineTax = lineSubtotal * taxPercent / 100;
-        total += lineSubtotal + lineTax;
-      }
-      return total;
-    }
-
-    await showDialog(
+    await showDialog<bool>(
       context: dialogCtx,
       useRootNavigator: true,
-      builder: (editCtx) {
-        return StatefulBuilder(builder: (editCtx, setStateSB) {
-          final grandTotal = computeGrandTotal();
-          return Dialog(
-            insetPadding: const EdgeInsets.all(16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text('Edit Invoice #${inv.invoiceNo}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                        ),
-                        IconButton(
-                          tooltip: 'Close',
-                          onPressed: () => Navigator.of(editCtx, rootNavigator: true).pop(),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: customerController,
-                                    decoration: const InputDecoration(labelText: 'Customer Name'),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                DropdownButton<String>(
-                                  value: status,
-                                  items: const [
-                                    DropdownMenuItem(value: 'Paid', child: Text('Paid')),
-                                    DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                                    DropdownMenuItem(value: 'Credit', child: Text('Credit')),
-                                  ],
-                                  onChanged: (v) => setStateSB(() => status = v ?? status),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                columns: const [
-                                  DataColumn(label: Text('SKU')),
-                                  DataColumn(label: Text('Item')),
-                                  DataColumn(label: Text('Qty')),
-                                  DataColumn(label: Text('Price')),
-                                  DataColumn(label: Text('GST %')),
-                                  DataColumn(label: Text('Line Total')),
-                                  DataColumn(label: Text('')),
-                                ],
-                                rows: [
-                                  for (int i = 0; i < items.length; i++)
-                                    DataRow(cells: [
-                                      DataCell(Text(items[i].product.sku)),
-                                      DataCell(Text(items[i].product.name)),
-                                      DataCell(SizedBox(
-                                        width: 60,
-                                        child: TextField(
-                                          controller: qtyControllers[i],
-                                          keyboardType: TextInputType.number,
-                                          onChanged: (_) => setStateSB(() {}),
-                                          decoration: const InputDecoration(border: InputBorder.none),
-                                        ),
-                                      )),
-                                      DataCell(SizedBox(
-                                        width: 80,
-                                        child: TextField(
-                                          controller: priceControllers[i],
-                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                          onChanged: (_) => setStateSB(() {}),
-                                          decoration: const InputDecoration(border: InputBorder.none),
-                                        ),
-                                      )),
-                                      DataCell(Text('${items[i].product.taxPercent}%')),
-                                      DataCell(() {
-                                        final qty = int.tryParse(qtyControllers[i].text.trim()) ?? items[i].qty;
-                                        final price = double.tryParse(priceControllers[i].text.trim()) ?? items[i].product.price;
-                                        final taxPercent = items[i].product.taxPercent;
-                                        final base = price / (1 + taxPercent / 100);
-                                        final lineSubtotal = base * qty;
-                                        final lineTax = lineSubtotal * taxPercent / 100;
-                                        final total = lineSubtotal + lineTax;
-                                        return Text('₹${total.toStringAsFixed(2)}');
-                                      }()),
-                                      DataCell(IconButton(
-                                        tooltip: 'Remove line',
-                                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                                        onPressed: () {
-                                          setStateSB(() {
-                                            items.removeAt(i);
-                                            qtyControllers.removeAt(i);
-                                            priceControllers.removeAt(i);
-                                          });
-                                        },
-                                      )),
-                                    ]),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Text('Grand Total: ₹${grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: () => Navigator.of(editCtx, rootNavigator: true).pop(),
-                            child: const Text('Cancel'),
-                          ),
-                          const SizedBox(width: 12),
-                          FilledButton.icon(
-                            onPressed: items.isEmpty
-                                ? null
-                                : () async {
-                              // Build updated lines array compatible with original structure
-                              final updatedLines = <Map<String, dynamic>>[];
-                              for (int i = 0; i < items.length; i++) {
-                                final qty = int.tryParse(qtyControllers[i].text.trim()) ?? items[i].qty;
-                                final price = double.tryParse(priceControllers[i].text.trim()) ?? items[i].product.price;
-                                updatedLines.add({
-                                  'sku': items[i].product.sku,
-                                  'name': items[i].product.name,
-                                  'qty': qty,
-                                  'unitPrice': price,
-                                  'taxPercent': items[i].product.taxPercent,
-                                });
-                              }
-                              if (updatedLines.isEmpty) {
-                                ScaffoldMessenger.of(editCtx).showSnackBar(const SnackBar(content: Text('Add at least one line before saving')));
-                                return;
-                              }
-                              await docRef.update({
-                                'customerName': customerController.text.trim(),
-                                'status': status,
-                                'lines': updatedLines,
-                                // Keep a simple timestamp update for tracking edits
-                                'lastEditedAt': FieldValue.serverTimestamp(),
-                              });
-                              // Close both dialogs and refresh list (stream auto updates)
-                              if (Navigator.of(editCtx).canPop()) {
-                                Navigator.of(editCtx, rootNavigator: true).pop(); // close edit
-                              }
-                              if (Navigator.of(dialogCtx).canPop()) {
-                                Navigator.of(dialogCtx, rootNavigator: true).pop(); // close details
-                              }
-                              // Optionally reopen updated details
-                              final refreshedSnap = await docRef.get();
-                              if (refreshedSnap.exists) {
-                                final updatedData = refreshedSnap.data() as Map<String, dynamic>;
-                                final updatedInv = Invoice.fromFirestore(updatedData);
-                                if (mounted) {
-                                  Future.microtask(() => _showInvoiceDetails(updatedInv));
-                                }
-                              }
-                            },
-                            icon: const Icon(Icons.save),
-                            label: const Text('Save Changes'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        });
-      },
+      builder: (_) => EditInvoiceDialog(invoice: inv),
     );
   }
-}
+} // end _InvoicesPageState
 
 class BillingCustomer {
   final String name;
@@ -618,6 +409,18 @@ class Invoice {
         }
       }
     }
+    final paymentMode = (data['paymentMode'] as String?)?.trim();
+    if (paymentMode != null && paymentMode.isNotEmpty) {
+      return InvoiceWithMode(
+        invoiceNo: invoiceNo,
+        customer: customer,
+        items: items,
+        date: date,
+        status: status,
+        taxInclusive: true,
+        paymentMode: paymentMode,
+      );
+    }
     return Invoice(invoiceNo: invoiceNo, customer: customer, items: items, date: date, status: status, taxInclusive: true);
   }
 
@@ -656,4 +459,229 @@ class CreditDebitNote {
 }
 
 String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+class InvoiceWithMode extends Invoice {
+  final String? paymentMode;
+  InvoiceWithMode({required super.invoiceNo, required super.customer, required super.items, required super.date, required super.status, required super.taxInclusive, this.paymentMode});
+  factory InvoiceWithMode.fromInvoice(Invoice base, {String? paymentMode}) {
+    return InvoiceWithMode(
+      invoiceNo: base.invoiceNo,
+      customer: base.customer,
+      items: base.items,
+      date: base.date,
+      status: base.status,
+      taxInclusive: base.taxInclusive,
+      paymentMode: paymentMode,
+    );
+  }
+}
+
+// Dedicated edit dialog widget (simpler structure -> fewer brace mismatches)
+class EditInvoiceDialog extends StatefulWidget {
+  final Invoice invoice;
+  const EditInvoiceDialog({super.key, required this.invoice});
+
+  @override
+  State<EditInvoiceDialog> createState() => _EditInvoiceDialogState();
+}
+
+class _EditInvoiceDialogState extends State<EditInvoiceDialog> {
+  late List<InvoiceItem> _items;
+  late List<TextEditingController> _qtyCtrls;
+  late List<TextEditingController> _priceCtrls;
+  late TextEditingController _customerCtrl;
+  late String _status;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.invoice.items.map((e) => e).toList();
+    _qtyCtrls = [for (final it in _items) TextEditingController(text: it.qty.toString())];
+    _priceCtrls = [for (final it in _items) TextEditingController(text: it.product.price.toStringAsFixed(2))];
+    _customerCtrl = TextEditingController(text: widget.invoice.customer.name);
+    _status = widget.invoice.status;
+  }
+
+  double _grandTotal() {
+    double total = 0;
+    for (int i = 0; i < _items.length; i++) {
+      final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
+      final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
+      final taxPercent = _items[i].product.taxPercent;
+      final base = price / (1 + taxPercent / 100);
+      final lineSubtotal = base * qty;
+      final lineTax = lineSubtotal * taxPercent / 100;
+      total += lineSubtotal + lineTax;
+    }
+    return total;
+  }
+
+  Future<void> _save() async {
+    if (_items.isEmpty) return;
+    final docRef = FirebaseFirestore.instance.collection('invoices').doc(widget.invoice.invoiceNo);
+    final updatedLines = <Map<String, dynamic>>[];
+    for (int i = 0; i < _items.length; i++) {
+      final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
+      final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
+      updatedLines.add({
+        'sku': _items[i].product.sku,
+        'name': _items[i].product.name,
+        'qty': qty,
+        'unitPrice': price,
+        'taxPercent': _items[i].product.taxPercent,
+      });
+    }
+    await docRef.update({
+      'customerName': _customerCtrl.text.trim(),
+      'status': _status,
+      'lines': updatedLines,
+      'lastEditedAt': FieldValue.serverTimestamp(),
+    });
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grand = _grandTotal();
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Text('Edit Invoice #${widget.invoice.invoiceNo}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _customerCtrl,
+                              decoration: const InputDecoration(labelText: 'Customer Name'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          DropdownButton<String>(
+                            value: _status,
+                            items: const [
+                              DropdownMenuItem(value: 'Paid', child: Text('Paid')),
+                              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+                              DropdownMenuItem(value: 'Credit', child: Text('Credit')),
+                            ],
+                            onChanged: (v) => setState(() => _status = v ?? _status),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('SKU')),
+                            DataColumn(label: Text('Item')),
+                            DataColumn(label: Text('Qty')),
+                            DataColumn(label: Text('Price')),
+                            DataColumn(label: Text('GST %')),
+                            DataColumn(label: Text('Line Total')),
+                            DataColumn(label: Text('')),
+                          ],
+                          rows: [
+                            for (int i = 0; i < _items.length; i++)
+                              DataRow(cells: [
+                                DataCell(Text(_items[i].product.sku)),
+                                DataCell(Text(_items[i].product.name)),
+                                DataCell(SizedBox(
+                                  width: 60,
+                                  child: TextField(
+                                    controller: _qtyCtrls[i],
+                                    keyboardType: TextInputType.number,
+                                    onChanged: (_) => setState(() {}),
+                                    decoration: const InputDecoration(border: InputBorder.none),
+                                  ),
+                                )),
+                                DataCell(SizedBox(
+                                  width: 80,
+                                  child: TextField(
+                                    controller: _priceCtrls[i],
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    onChanged: (_) => setState(() {}),
+                                    decoration: const InputDecoration(border: InputBorder.none),
+                                  ),
+                                )),
+                                DataCell(Text('${_items[i].product.taxPercent}%')),
+                                DataCell(() {
+                                  final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
+                                  final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
+                                  final taxPercent = _items[i].product.taxPercent;
+                                  final base = price / (1 + taxPercent / 100);
+                                  final lineSubtotal = base * qty;
+                                  final lineTax = lineSubtotal * taxPercent / 100;
+                                  final total = lineSubtotal + lineTax;
+                                  return Text('₹${total.toStringAsFixed(2)}');
+                                }()),
+                                DataCell(IconButton(
+                                  tooltip: 'Remove line',
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                                  onPressed: () => setState(() {
+                                    _items.removeAt(i);
+                                    _qtyCtrls.removeAt(i);
+                                    _priceCtrls.removeAt(i);
+                                  }),
+                                )),
+                              ]),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text('Grand Total: ₹${grand.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      onPressed: _items.isEmpty ? null : _save,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Save Changes'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 

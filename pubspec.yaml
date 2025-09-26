@@ -58,6 +58,8 @@ dependencies:
   csv: ^6.0.0
   excel: ^2.1.0
   pluto_grid: ^8.0.0
+  # Streams combination for accounting ledger
+  rxdart: ^0.27.7
 
 dev_dependencies:
   flutter_test:

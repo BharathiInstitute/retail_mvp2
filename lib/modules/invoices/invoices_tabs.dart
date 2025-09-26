@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'invoices.dart';
 import 'purchse_invoice.dart';
+import 'package:retail_mvp2/dev/gstr3b_demo_seed.dart';
+import '../accounting/gstr3b_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class InvoicesTabsScreen extends StatelessWidget {
@@ -24,9 +26,7 @@ class InvoicesTabsScreen extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: const [
-                // Sales tab reuses the existing invoices list UI
-                InvoicesListScreen(),
-                // Purchases tab provides entry to Purchase Invoice dialog
+                _SalesTab(),
                 _PurchasesTab(),
               ],
             ),
@@ -37,8 +37,67 @@ class InvoicesTabsScreen extends StatelessWidget {
   }
 }
 
+class _SalesTab extends StatelessWidget {
+  const _SalesTab();
+  Future<void> _seed(BuildContext context) async {
+    try {
+      await seedGstr3bDemoData();
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo sales invoices seeded.')));
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seed failed: $e')));
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.icon(onPressed: () => _seed(context), icon: const Icon(Icons.cloud_download_outlined), label: const Text('Seed Demo Invoices')),
+          FilledButton.tonalIcon(onPressed: () async {
+            final svc = Gstr3bService();
+            final now = DateTime.now();
+            final from = DateTime(now.year, now.month, 1);
+            final to = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+            final s = await svc.compute(from: from, to: to);
+            if (!context.mounted) return;
+            showDialog(context: context, builder: (_) => AlertDialog(title: const Text('GSTR-3B Summary'), content: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('3.1(a) Taxable Value: ₹${s.outwardTaxable.toStringAsFixed(2)}'),
+              Text('3.1(b) Zero Rated: ₹${s.outwardZeroRated.toStringAsFixed(2)}'),
+              Text('3.1(c) Exempt/Nil: ₹${s.outwardExemptNil.toStringAsFixed(2)}'),
+              Text('3.1(d) RCM Inward Taxable: ₹${s.inwardReverseChargeTaxable.toStringAsFixed(2)}'),
+              const SizedBox(height: 8),
+              Text('Tax on Outward: ₹${s.taxOnOutward.toStringAsFixed(2)}'),
+              Text('Tax on RCM (Payable): ₹${s.taxOnRCM.toStringAsFixed(2)}'),
+              const Divider(),
+              Text('Eligible ITC (Inputs CGST): ₹${s.itcInputsCgst.toStringAsFixed(2)}'),
+              Text('Eligible ITC (Inputs SGST): ₹${s.itcInputsSgst.toStringAsFixed(2)}'),
+              Text('Eligible ITC (Inputs IGST): ₹${s.itcInputsIgst.toStringAsFixed(2)}'),
+              Text('Capital Goods ITC: ₹${s.itcCapitalGoods.toStringAsFixed(2)}'),
+              Text('RCM Eligible ITC: ₹${s.itcInwardRCMEligible.toStringAsFixed(2)}'),
+              Text('Ineligible ITC: ₹${s.itcIneligible.toStringAsFixed(2)}'),
+              const SizedBox(height: 8),
+              Text('Total Eligible ITC: ₹${s.totalEligibleITC.toStringAsFixed(2)}'),
+            ])), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]));
+          }, icon: const Icon(Icons.summarize_outlined), label: const Text('Compute GSTR-3B')),
+        ]),
+        const SizedBox(height: 12),
+        const Expanded(child: InvoicesListScreen()),
+      ]),
+    );
+  }
+}
+
 class _PurchasesTab extends StatelessWidget {
   const _PurchasesTab();
+  Future<void> _seedPurchases(BuildContext context) async {
+    try {
+      await seedGstr3bDemoData();
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo purchase invoices seeded (shared seed).')));
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seed failed: $e')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +112,7 @@ class _PurchasesTab extends StatelessWidget {
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('New Purchase Invoice'),
             ),
+            OutlinedButton.icon(onPressed: () => _seedPurchases(context), icon: const Icon(Icons.cloud_download_outlined), label: const Text('Seed Demo Purchases')),
           ]),
           const SizedBox(height: 12),
           Expanded(child: _PurchasesList()),

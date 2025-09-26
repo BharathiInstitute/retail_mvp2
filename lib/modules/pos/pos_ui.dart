@@ -13,7 +13,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'invoice_models.dart';
-import 'invoice_pdf.dart'; // For PDF generation (email attachment only; download removed)
+import 'invoice_pdf.dart' as pdf_gen; // For PDF generation (email attachment only; download removed)
 import 'invoice_email_service.dart';
 import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav.dart';
@@ -395,6 +395,7 @@ class _PosPageState extends State<PosPage> {
         ...data,
         'timestampMs': invoice.timestamp.millisecondsSinceEpoch,
         'status': 'Paid',
+        'paymentMode': invoice.paymentMode,
       });
     } catch (e) {
       // ignore persistence failure
@@ -617,7 +618,7 @@ class _PosPageState extends State<PosPage> {
     try {
       final messenger = ScaffoldMessenger.of(ctx);
       messenger.showSnackBar(const SnackBar(content: Text('Generating PDF...')));
-      final pdfBytes = await buildInvoicePdf(inv);
+      final pdfBytes = await pdf_gen.buildInvoicePdf(inv);
       messenger.showSnackBar(const SnackBar(content: Text('Sending invoice email (PDF)...')));
       final service = InvoiceEmailService();
       await service.sendInvoicePdf(
@@ -645,6 +646,7 @@ class _PosPageState extends State<PosPage> {
         Text('Invoice #: ${invoice.invoiceNumber}'),
         Text('Date: $dateStr  Time: $timeStr'),
         Text('Customer: ${invoice.customerName}'),
+        Text('Paid via: ${invoice.paymentMode}'),
         if ((invoice.customerEmail ?? '').isNotEmpty)
           Text('Email: ${invoice.customerEmail}'),
         if ((invoice.customerPhone ?? '').isNotEmpty)
