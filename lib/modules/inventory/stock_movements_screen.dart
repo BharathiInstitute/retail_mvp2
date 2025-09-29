@@ -281,7 +281,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _type,
+                          value: _type,
                           items: const ['Inbound', 'Outbound', 'Adjust']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -292,7 +292,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _location,
+                          value: _location,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),

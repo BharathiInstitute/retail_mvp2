@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:rxdart/rxdart.dart';
-import 'gstr3b_service.dart';
+// Removed import 'gstr3b_service.dart'; file deleted. Replacing GST summary logic with placeholders.
 
 // Consolidated Accounting module in a single file.
 // This merges prior UI screens and keeps placeholders for models/services.
@@ -84,13 +84,32 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 	}
 
 	Stream<List<_LedgerEntry>> _buildLedgerStream() {
-		return Rx.combineLatest2<List<_LedgerEntry>, List<_LedgerEntry>, List<_LedgerEntry>>(
-			_salesStream(), _purchaseStream(), (sales, purchases) {
-				final all = [...sales, ...purchases];
-				all.sort((a, b) => a.date.compareTo(b.date));
-				return all;
-			},
-		);
+		// Replace rxdart combineLatest with manual merge using StreamZip-like behavior.
+		final sales$ = _salesStream();
+		final purchases$ = _purchaseStream();
+		List<_LedgerEntry>? latestSales;
+		List<_LedgerEntry>? latestPurchases;
+		StreamController<List<_LedgerEntry>>? controller;
+		controller = StreamController<List<_LedgerEntry>>(onListen: () {
+			final sub1 = sales$.listen((s) {
+				latestSales = s;
+				if (latestPurchases != null) {
+					final all = [...latestSales!, ...latestPurchases!];
+					all.sort((a,b)=>a.date.compareTo(b.date));
+					controller!.add(all);
+				}
+			});
+			final sub2 = purchases$.listen((p) {
+				latestPurchases = p;
+				if (latestSales != null) {
+					final all = [...latestSales!, ...latestPurchases!];
+					all.sort((a,b)=>a.date.compareTo(b.date));
+					controller!.add(all);
+				}
+			});
+			controller!.onCancel = () { sub1.cancel(); sub2.cancel(); };
+		});
+		return controller.stream.asBroadcastStream();
 	}
 
 	Stream<double> _buildStockValueStream() {
@@ -244,17 +263,23 @@ class _TotalSummaryCard extends StatelessWidget {
 	}
 }
 
-class _DynamicGstReportsCard extends StatefulWidget { const _DynamicGstReportsCard(); @override State<_DynamicGstReportsCard> createState()=>_DynamicGstReportsCardState(); }
-class _DynamicGstReportsCardState extends State<_DynamicGstReportsCard> with SingleTickerProviderStateMixin {
-	late TabController _tab; DateTimeRange? _range; String _paymentModeFilter = 'All'; bool _loading = false; Gstr1Summary? _g1; Gstr3bSummary? _g3b;
-	@override void initState(){super.initState();_tab=TabController(length:2,vsync:this);_range=_currentMonth();_compute();}
-	DateTimeRange _currentMonth(){final now=DateTime.now();final start=DateTime(now.year,now.month,1);final end=DateTime(now.year,now.month+1,0,23,59,59);return DateTimeRange(start:start,end:end);}
-	Future<void> _pickRange() async {final picked=await showDateRangePicker(context:context, firstDate:DateTime(2023,1,1), lastDate:DateTime(2099)); if(picked!=null){setState(()=>_range=picked); _compute();}}
-	Future<void> _compute() async { if(_range==null)return; setState(()=>_loading=true); try { final svc=Gstr3bService(); final pm = _paymentModeFilter=='All'? null : _paymentModeFilter; _g1=await svc.computeGstr1(from:_range!.start,to:_range!.end,paymentMode:pm); _g3b=await svc.compute(from:_range!.start,to:_range!.end,paymentMode:pm);} catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('GST calc error: $e')));} finally { if(mounted) setState(()=>_loading=false);} }
-	Widget _gstr1Table(){ final g=_g1; if(g==null) return const SizedBox.shrink(); return DataTable(columns: const [ DataColumn(label: Text('Section')), DataColumn(label: Text('Invoices')), DataColumn(label: Text('Taxable Value')), DataColumn(label: Text('Tax Amount')), ], rows: [ DataRow(cells:[const DataCell(Text('B2B')), DataCell(Text('${g.b2bCount}')), DataCell(Text('₹${g.b2bTaxable.toStringAsFixed(0)}')), DataCell(Text('—'))]), DataRow(cells:[const DataCell(Text('B2C')), DataCell(Text('${g.b2cCount}')), DataCell(Text('₹${g.b2cTaxable.toStringAsFixed(0)}')), DataCell(Text('—'))]), DataRow(cells:[const DataCell(Text('Zero Rated')), DataCell(Text('${g.zeroCount}')), DataCell(Text('₹${g.zeroRated.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('Exempt / Nil')), DataCell(Text('${g.exemptCount}')), DataCell(Text('₹${g.exempt.toStringAsFixed(0)}')), const DataCell(Text('0'))]), ]); }
-	Widget _gstr3bTable(){ final g=_g3b; if(g==null) return const SizedBox.shrink(); return SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [ DataColumn(label: Text('3.1 Section')), DataColumn(label: Text('Taxable Value')), DataColumn(label: Text('Tax')) ], rows: [ DataRow(cells:[const DataCell(Text('Outward Taxable')), DataCell(Text('₹${g.outwardTaxable.toStringAsFixed(0)}')), DataCell(Text('₹${g.taxOnOutward.toStringAsFixed(0)}'))]), DataRow(cells:[const DataCell(Text('Zero Rated')), DataCell(Text('₹${g.outwardZeroRated.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('Exempt/Nil')), DataCell(Text('₹${g.outwardExemptNil.toStringAsFixed(0)}')), const DataCell(Text('0'))]), DataRow(cells:[const DataCell(Text('RCM Inward Taxable')), DataCell(Text('₹${g.inwardReverseChargeTaxable.toStringAsFixed(0)}')), DataCell(Text('₹${g.taxOnRCM.toStringAsFixed(0)}'))]), DataRow(cells:[const DataCell(Text('Eligible ITC')), DataCell(Text('₹${g.totalEligibleITC.toStringAsFixed(0)}')), const DataCell(Text('-'))]), DataRow(cells:[const DataCell(Text('Ineligible ITC')), DataCell(Text('₹${g.itcIneligible.toStringAsFixed(0)}')), const DataCell(Text('-'))]), ])); }
-	@override Widget build(BuildContext context){ return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[ Row(children:[ const Icon(Icons.assignment_outlined), const SizedBox(width:8), Text('GST Reports', style: Theme.of(context).textTheme.titleMedium), const Spacer(), DropdownButton<String>(value:_paymentModeFilter, items: const ['All','Cash','UPI','Card'].map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(), onChanged:(v){ if(v!=null){ setState(()=>_paymentModeFilter=v); _compute();}}), const SizedBox(width:8), OutlinedButton.icon(onPressed:_pickRange, icon: const Icon(Icons.date_range), label: Text(_range==null? 'Select Range' : '${_range!.start.toString().split(' ').first} → ${_range!.end.toString().split(' ').first}')), const SizedBox(width:8), IconButton(onPressed:_compute, tooltip:'Refresh', icon: const Icon(Icons.refresh)), ]), const SizedBox(height:8), TabBar(controller:_tab, labelColor: Theme.of(context).colorScheme.primary, tabs: const [Tab(text:'GSTR-1'), Tab(text:'GSTR-3B')]), SizedBox(height:260, child: _loading ? const Center(child:CircularProgressIndicator()) : TabBarView(controller:_tab, children:[ SingleChildScrollView(child:_gstr1Table()), SingleChildScrollView(child:_gstr3bTable()) ])), ]))); }
-	@override void dispose(){ _tab.dispose(); super.dispose(); }
+class _DynamicGstReportsCard extends StatelessWidget {
+	const _DynamicGstReportsCard();
+	@override
+	Widget build(BuildContext context) {
+		return Card(
+			child: Padding(
+				padding: const EdgeInsets.all(16),
+				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+					Row(children:[ const Icon(Icons.assignment_outlined), const SizedBox(width:8), Text('GST Reports', style: Theme.of(context).textTheme.titleMedium) ]),
+					const SizedBox(height: 12),
+					const Text('Detailed GST computations removed (service file deleted).'),
+					const SizedBox(height: 8),
+					const Text('Restore by re-adding gstr3b_service.dart or integrating backend API.'),
+				]),
+			),
+		);
+	}
 }
 
 class _PnLCard extends StatelessWidget {

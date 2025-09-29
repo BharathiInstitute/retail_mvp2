@@ -289,7 +289,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _from,
+                          value: _from,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -300,7 +300,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _to,
+                          value: _to,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),

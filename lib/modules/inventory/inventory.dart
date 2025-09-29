@@ -17,6 +17,7 @@ import 'audit_screen.dart';
 import 'stock_movements_screen.dart';
 import 'transfers_screen.dart';
 import 'inventory_sheet_page.dart';
+import 'invoice_analysis_page.dart';
 
 // -------------------- Inventory Root Screen (Tabs) --------------------
 class InventoryScreen extends StatefulWidget {
@@ -191,6 +192,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
             ),
             icon: const Icon(Icons.grid_on_outlined),
             label: const Text('Update Sheet'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const InvoiceAnalysisPage()),
+            ),
+            icon: const Icon(Icons.analytics_outlined),
+            label: const Text('Invoice Analysis'),
           ),
         ]),
         const SizedBox(height: 12),

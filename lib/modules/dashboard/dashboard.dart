@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:retail_mvp2/core/auth/auth.dart';
+import 'dashboard_providers.dart';
 
 // Consolidated Dashboard module in a single file.
 // Includes DashboardScreen and all helper widgets.
@@ -16,50 +17,49 @@ class DashboardScreen extends ConsumerWidget {
 		final _ = ref.watch(authStateProvider);
 	// Role-based UI removed; full owner view shown for all users.
 
-		// Demo data: revenue trends
-		final todayTrend = [1200.0, 2400.0, 3800.0, 5200.0, 6900.0, 8500.0];
-		final weekTrend = [32000.0, 41000.0, 52000.0, 61000.0, 74000.0, 87000.0, 96000.0];
-		final monthTrend = [110000.0, 150000.0, 210000.0, 300000.0, 420000.0, 520000.0, 612431.0];
+		final salesAgg = ref.watch(salesAggregateProvider);
 
-		// Top products table data
-		final topProducts = const [
-			_P(name: 'Organic Almonds 500g', units: 128, revenue: 17920.0),
-			_P(name: 'Arabica Coffee 1kg', units: 96, revenue: 28800.0),
-			_P(name: 'Dark Chocolate 70% 100g', units: 210, revenue: 31500.0),
-			_P(name: 'Olive Oil Extra Virgin 1L', units: 74, revenue: 25160.0),
-			_P(name: 'Granola Honey Nut 750g', units: 88, revenue: 21120.0),
-		];
+		final topProductsAsync = ref.watch(topSellingProductsProvider);
+		final alertsAsync = ref.watch(inventoryAlertsProvider);
 
-		// Alerts table data
-		final alerts = const [
-			_A(product: 'Arabica Coffee 1kg', sku: 'COF-1KG', stock: 6, expiry: '—', status: 'Low Stock'),
-			_A(product: 'Granola Honey Nut 750g', sku: 'GRN-750', stock: 3, expiry: '—', status: 'Low Stock'),
-			_A(product: 'Greek Yogurt 200g', sku: 'YGT-200', stock: 18, expiry: '5 days', status: 'Near Expiry'),
-			_A(product: 'Protein Bar Choco 60g', sku: 'PRB-060', stock: 24, expiry: '9 days', status: 'Near Expiry'),
-		];
-
-		// Daily revenue vs target
+		// Daily revenue vs target (target static demo, actual from sales aggregate)
 		const dailyTarget = 10000.0;
-		const dailyActual = 8500.0;
+		final double dailyActual = salesAgg.asData?.value['today'] ?? 0;
 
-		// Payment split
-		const splitCash = 40.0, splitUpi = 35.0, splitCard = 25.0; // percentages
+		// Payment split (live from ledger)
+		final splitAsync = ref.watch(paymentSplitProvider);
 
 		final page = Padding(
 			padding: const EdgeInsets.all(16),
 			child: LayoutBuilder(builder: (context, c) {
 				final isWide = c.maxWidth >= 1100;
 
-				final summary = _SummaryRow(
-					today: todayTrend,
-					week: weekTrend,
-					month: monthTrend,
+				final summary = salesAgg.when(
+					data: (m) => _SummaryRow(
+						 today: [0, m['today'] ?? 0],
+						 week: [0, m['week'] ?? 0],
+						 month: [0, m['month'] ?? 0],
+					),
+					loading: () => const SizedBox(height: 90, child: Center(child: CircularProgressIndicator())),
+					error: (e,_) => SizedBox(height: 90, child: Center(child: Text('Error loading sales: $e'))),
 				);
 
-				final topProductsTable = _TopProductsTable(rows: topProducts);
-				final alertsTable = _AlertsTable(rows: alerts);
+				final topProductsTable = topProductsAsync.when(
+				  data: (rows) => _TopProductsTable(rows: [for (final r in rows) _P(name: r['name'] as String, units: (r['units'] as double).round(), revenue: r['revenue'] as double)]),
+				  loading: () => const SizedBox(height: 180, child: Center(child: CircularProgressIndicator())),
+				  error: (e,_) => SizedBox(height: 80, child: Center(child: Text('Top products error: $e'))),
+				);
+				final alertsTable = alertsAsync.when(
+				  data: (rows) => _AlertsTable(rows: [for (final r in rows) _A(product: r['product'] as String, sku: r['sku'] as String, stock: r['stock'] as int, expiry: r['expiry'] as String, status: r['status'] as String)]),
+				  loading: () => const SizedBox(height: 160, child: Center(child: CircularProgressIndicator())),
+				  error: (e,_) => SizedBox(height: 80, child: Center(child: Text('Alerts error: $e'))),
+				);
 				final revenueVsTarget = _RevenueVsTargetChart(actual: dailyActual, target: dailyTarget);
-				final paymentSplit = _PaymentSplitDonut(cash: splitCash, upi: splitUpi, card: splitCard);
+				final paymentSplit = splitAsync.when(
+				  data: (m) => _PaymentSplitDonut(cash: m['cash'] ?? 0, upi: m['upi'] ?? 0, card: m['card'] ?? 0),
+				  loading: () => const SizedBox(height: 200, child: Center(child: CircularProgressIndicator())),
+				  error: (e,_) => SizedBox(height: 80, child: Center(child: Text('Payment split error: $e'))),
+				);
 				final quickLinks = _QuickLinks(onGo: (r) => context.go(r));
 				final export = const _ExportRow();
 

@@ -432,7 +432,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 200,
           child: DropdownButtonFormField<PurchaseType>(
-            initialValue: type,
+            value: type,
             items: PurchaseType.values
                 .map((t) => DropdownMenuItem(value: t, child: Text(_purchaseTypeLabel(t))))
                 .toList(),
@@ -465,7 +465,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 160,
           child: DropdownButtonFormField<String>(
-            initialValue: paymentMode,
+            value: paymentMode,
             items: const [
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
               DropdownMenuItem(value: 'Bank', child: Text('Bank')),
@@ -550,7 +550,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           SizedBox(
             width: 120,
             child: DropdownButtonFormField<int>(
-              initialValue: r.gstRate,
+              value: r.gstRate,
               items: const [0, 5, 12, 18, 28]
                   .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
                   .toList(),
@@ -775,7 +775,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
         if (current.isNotEmpty && !items.contains(current)) items.add(current);
         return DropdownButtonFormField<String>(
           isExpanded: true,
-            initialValue: current.isEmpty ? null : current,
+            value: current.isEmpty ? null : current,
             items: items
                 .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                 .toList(),

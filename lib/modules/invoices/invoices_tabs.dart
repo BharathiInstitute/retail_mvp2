@@ -1,38 +1,76 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'invoices.dart';
 import 'purchse_invoice.dart';
 import 'package:retail_mvp2/dev/gstr3b_demo_seed.dart';
-import '../accounting/gstr3b_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class InvoicesTabsScreen extends StatelessWidget {
+// Persist the last selected tab index across navigation using Riverpod.
+final invoicesTabIndexProvider = StateProvider<int>((ref) => 0);
+
+class InvoicesTabsScreen extends ConsumerStatefulWidget {
   const InvoicesTabsScreen({super.key});
+  @override
+  ConsumerState<InvoicesTabsScreen> createState() => _InvoicesTabsScreenState();
+}
+
+class _InvoicesTabsScreenState extends ConsumerState<InvoicesTabsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = ref.read(invoicesTabIndexProvider);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: initial);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return; // wait until settled
+      final current = ref.read(invoicesTabIndexProvider);
+      if (current != _tabController.index) {
+        ref.read(invoicesTabIndexProvider.notifier).state = _tabController.index;
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant InvoicesTabsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If provider changed externally (unlikely), sync controller.
+    final target = ref.read(invoicesTabIndexProvider);
+    if (target != _tabController.index) {
+      _tabController.index = target;
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const TabBar(
-            isScrollable: false,
-            tabs: [
-              Tab(text: 'Sales'),
-              Tab(text: 'Purchases'),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TabBar(
+          controller: _tabController,
+          isScrollable: false,
+          tabs: const [
+            Tab(text: 'Sales'),
+            Tab(text: 'Purchases'),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: const [
+              _SalesTab(),
+              _PurchasesTab(),
             ],
           ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: TabBarView(
-              children: const [
-                _SalesTab(),
-                _PurchasesTab(),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -55,31 +93,12 @@ class _SalesTab extends StatelessWidget {
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton.icon(onPressed: () => _seed(context), icon: const Icon(Icons.cloud_download_outlined), label: const Text('Seed Demo Invoices')),
           FilledButton.tonalIcon(onPressed: () async {
-            final svc = Gstr3bService();
-            final now = DateTime.now();
-            final from = DateTime(now.year, now.month, 1);
-            final to = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
-            final s = await svc.compute(from: from, to: to);
             if (!context.mounted) return;
-            showDialog(context: context, builder: (_) => AlertDialog(title: const Text('GSTR-3B Summary'), content: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('3.1(a) Taxable Value: ₹${s.outwardTaxable.toStringAsFixed(2)}'),
-              Text('3.1(b) Zero Rated: ₹${s.outwardZeroRated.toStringAsFixed(2)}'),
-              Text('3.1(c) Exempt/Nil: ₹${s.outwardExemptNil.toStringAsFixed(2)}'),
-              Text('3.1(d) RCM Inward Taxable: ₹${s.inwardReverseChargeTaxable.toStringAsFixed(2)}'),
-              const SizedBox(height: 8),
-              Text('Tax on Outward: ₹${s.taxOnOutward.toStringAsFixed(2)}'),
-              Text('Tax on RCM (Payable): ₹${s.taxOnRCM.toStringAsFixed(2)}'),
-              const Divider(),
-              Text('Eligible ITC (Inputs CGST): ₹${s.itcInputsCgst.toStringAsFixed(2)}'),
-              Text('Eligible ITC (Inputs SGST): ₹${s.itcInputsSgst.toStringAsFixed(2)}'),
-              Text('Eligible ITC (Inputs IGST): ₹${s.itcInputsIgst.toStringAsFixed(2)}'),
-              Text('Capital Goods ITC: ₹${s.itcCapitalGoods.toStringAsFixed(2)}'),
-              Text('RCM Eligible ITC: ₹${s.itcInwardRCMEligible.toStringAsFixed(2)}'),
-              Text('Ineligible ITC: ₹${s.itcIneligible.toStringAsFixed(2)}'),
-              const SizedBox(height: 8),
-              Text('Total Eligible ITC: ₹${s.totalEligibleITC.toStringAsFixed(2)}'),
-            ])), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]));
-          }, icon: const Icon(Icons.summarize_outlined), label: const Text('Compute GSTR-3B')),
+            showDialog(context: context, builder: (_) => const AlertDialog(
+              title: Text('GSTR-3B Summary'),
+              content: Text('GST computation service removed. Reintroduce gstr3b_service.dart to enable.'),
+            ));
+          }, icon: const Icon(Icons.summarize_outlined), label: const Text('Compute GSTR-3B (Disabled)')),
         ]),
         const SizedBox(height: 12),
         const Expanded(child: InvoicesListScreen()),

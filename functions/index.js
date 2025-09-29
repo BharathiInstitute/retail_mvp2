@@ -1,8 +1,11 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
-const vision = require('@google-cloud/vision');
-const { VertexAI } = require('@google-cloud/vertexai');
+// Lazy/optional dependencies (Vision + Vertex AI). They may not be installed in all environments.
+let vision;
+let VertexAI;
+try { vision = require('@google-cloud/vision'); } catch(e){ console.warn('vision module unavailable (optional):', e.message); }
+try { ({ VertexAI } = require('@google-cloud/vertexai')); } catch(e){ console.warn('vertexai module unavailable (optional):', e.message); }
 
 admin.initializeApp();
 // Load additional simple invoice workflow functions (added separately)
@@ -158,6 +161,7 @@ exports.analyzeInvoice = functions.region('us-central1').https.onCall(async (dat
 				if (useVision) {
 					// Try OCR with Vision but don't fail overall if Vision is disabled
 					try {
+						if(!vision) throw new Error('vision module not installed');
 						const client = new vision.ImageAnnotatorClient();
 						const [result] = await client.documentTextDetection({ image: { content: imgBuffer } });
 						ocrText = (result.fullTextAnnotation && result.fullTextAnnotation.text) || '';
@@ -174,6 +178,7 @@ exports.analyzeInvoice = functions.region('us-central1').https.onCall(async (dat
 
 			// Gemini via Vertex AI (with graceful fallback)
 				try {
+				if(!VertexAI) throw new Error('vertexai module not installed');
 				const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
 				const location = process.env.VERTEX_LOCATION || 'us-central1';
 				const vertex = new VertexAI({ project, location });
@@ -232,6 +237,134 @@ exports.analyzeInvoice = functions.region('us-central1').https.onCall(async (dat
 				? 'Verify Cloud Vision API and Vertex AI are enabled, and the Cloud Functions service account has access.'
 				: undefined;
 			throw new functions.https.HttpsError('internal', hint ? `${msg} — ${hint}` : msg);
+	}
+});
+
+// -------------------------------------------------------------
+// createUserAccount (callable)
+// -------------------------------------------------------------
+// Creates a Firebase Auth user + (optionally) the Firestore /users doc
+// and assigns a role via custom claims. The client currently creates
+// the Firestore doc itself; this function is the authoritative place
+// for secure Auth user + claims creation. It is idempotent per email.
+// -------------------------------------------------------------
+exports.createUserAccount = functions.region('us-central1').https.onCall(async (data, context) => {
+	try {
+		console.log('[createUserAccount] raw data keys:', Object.keys(data || {}));
+		if (!context.auth) {
+			throw new functions.https.HttpsError('unauthenticated', 'Login required');
+		}
+
+		const callerClaims = context.auth.token || {};
+		const allowedRoles = new Set(['owner', 'manager']); // Roles allowed to create users
+		let callerRole = callerClaims.role;
+
+		// Fallback: if custom claim not present, look up Firestore /users doc
+		if (!callerRole) {
+			try {
+				const callerDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
+				callerRole = callerDoc.exists ? callerDoc.get('role') : undefined;
+			} catch (_) {
+				// ignore; will be caught by role check below
+			}
+		}
+		if (!callerRole || !allowedRoles.has(String(callerRole))) {
+			throw new functions.https.HttpsError('permission-denied', 'Insufficient privileges to create users');
+		}
+
+		const { email, password, displayName, role, stores } = data || {};
+		if (!email || !password) {
+			throw new functions.https.HttpsError('invalid-argument', 'email & password required');
+		}
+		const targetRole = role || 'clerk';
+		const roleWhitelist = new Set(['owner','manager','accountant','cashier','clerk']);
+		if (!roleWhitelist.has(targetRole)) {
+			throw new functions.https.HttpsError('invalid-argument', 'Invalid role');
+		}
+
+		// Idempotency: if user already exists by email, reuse
+		let userRecord;
+		try {
+			userRecord = await admin.auth().getUserByEmail(email);
+			console.log('[createUserAccount] existing user found for email');
+		} catch (err) {
+			// If not found, create; else rethrow
+			if (err.code !== 'auth/user-not-found') {
+				console.error('[createUserAccount] getUserByEmail failed', err);
+				throw err;
+			}
+		}
+
+		let created = false;
+		if (!userRecord) {
+			try {
+				userRecord = await admin.auth().createUser({ email, password, displayName });
+				created = true;
+				console.log('[createUserAccount] user created', userRecord.uid);
+			} catch (createErr) {
+				console.error('[createUserAccount] createUser error', createErr);
+				throw createErr;
+			}
+		} else if (displayName && userRecord.displayName !== displayName) {
+			// Sync display name if provided & changed
+			await admin.auth().updateUser(userRecord.uid, { displayName });
+		}
+
+		// Always (re)set custom claims to ensure correctness
+		try {
+			await admin.auth().setCustomUserClaims(userRecord.uid, { role: targetRole });
+		} catch (claimsErr) {
+			console.error('[createUserAccount] setCustomUserClaims failed', claimsErr);
+			throw claimsErr;
+		}
+
+		// Optionally ensure Firestore profile exists (idempotent)
+		const usersCol = admin.firestore().collection('users');
+		const userDocRef = usersCol.doc(userRecord.uid);
+		const userDoc = await userDocRef.get();
+		const now = admin.firestore.FieldValue.serverTimestamp();
+		if (!userDoc.exists) {
+			await userDocRef.set({
+				email,
+				displayName: displayName || email.split('@')[0],
+				role: targetRole,
+				stores: Array.isArray(stores) ? stores.filter(s => typeof s === 'string' && s.trim()) : [],
+				createdAt: now,
+				updatedAt: now,
+			});
+		} else {
+			// Keep role in sync if changed via this path
+			const updates = { updatedAt: now };
+			if (userDoc.get('role') !== targetRole) updates.role = targetRole;
+			if (displayName && userDoc.get('displayName') !== displayName) updates.displayName = displayName;
+			if (Object.keys(updates).length > 1) await userDocRef.update(updates);
+		}
+
+		return { uid: userRecord.uid, created, role: targetRole, claimsSet: true };
+	} catch (err) {
+		console.error('createUserAccount error', err);
+		if (err instanceof functions.https.HttpsError) throw err;
+		const msg = err && err.message ? err.message : String(err);
+		// Map common auth errors to HttpsError
+		if (/email-already-in-use|email-already-exists/i.test(msg)) {
+			throw new functions.https.HttpsError('already-exists', 'Email already in use');
+		}
+		if (/invalid-password|password.*6 characters/i.test(msg)) {
+			throw new functions.https.HttpsError('invalid-argument', 'Password must be at least 6 characters');
+		}
+		if (/invalid-email/i.test(msg)) {
+			throw new functions.https.HttpsError('invalid-argument', 'Invalid email');
+		}
+		if (/operation-not-allowed|OPERATION_NOT_ALLOWED/i.test(msg)) {
+			throw new functions.https.HttpsError('failed-precondition', 'Auth provider not enabled (Email/Password)');
+		}
+		if (/uid-already-exists/i.test(msg)) {
+			throw new functions.https.HttpsError('already-exists', 'UID already exists');
+		}
+		if (/setCustomUserClaims/i.test(msg)) {
+			throw new functions.https.HttpsError('internal', 'Failed to set custom claims');
+		}
+		throw new functions.https.HttpsError('internal', msg);
 	}
 });
 

@@ -461,7 +461,7 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 						),
 						const SizedBox(height: 8),
 						DropdownButtonFormField<LoyaltyStatus>(
-							initialValue: status,
+							value: status,
 							items: const [
 								DropdownMenuItem(value: LoyaltyStatus.bronze, child: Text('Bronze')),
 								DropdownMenuItem(value: LoyaltyStatus.silver, child: Text('Silver')),
