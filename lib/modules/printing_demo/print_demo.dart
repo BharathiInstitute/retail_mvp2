@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+import 'dart:convert';
+=======
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
 import 'package:flutter/material.dart';
 
 /// Legacy printing demo removed. This placeholder kept only so existing routes don't break.
