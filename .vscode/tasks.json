@@ -27,6 +27,12 @@
 			"type": "shell",
 			"command": "flutter analyze",
 			"group": "build"
+		},
+		{
+			"label": "Analyze before git push",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
 		}
 	]
 }

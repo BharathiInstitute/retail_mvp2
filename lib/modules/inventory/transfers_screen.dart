@@ -161,9 +161,9 @@ final _transfersProvider = StreamProvider.autoDispose<List<TransferRecord>>((ref
 
 TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
-  DateTime? _ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+  DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return TransferRecord(
-    date: _ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
     from: (m['from'] ?? '') as String,
@@ -173,7 +173,7 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     storeAfter: (m['storeAfter'] as num?)?.toInt(),
     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
     totalAfter: (m['totalAfter'] as num?)?.toInt(),
-    updatedAt: _ts(m['updatedAt']),
+    updatedAt: tsLocal(m['updatedAt']),
     updatedBy: m['updatedBy'] as String?,
   );
 }
@@ -387,7 +387,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     return;
                   }
                   if (mounted) {
-                    Navigator.pop(context); // stream refresh
+                    final nav = Navigator.of(context);
+                    if (nav.mounted) nav.pop(); // stream refresh
                   }
                 },
           child: _submitting

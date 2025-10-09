@@ -3,14 +3,15 @@
 // Models & enums live in pos.dart to allow reuse without pulling in UI code.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 
 import 'invoice_models.dart';
 import 'invoice_pdf.dart'; // For PDF generation (email attachment only; download removed)
@@ -19,6 +20,22 @@ import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav.dart';
 import '../inventory/inventory_repository.dart';
 import 'pos_checkout.dart';
+import 'credit_service.dart';
+import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
+import 'windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
+import 'web_print_fallback_stub.dart' if (dart.library.js) 'web_print_fallback.dart';
+
+// Debug/feature flags (set with --dart-define=KEY=value)
+const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);
+const bool kDisableLoyaltyTx = bool.fromEnvironment('DISABLE_LOYALTY_TX', defaultValue: false);
+const bool kPosVerbose = bool.fromEnvironment('POS_DEBUG_VERBOSE', defaultValue: false);
+const bool kSafeWindowsSkipFirestore = bool.fromEnvironment('SAFE_WINDOWS_SKIP_FIRESTORE', defaultValue: true); // default true until crash source isolated
+// Enable or disable direct hidden PowerShell printing on Windows (fallback / alternative to backend service)
+const bool kEnableDirectPsPrint = bool.fromEnvironment('ENABLE_DIRECT_PS_PRINT', defaultValue: true);
+// Web: if true, open the browser's print dialog; if false, send to backend silently
+const bool kWebOpenBrowserPrint = bool.fromEnvironment('WEB_OPEN_BROWSER_PRINT', defaultValue: false);
+// Web strict-silent: when true, never open browser print dialog (no fallback); fail with a message instead
+const bool kWebStrictSilent = bool.fromEnvironment('WEB_STRICT_SILENT', defaultValue: false);
 
 class PosPage extends StatefulWidget {
   const PosPage({super.key});
@@ -61,8 +78,7 @@ class _PosPageState extends State<PosPage> {
   final TextEditingController _redeemPointsCtrl = TextEditingController(text: '0');
   double _availablePoints = 0; // loaded from customer doc when selected
   static const double _pointValue = 1; // 1 point = ₹1 (adjust if needed or load from settings)
-  // Scroll controller for summary/payment panel (enables scrollbar & prevents overflow)
-  final ScrollController _summaryScrollCtrl = ScrollController();
+  // Scrollbar for summary panel now managed inside CheckoutPanel; local controller removed.
   // Active subscription to currently selected customer's document for live loyalty point updates
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _customerDocSub;
 
@@ -86,6 +102,8 @@ class _PosPageState extends State<PosPage> {
   void initState() {
     super.initState();
     _backendBase = _resolveBackendBase();
+  // On Windows desktop attempt to auto-start backend if not reachable.
+  ensurePrinterBackendRunning();
     selectedCustomer = customers.first;
     // Fix discount mode to Percent (discount type selector removed)
     discountType = DiscountType.percent;
@@ -106,83 +124,42 @@ class _PosPageState extends State<PosPage> {
     const envUrl = String.fromEnvironment('PRINTER_BACKEND_URL', defaultValue: '');
     if (envUrl.isNotEmpty) return envUrl;
     if (kIsWeb) {
-      final scheme = Uri.base.scheme == 'https' ? 'https' : 'http';
+      // If the app is served over HTTPS and no explicit backend URL is provided,
+      // do NOT default to https://host:5005 (likely not available). Leave empty to force fallback.
+      if (Uri.base.scheme == 'https') {
+        return '';
+      }
       final host = Uri.base.host.isEmpty ? 'localhost' : Uri.base.host;
       const port = 5005;
-      return '$scheme://$host:$port';
+      return 'http://$host:$port';
     }
     return 'http://localhost:5005';
   }
 
-  Future<void> _loadCustomersOnce() async {
-    try {
-      final first = await _customerStream.first;
-      if (mounted) {
-        setState(() {
-          customers = first;
-          if (!customers.contains(selectedCustomer)) {
-            selectedCustomer = customers.first;
-          }
-        });
-      }
-    } catch (_) {
-      // ignore failures; UI will still use stream builder later
-    }
-  }
+  bool get _canUseBackend => _backendBase.isNotEmpty;
 
-  @override
-  void dispose() {
-    _finalizeTimer?.cancel();
-    _customerDocSub?.cancel();
-    _scannerFocusNode.dispose();
-    barcodeCtrl.dispose();
-    searchCtrl.dispose();
-    customerSearchCtrl.dispose();
-    discountCtrl.dispose();
-    _redeemPointsCtrl.dispose();
-    _summaryScrollCtrl.dispose();
-    super.dispose();
-  }
-
-  // Stream CRM customers from Firestore `customers` collection
+  // Live stream of CRM customers from Firestore
   Stream<List<Customer>> get _customerStream => FirebaseFirestore.instance
       .collection('customers')
       .snapshots()
-      .map((snap) {
-        final list = snap.docs.map((d) => Customer.fromDoc(d)).toList();
-        list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-        return [walkIn, ...list];
-      });
+      .map((s) {
+    final list = s.docs.map((d) => Customer.fromDoc(d)).toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  });
 
-  // Print Settings UI removed; printing now sends to backend default printer.
-  Future<void> _quickPrintFromPanel() async {
-    if (_isPrinting) return;
-    await _oneClickPrintCurrentCart();
-  }
-
-  Future<void> _oneClickPrintCurrentCart() async {
-    if (cart.isEmpty) {
-      _snack('Cart empty');
-      return;
-    }
-    setState(() => _isPrinting = true);
+  Future<void> _loadCustomersOnce() async {
     try {
-      final invoice = _buildTempInvoiceForPrint();
-      final pdfBytes = await _buildThermalPdf(invoice, widthMm: 48, marginMm: 4, density: 8);
-      final uri = Uri.parse('$_backendBase/print-pdf');
-      final req = http.MultipartRequest('POST', uri)
-        ..files.add(http.MultipartFile.fromBytes('file', pdfBytes, filename: 'pos_receipt.pdf'));
-      final streamed = await req.send();
-      final resp = await http.Response.fromStream(streamed);
-      if (resp.statusCode == 200) {
-        _snack('Printed');
-      } else {
-        _snack('Print failed: ${resp.statusCode}');
-      }
+      final first = await _customerStream.first;
+      if (!mounted) return;
+      setState(() {
+        customers = [walkIn, ...first.where((c) => c.id != walkIn.id)];
+        if (!customers.any((c) => c.id == (selectedCustomer?.id ?? ''))) {
+          selectedCustomer = customers.first;
+        }
+      });
     } catch (e) {
-      _snack('Print error: $e');
-    } finally {
-      if (mounted) setState(() => _isPrinting = false);
+      if (kPosVerbose) debugPrint('[POS] customers preload failed: $e');
     }
   }
 
@@ -232,49 +209,92 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  Future<Uint8List> _buildThermalPdf(InvoiceData data, {double widthMm = 48, double marginMm = 4, int density = 8}) async {
-    final doc = pw.Document();
-    final fmtDate = '${data.timestamp.year.toString().padLeft(4,'0')}-${data.timestamp.month.toString().padLeft(2,'0')}-${data.timestamp.day.toString().padLeft(2,'0')}';
-    final fmtTime = '${data.timestamp.hour.toString().padLeft(2,'0')}:${data.timestamp.minute.toString().padLeft(2,'0')}:${data.timestamp.second.toString().padLeft(2,'0')}';
-    final pageFormat = PdfPageFormat(widthMm * PdfPageFormat.mm, double.maxFinite, marginAll: marginMm * PdfPageFormat.mm);
-    doc.addPage(pw.MultiPage(
-      pageFormat: pageFormat,
-      build: (ctx) {
-        final widgets = <pw.Widget>[];
-        widgets.add(pw.Center(child: pw.Text('RECEIPT', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))));
-        widgets.add(pw.SizedBox(height: 4));
-        widgets.add(pw.Text('No: ${data.invoiceNumber}', style: const pw.TextStyle(fontSize: 8)));
-        widgets.add(pw.Text('Date: $fmtDate $fmtTime', style: const pw.TextStyle(fontSize: 8)));
-        widgets.add(pw.Text('Cust: ${data.customerName}', style: const pw.TextStyle(fontSize: 8)));
-        if ((data.customerPhone ?? '').isNotEmpty) widgets.add(pw.Text('Ph: ${data.customerPhone}', style: const pw.TextStyle(fontSize: 8)));
-        widgets.add(pw.Divider());
-        for (final l in data.lines) {
-          widgets.add(pw.Row(children:[
-            pw.Expanded(child: pw.Text(l.name, style: const pw.TextStyle(fontSize: 8))),
-            pw.Text('x${l.qty}', style: const pw.TextStyle(fontSize: 8)),
-          ]));
-          widgets.add(pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children:[
-            pw.Text('₹${l.unitPrice.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
-            if (l.discount>0) pw.Text('-${l.discount.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
-            pw.Text('₹${l.lineTotal.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
-          ]));
+  // One-click print from the right panel without creating an invoice record.
+  Future<void> _quickPrintFromPanel() async {
+    if (cart.isEmpty) return _snack('Cart empty');
+    if (_isPrinting) return;
+    setState(() => _isPrinting = true);
+    try {
+      final invoice = _buildTempInvoiceForPrint();
+      bool directOk = false;
+      if (kEnableDirectPsPrint) {
+        try {
+          directOk = await directWindowsPrintInvoice(invoice);
+        } catch (_) {
+          directOk = false;
         }
-        widgets.add(pw.Divider());
-        pw.Widget kv(String k, String v,{bool b=false}) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children:[pw.Text(k,style: pw.TextStyle(fontSize:8,fontWeight:b?pw.FontWeight.bold:pw.FontWeight.normal)), pw.Text(v,style: pw.TextStyle(fontSize:8,fontWeight:b?pw.FontWeight.bold:pw.FontWeight.normal))]);
-        widgets.add(kv('Subtotal','₹${data.subtotal.toStringAsFixed(2)}'));
-        widgets.add(kv('Discount','-₹${data.discountTotal.toStringAsFixed(2)}'));
-        if (data.redeemedValue>0) widgets.add(kv('Redeemed','-₹${data.redeemedValue.toStringAsFixed(2)}'));
-        widgets.add(kv('GST','₹${data.taxTotal.toStringAsFixed(2)}'));
-        widgets.add(pw.Divider());
-        widgets.add(kv('TOTAL','₹${data.grandTotal.toStringAsFixed(2)}', b:true));
-        widgets.add(kv('Paid', data.paymentMode));
-        widgets.add(pw.SizedBox(height:4));
-        widgets.add(pw.Text('Thank you!', style: const pw.TextStyle(fontSize: 8)));
-        return widgets;
       }
-    ));
-    return doc.save();
+      if (directOk) {
+        _snack('Invoice sent to printer (direct)');
+        return;
+      }
+
+      if (kIsWeb) {
+        // Web: try backend if available, then always fall back to browser print.
+        bool backendOk = false;
+        if (_canUseBackend) {
+          try {
+            try {
+              await http.get(Uri.parse('$_backendBase/health')).timeout(const Duration(seconds: 2));
+            } catch (_) {}
+            final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'invoice': invoice.toJson()}));
+            if (resp.statusCode == 200) {
+              backendOk = true;
+              try {
+                final data = jsonDecode(resp.body) as Map<String, dynamic>;
+                final msg = (data['message'] as String?) ?? 'Invoice print sent';
+                final usedPrinter = data['usedPrinter'];
+                _snack(usedPrinter != null ? '$msg (${usedPrinter.toString()})' : msg);
+              } catch (_) {
+                _snack('Invoice print sent');
+              }
+              return;
+            } else if (kPosVerbose) {
+              debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
+            }
+          } catch (e) {
+            if (kPosVerbose) debugPrint('[POS][web] quick print backend error: $e');
+          }
+        }
+        // Not printed via backend => try browser dialog unless strict silent is enabled
+        if (!backendOk) {
+          if (kWebStrictSilent) {
+            _snack('Silent print unavailable (backend offline)');
+          } else {
+            // Pre-open window synchronously (for popup blockers), then populate and print
+            final handle = webPrintPreopen();
+            final handled = await webPrintPopulateAndPrint(handle, invoice);
+            if (handled) {
+              _snack('Browser print opened');
+              return;
+            }
+            _snack('Print error (popup blocked?)');
+          }
+        }
+      } else {
+        // Non-web: use backend service
+        try {
+          try { await http.get(Uri.parse('$_backendBase/health')).timeout(const Duration(seconds: 2)); } catch (_) {}
+          final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'invoice': invoice.toJson()}));
+          if (resp.statusCode == 200) {
+            _snack('Invoice print sent');
+          } else {
+            _snack('Print failed (${resp.statusCode})');
+          }
+        } catch (e) {
+          if (kPosVerbose) debugPrint('[POS] quick print error: $e');
+          _snack('Print error');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
   }
+
   double get _customerPercent => selectedCustomer?.discountPercent ?? 0;
   double get discountValue {
     switch (discountType) {
@@ -328,8 +348,9 @@ class _PosPageState extends State<PosPage> {
     _holdController.resumeHeld(order);
   }
 
-  Future<void> completeSale() async {
+  Future<void> completeSale({double creditPaidInput = 0}) async {
     if (cart.isEmpty) return _snack('Cart is empty');
+    if (kPosVerbose) debugPrint('[POS] completeSale begin cartItems=${cart.length}');
     final rp = redeemedPoints;
     if (rp > _availablePoints) {
       _snack('You do not have enough points');
@@ -339,8 +360,12 @@ class _PosPageState extends State<PosPage> {
       return;
     }
 
+    // Update local stock snapshot (UI only)
     for (final item in cart.values) {
-      item.product.stock -= item.qty;
+      final newStock = item.product.stock - item.qty;
+      if (newStock >= 0) {
+        item.product.stock = newStock;
+      }
     }
 
     final discounts = lineDiscounts;
@@ -389,26 +414,121 @@ class _PosPageState extends State<PosPage> {
     );
     lastInvoice = invoice;
 
-    try {
-      final data = invoice.toJson();
-      await FirebaseFirestore.instance.collection('invoices').doc(invoice.invoiceNumber).set({
-        ...data,
-        'timestampMs': invoice.timestamp.millisecondsSinceEpoch,
-        'status': 'Paid',
-      });
-    } catch (e) {
-      // ignore persistence failure
+  final isWindows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  final skipWritesForPlatform = isWindows && kSafeWindowsSkipFirestore;
+  if (skipWritesForPlatform && kPosVerbose) debugPrint('[POS] Skipping Firestore invoice write on Windows (safe mode)');
+
+    // Determine credit mixing BEFORE invoice persistence (central helper ensures consistent math)
+    double creditAddPortion = 0;
+    double creditRepayPortion = 0;
+    double paidNow = 0;
+    double expectedNewCredit = selectedCustomer?.creditBalance ?? 0;
+    if (selectedPaymentMode == PaymentMode.credit) {
+      paidNow = creditPaidInput.clamp(0, double.infinity);
+      final existingCredit = selectedCustomer?.creditBalance ?? 0;
+      final mix = CustomerCreditService.computeCreditMix(
+        saleDue: payableTotal,
+        existingCredit: existingCredit,
+        paidNow: paidNow,
+      );
+      creditAddPortion = mix['add'] ?? 0;
+      creditRepayPortion = mix['repay'] ?? 0;
+      expectedNewCredit = mix['newCredit'] ?? existingCredit;
+      if (kPosVerbose) {
+        debugPrint('[POS][creditMix] compute due=$payableTotal existing=$existingCredit paid=$paidNow add=$creditAddPortion repay=$creditRepayPortion -> expectedNew=$expectedNewCredit');
+      }
     }
 
-    if (selectedCustomer != null && selectedCustomer!.id.isNotEmpty) {
+    if (!kDisableInvoiceWrites && !skipWritesForPlatform) {
       try {
-        await _applyLoyaltyRewardsForCustomer(invoice);
-      } catch (e) {
-        if (mounted) {
-          _snack('Loyalty update failed: $e');
+        final data = invoice.toJson();
+        if (kPosVerbose) debugPrint('[POS] writing invoice ${invoice.invoiceNumber}');
+        await FirebaseFirestore.instance.collection('invoices').doc(invoice.invoiceNumber).set({
+          ...data,
+          'timestampMs': invoice.timestamp.millisecondsSinceEpoch,
+          'status': (selectedPaymentMode == PaymentMode.credit && creditAddPortion > 0) ? 'on_credit' : 'Paid',
+          if (selectedPaymentMode == PaymentMode.credit)
+            'credit': {
+              'paidNow': paidNow,
+              'added': creditAddPortion,
+              'repaid': creditRepayPortion,
+            },
+        });
+        if (kPosVerbose) debugPrint('[POS] invoice write done');
+      } catch (e, st) {
+        if (kPosVerbose) debugPrint('[POS] invoice write error: $e\n$st');
+        // Non-fatal for POS flow
+      }
+    } else if (kPosVerbose) {
+      debugPrint('[POS] invoice writes disabled');
+      if (selectedPaymentMode == PaymentMode.credit) {
+        _snack('Invoice write skipped (debug mode) – credit still adjusting');
+      }
+    }
+
+    if (selectedPaymentMode == PaymentMode.credit) {
+      if (selectedCustomer == null || selectedCustomer!.id.isEmpty) {
+        _snack('Select a customer for credit checkout');
+      } else {
+        try {
+          await CustomerCreditService.ensureCreditField(selectedCustomer!.id);
+          if (kPosVerbose) {
+            debugPrint('[POS][creditMix] attempting adjust add=$creditAddPortion repay=$creditRepayPortion');
+          }
+          final creditResult = await CustomerCreditService.adjustForCheckout(
+            customerId: selectedCustomer!.id,
+            creditAdd: creditAddPortion,
+            creditRepay: creditRepayPortion,
+            invoiceNumber: invoice.invoiceNumber,
+          );
+          setState(() {
+            selectedCustomer = Customer(
+              id: selectedCustomer!.id,
+              name: selectedCustomer!.name,
+              email: selectedCustomer!.email,
+              phone: selectedCustomer!.phone,
+              status: selectedCustomer!.status,
+              totalSpend: selectedCustomer!.totalSpend,
+              discountPercent: selectedCustomer!.discountPercent,
+              creditBalance: creditResult.newBalance,
+            );
+          });
+          if (kPosVerbose) {
+            debugPrint('[POS][creditMix] txn result prev=${creditResult.previousBalance} new=${creditResult.newBalance} amountChanged=${creditResult.amountChanged} ledger=${creditResult.ledgerRecorded} type=${creditResult.type} expectedNew=$expectedNewCredit');
+            if ((creditResult.newBalance - expectedNewCredit).abs() > 0.01) {
+              debugPrint('[POS][creditMix][warn] mismatch expected=$expectedNewCredit actual=${creditResult.newBalance}');
+            }
+          }
+          if (creditAddPortion == 0 && creditRepayPortion == 0) {
+            _snack('Credit unchanged (fully paid) → Balance ₹${creditResult.newBalance.toStringAsFixed(2)}');
+          } else {
+            _snack('Credit updated (Add ₹${creditAddPortion.toStringAsFixed(2)}, Repay ₹${creditRepayPortion.toStringAsFixed(2)}) → Balance ₹${creditResult.newBalance.toStringAsFixed(2)}');
+          }
+        } on FirebaseException catch (e) {
+          _snack('Credit failed (${e.code})');
+          if (kPosVerbose) debugPrint('[POS][creditMix][error] FirebaseException ${e.code} ${e.message}');
+        } catch (e) {
+          _snack('Credit adjust failed: $e');
+          if (kPosVerbose) debugPrint('[POS][creditMix][error] $e');
         }
       }
     }
+
+  if (!kDisableLoyaltyTx && !skipWritesForPlatform && selectedCustomer != null && selectedCustomer!.id.isNotEmpty) {
+    try {
+      if (kPosVerbose) debugPrint('[POS] loyalty tx start for cust=${selectedCustomer!.id}');
+      await _applyLoyaltyRewardsForCustomer(invoice);
+      if (kPosVerbose) debugPrint('[POS] loyalty tx ok');
+    } catch (e, st) {
+      // This catch should normally never trigger because the method internally handles errors.
+      if (kPosVerbose) debugPrint('[POS][loyalty][outer-catch] $e\n$st');
+      if (mounted) {
+        _snack('Loyalty failed: $e');
+      }
+    }
+  } else if (kPosVerbose) {
+    debugPrint('[POS] loyalty transaction skipped');
+  }
 
     if (!mounted) return;
 
@@ -422,7 +542,8 @@ class _PosPageState extends State<PosPage> {
 
     // Direct print removed (migrated to new Node backend architecture).
 
-    showDialog(
+  if (kPosVerbose) debugPrint('[POS] showing invoice dialog');
+  showDialog(
         context: context,
         barrierDismissible: true,
         builder: (dialogCtx) => AlertDialog(
@@ -441,18 +562,65 @@ class _PosPageState extends State<PosPage> {
                   onPressed: _isPrinting ? null : () async {
                     setState(() => _isPrinting = true);
                     try {
-                      final pdfBytes = await _buildThermalPdf(invoice, widthMm: 48, marginMm: 4, density: 8);
-                      final req = http.MultipartRequest('POST', Uri.parse('$_backendBase/print-pdf'))
-                        ..files.add(http.MultipartFile.fromBytes('file', pdfBytes, filename: 'invoice_${invoice.invoiceNumber}.pdf'));
-                      final streamed = await req.send();
-                      final resp = await http.Response.fromStream(streamed);
-                      if (resp.statusCode == 200) {
-                        _snack('Invoice printed');
+                      bool directOk = false;
+                      if (kEnableDirectPsPrint) {
+                        try { directOk = await directWindowsPrintInvoice(invoice); } catch (_) { directOk = false; }
+                      }
+                      if (directOk) {
+                        _snack('Invoice printed (direct)');
+                        if (kPosVerbose) debugPrint('[POS] direct print success');
                       } else {
-                        _snack('Print failed: ${resp.statusCode}');
+                        if (kIsWeb) {
+                          // Web: try backend, then always fall back to browser print
+                          bool backendOk = false;
+                          if (_canUseBackend) {
+                            if (kPosVerbose) debugPrint('[POS] print-invoice POST');
+                            try {
+                              final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                                  headers: {'Content-Type': 'application/json'},
+                                  body: jsonEncode({'invoice': invoice.toJson()}));
+                              if (resp.statusCode == 200) {
+                                backendOk = true;
+                                _snack('Invoice printed');
+                                if (kPosVerbose) debugPrint('[POS] backend print success');
+                                return;
+                              } else if (kPosVerbose) {
+                                debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
+                              }
+                            } catch (e) {
+                              if (kPosVerbose) debugPrint('[POS][web] backend print error: $e');
+                            }
+                          }
+                          if (!backendOk) {
+                            if (kWebStrictSilent) {
+                              _snack('Silent print unavailable (backend offline)');
+                            } else {
+                              final handle = webPrintPreopen();
+                              final handled = await webPrintPopulateAndPrint(handle, invoice);
+                              if (handled) {
+                                _snack('Browser print opened');
+                                return;
+                              }
+                              _snack('Print error (popup blocked?)');
+                            }
+                          }
+                        } else {
+                          if (kPosVerbose) debugPrint('[POS] print-invoice POST');
+                          final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                              headers: {'Content-Type': 'application/json'},
+                              body: jsonEncode({'invoice': invoice.toJson()}));
+                          if (resp.statusCode == 200) {
+                            _snack('Invoice printed');
+                            if (kPosVerbose) debugPrint('[POS] backend print success');
+                          } else {
+                            _snack('Print failed: ${resp.statusCode} ${resp.body}');
+                            if (kPosVerbose) debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
+                          }
+                        }
                       }
                     } catch (e) {
-                      _snack('Print error: $e');
+                      _snack('Print error');
+                      if (kPosVerbose) debugPrint('[POS] print error: $e');
                     } finally {
                       if (mounted) setState(() => _isPrinting = false);
                     }
@@ -461,7 +629,12 @@ class _PosPageState extends State<PosPage> {
                   label: const Text('Print'),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+                  onPressed: () {
+                    // Use local navigator to avoid popping the shell root route.
+                    if (Navigator.of(dialogCtx).canPop()) {
+                      Navigator.of(dialogCtx).pop();
+                    }
+                  },
                   child: const Text('Close'),
                 ),
               ],
@@ -489,77 +662,141 @@ class _PosPageState extends State<PosPage> {
   double get subtotal => cart.values.fold(0.0, (s,it)=> s + it.product.price * it.qty);
 
   Future<void> _applyLoyaltyRewardsForCustomer(InvoiceData invoice) async {
-    final customerId = selectedCustomer?.id;
-    if (customerId == null || customerId.isEmpty) return; // walk-in
-    final fs = FirebaseFirestore.instance;
-    final settingsRef = fs.collection('settings').doc('loyalty_config');
-    final customerRef = fs.collection('customers').doc(customerId);
-    double earned = 0;
-    double newPointsTotal = 0;
-    await fs.runTransaction((tx) async {
-      final settingsSnap = await tx.get(settingsRef);
-      final settingsData = settingsSnap.data() ?? {};
-      double pointsPerCurrency = 0.01; // 1 point per 100 currency
-      final ppcRaw = settingsData['pointsPerCurrency'];
-      if (ppcRaw is num) {
-        pointsPerCurrency = ppcRaw.toDouble();
-      } else if (ppcRaw is String) {
-        pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+    try {
+      final customerId = selectedCustomer?.id;
+      if (customerId == null || customerId.isEmpty) {
+        if (kPosVerbose) debugPrint('[LOYALTY] abort: no customer');
+        return; // walk-in
       }
-      List<Map<String, dynamic>> rawTiers = [];
-      final tiersData = settingsData['tiers'];
-      if (tiersData is List) {
-        for (final t in tiersData) {
-          if (t is Map) rawTiers.add(Map<String, dynamic>.from(t));
+      final fs = FirebaseFirestore.instance;
+      final settingsRef = fs.collection('settings').doc('loyalty_config');
+      final customerRef = fs.collection('customers').doc(customerId);
+      double earned = 0;
+      double newPointsTotal = 0;
+      if (kPosVerbose) debugPrint('[LOYALTY] start invoice=${invoice.invoiceNumber} grand=${invoice.grandTotal} cust=$customerId');
+      if (kPosVerbose) {
+        try {
+          final u = FirebaseAuth.instance.currentUser;
+          debugPrint('[LOYALTY][auth] user=' + (u==null ? 'null' : '${u.uid} email=${u.email}'));
+        } catch (e) {
+          debugPrint('[LOYALTY][auth] error $e');
         }
       }
-      rawTiers.sort((a, b) {
-        final am = (a['minSpend'] is num) ? (a['minSpend'] as num).toDouble() : double.tryParse('${a['minSpend']}') ?? 0;
-        final bm = (b['minSpend'] is num) ? (b['minSpend'] as num).toDouble() : double.tryParse('${b['minSpend']}') ?? 0;
-        return am.compareTo(bm);
-      });
-      final custSnap = await tx.get(customerRef);
-      final custData = custSnap.data() ?? {};
-      final prevPointsRaw = custData['loyaltyPoints'];
-      double prevPoints = 0;
-      if (prevPointsRaw is num) prevPoints = prevPointsRaw.toDouble();
-      final prevSpendRaw = custData['totalSpend'];
-      double prevSpend = 0;
-      if (prevSpendRaw is num) prevSpend = prevSpendRaw.toDouble();
-      earned = (invoice.grandTotal * pointsPerCurrency);
-      final redeemedPts = invoice.redeemedPoints;
-      final afterRedeem = (prevPoints - redeemedPts).clamp(0, double.infinity);
-      newPointsTotal = afterRedeem + earned;
-      final newSpendTotal = prevSpend + invoice.grandTotal;
-      String? newStatus;
-      double? newDiscount;
-      for (final tier in rawTiers) {
-        final minSpend = (tier['minSpend'] is num) ? (tier['minSpend'] as num).toDouble() : double.tryParse('${tier['minSpend']}') ?? 0;
-        if (newSpendTotal >= minSpend) {
-          newStatus = (tier['name'] ?? '').toString().toLowerCase();
-          final discRaw = tier['discount'];
-          if (discRaw is num) newDiscount = discRaw.toDouble();
+      bool txSucceeded = false;
+      dynamic lastError;
+      try {
+        await fs.runTransaction((tx) async {
+          final settingsSnap = await tx.get(settingsRef);
+          final settingsData = settingsSnap.data() ?? {};
+          double pointsPerCurrency = 0.01;
+          final ppcRaw = settingsData['pointsPerCurrency'];
+          if (ppcRaw is num) pointsPerCurrency = ppcRaw.toDouble(); else if (ppcRaw is String) pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          final rawTiers = <Map<String, dynamic>>[];
+          final tiersData = settingsData['tiers'];
+          if (tiersData is List) {
+            for (final t in tiersData) { if (t is Map) rawTiers.add(Map<String,dynamic>.from(t)); }
+          }
+            rawTiers.sort((a,b){
+              double am = (a['minSpend'] is num)? (a['minSpend'] as num).toDouble() : double.tryParse('${a['minSpend']}') ?? 0;
+              double bm = (b['minSpend'] is num)? (b['minSpend'] as num).toDouble() : double.tryParse('${b['minSpend']}') ?? 0;
+              return am.compareTo(bm);
+            });
+          final custSnap = await tx.get(customerRef);
+          final cdata = custSnap.data() ?? {};
+          double prevPoints = (cdata['loyaltyPoints'] is num) ? (cdata['loyaltyPoints'] as num).toDouble() : 0;
+          double prevSpend = (cdata['totalSpend'] is num) ? (cdata['totalSpend'] as num).toDouble() : 0;
+          final earnBase = invoice.grandTotal;
+          earned = double.parse((earnBase * pointsPerCurrency).toStringAsFixed(2));
+          if (earned < 0) earned = 0;
+          final redeemedPts = invoice.redeemedPoints;
+          final afterRedeem = (prevPoints - redeemedPts).clamp(0, double.infinity);
+          newPointsTotal = afterRedeem + earned;
+          final newSpendTotal = prevSpend + invoice.grandTotal;
+          String? newStatus; double? newDiscount;
+          for (final tier in rawTiers) {
+            final minSpend = (tier['minSpend'] is num)? (tier['minSpend'] as num).toDouble() : double.tryParse('${tier['minSpend']}') ?? 0;
+            if (newSpendTotal >= minSpend) {
+              newStatus = (tier['name'] ?? '').toString().toLowerCase();
+              final discRaw = tier['discount'];
+              if (discRaw is num) newDiscount = discRaw.toDouble();
+            }
+          }
+          if (kPosVerbose) debugPrint('[LOYALTY][tx] prevPoints=$prevPoints earned=$earned redeemed=$redeemedPts newPoints=$newPointsTotal');
+          final update = <String,dynamic>{
+            'loyaltyPoints': newPointsTotal,
+            'loyaltyUpdatedAt': FieldValue.serverTimestamp(),
+            'lastInvoiceNumber': invoice.invoiceNumber,
+            'lastInvoiceTotal': invoice.grandTotal,
+            'loyaltyEarnedLast': earned,
+            'loyaltyRedeemedLast': redeemedPts,
+            'totalSpend': newSpendTotal,
+          };
+          if (newStatus != null && newStatus.isNotEmpty) {
+            update['status'] = newStatus;
+            if (newDiscount != null) update['loyaltyDiscount'] = newDiscount;
+          }
+          tx.update(customerRef, update);
+        });
+        txSucceeded = true;
+      } catch (e, st) {
+        lastError = e;
+        if (kPosVerbose) debugPrint('[LOYALTY][tx-fail] $e\n$st');
+      }
+      if (!txSucceeded) {
+        // Attempt fallback non-transactional optimistic update if the error wasn't permission-denied
+  if (lastError is FirebaseException && lastError.code == 'permission-denied') {
+          if (mounted) _snack('Loyalty skipped (no permission)');
+          return;
+        }
+        try {
+          if (kPosVerbose) debugPrint('[LOYALTY][fallback] attempting direct update');
+          final custSnap = await customerRef.get();
+          final cdata = custSnap.data() ?? {};
+          double prevPoints = (cdata['loyaltyPoints'] is num) ? (cdata['loyaltyPoints'] as num).toDouble() : 0;
+          double prevSpend = (cdata['totalSpend'] is num) ? (cdata['totalSpend'] as num).toDouble() : 0;
+          double pointsPerCurrency = 0.01;
+          final settingsSnap = await settingsRef.get();
+          final settingsData = settingsSnap.data() ?? {};
+          final ppcRaw = settingsData['pointsPerCurrency'];
+          if (ppcRaw is num) pointsPerCurrency = ppcRaw.toDouble(); else if (ppcRaw is String) pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          earned = double.parse((invoice.grandTotal * pointsPerCurrency).toStringAsFixed(2));
+          if (earned < 0) earned = 0;
+          final redeemedPts = invoice.redeemedPoints;
+          final afterRedeem = (prevPoints - redeemedPts).clamp(0, double.infinity);
+          newPointsTotal = afterRedeem + earned;
+          final newSpendTotal = prevSpend + invoice.grandTotal;
+          await customerRef.update({
+            'loyaltyPoints': newPointsTotal,
+            'loyaltyUpdatedAt': FieldValue.serverTimestamp(),
+            'lastInvoiceNumber': invoice.invoiceNumber,
+            'lastInvoiceTotal': invoice.grandTotal,
+            'loyaltyEarnedLast': earned,
+            'loyaltyRedeemedLast': invoice.redeemedPoints,
+            'totalSpend': newSpendTotal,
+          });
+          if (kPosVerbose) debugPrint('[LOYALTY][fallback] success new=$newPointsTotal earned=$earned');
+        } catch (fe, st2) {
+          if (kPosVerbose) debugPrint('[LOYALTY][fallback-fail] $fe\n$st2');
+          rethrow; // let outer catch handle final failure
         }
       }
-      final update = <String, dynamic>{
-        'loyaltyPoints': newPointsTotal,
-        'loyaltyUpdatedAt': FieldValue.serverTimestamp(),
-        'lastInvoiceNumber': invoice.invoiceNumber,
-        'lastInvoiceTotal': invoice.grandTotal,
-        'loyaltyEarnedLast': earned,
-        'loyaltyRedeemedLast': redeemedPts,
-        'totalSpend': newSpendTotal,
-      };
-      if (newStatus != null && newStatus.isNotEmpty) {
-        update['status'] = newStatus;
-        if (newDiscount != null) {
-          update['loyaltyDiscount'] = newDiscount;
+      if (!mounted) return;
+      if (kPosVerbose) debugPrint('[LOYALTY] success new=${newPointsTotal.toStringAsFixed(2)} earned=$earned');
+      _snack('Earned ${earned.toStringAsFixed(1)} pts (Total: ${newPointsTotal.toStringAsFixed(1)})');
+    } on FirebaseException catch (e) {
+      if (kPosVerbose) debugPrint('[LOYALTY][fail-inner] code=${e.code} msg=${e.message}');
+      if (mounted) {
+        if (e.code == 'permission-denied') {
+          _snack('Loyalty skipped (no permission)');
+        } else {
+          _snack('Loyalty error (${e.code})');
         }
       }
-      tx.update(customerRef, update);
-    });
-    if (!mounted) return;
-    _snack('Earned ${earned.toStringAsFixed(1)} pts (Total: ${newPointsTotal.toStringAsFixed(1)})');
+    } catch (e, st) {
+      if (kPosVerbose) debugPrint('[LOYALTY][uncaught] $e\n$st');
+      if (mounted) _snack('Loyalty update failed');
+      // swallow to avoid crashing outer sale flow
+    }
   }
 
   Future<void> _onCustomerSelected(Customer? c) async {
@@ -571,6 +808,8 @@ class _PosPageState extends State<PosPage> {
       return;
     }
     try {
+      // Ensure creditBalance field exists (idempotent)
+      await CustomerCreditService.ensureCreditField(chosen.id);
       final docRef = FirebaseFirestore.instance.collection('customers').doc(chosen.id);
       final snap = await docRef.get();
       if (snap.data() != null && mounted) {
@@ -806,10 +1045,12 @@ class _PosPageState extends State<PosPage> {
             },
             cart: cart,
             lineTaxes: lineTaxes,
-            onCheckout: completeSale,
+            onCheckout: () => completeSale(),
+            onCheckoutCreditMix: (amt) => completeSale(creditPaidInput: amt),
             selectedPaymentMode: selectedPaymentMode,
             onPaymentModeChanged: (m) => setState(() => selectedPaymentMode = m),
             onQuickPrint: _quickPrintFromPanel,
+            onPayCredit: (amt) => _payCustomerCredit(amt),
           ),
           
         ),
@@ -828,7 +1069,6 @@ class _PosPageState extends State<PosPage> {
           onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
           onBarcodeSubmitted: _scan,
           onSearchChanged: () => setState(() {}),
-          
         ),
         const SizedBox(height: 8),
         SizedBox(
@@ -906,10 +1146,12 @@ class _PosPageState extends State<PosPage> {
           },
           cart: cart,
           lineTaxes: lineTaxes,
-          onCheckout: completeSale,
+          onCheckout: () => completeSale(),
+          onCheckoutCreditMix: (amt) => completeSale(creditPaidInput: amt),
           selectedPaymentMode: selectedPaymentMode,
           onPaymentModeChanged: (m) => setState(() => selectedPaymentMode = m),
           onQuickPrint: _quickPrintFromPanel,
+          onPayCredit: (amt) => _payCustomerCredit(amt),
         ),
       ],
     );
@@ -1045,6 +1287,31 @@ class _PosPageState extends State<PosPage> {
       ),
     );
   }
+
+  Future<void> _payCustomerCredit(double enteredAmount) async {
+    final cust = selectedCustomer;
+    if (cust == null || cust.id.isEmpty) {
+      _snack('Select a customer');
+      return;
+    }
+    if (cart.isNotEmpty) {
+      _snack('Clear cart before credit repayment');
+      return;
+    }
+  final amount = enteredAmount.clamp(0, cust.creditBalance).toDouble();
+    if (amount <= 0) {
+      _snack('Enter amount');
+      return;
+    }
+    try {
+      await CustomerCreditService.repayCredit(customerId: cust.id, amount: amount);
+      _snack('Credit payment ₹${amount.toStringAsFixed(2)} recorded');
+      // Refresh customer doc to update live balance (stream listener will also update if active)
+      setState(() { selectedPaymentMode = PaymentMode.cash; });
+    } catch (e) {
+      _snack('Credit payment failed');
+    }
+  }
 }
 
 // _SearchableCustomerDropdown removed after introducing CheckoutPanel simple dropdown
@@ -1084,3 +1351,5 @@ class _HeldOrdersDialog extends StatelessWidget {
 
 // ---------------- Simple Print Settings Dialog (placeholder) ----------------
 // Print Settings UI removed; printing now sends to backend default printer.
+
+

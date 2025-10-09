@@ -1,1 +1,102 @@
 
+rules_version = '2';
+service cloud.firestore {
+	match /databases/{database}/documents {
+
+		// Helper: user signed in
+		function isSignedIn() {
+			return request.auth != null;
+		}
+
+		// Helper: for multi-tenant setups where each product has a tenantId field.
+		// Adjust or remove if you don't use tenant separation.
+		function tenantMatchesCreate() {
+			return isSignedIn() &&
+				(request.resource.data.keys().hasOnly(['tenantId','sku','barcode','name','description','unitPrice','mrpPrice','costPrice','taxPct','variants','categoryId','supplierId','isActive','batches']) || true) &&
+				request.resource.data.tenantId == request.auth.token.tenantId;
+		}
+		function tenantMatchesUpdate() {
+			return isSignedIn() &&
+				resource.data.tenantId == request.auth.token.tenantId &&
+				request.resource.data.tenantId == resource.data.tenantId; // cannot change tenantId
+		}
+
+		// Products (inventory) collection
+		match /inventory/{sku} {
+			// Open read access so POS & anonymous sessions can list products.
+			allow get, list: if true;
+
+			// Writes still restricted to authenticated tenant (adjust if you don't use tenant claims)
+			allow create: if tenantMatchesCreate();
+			allow update, delete: if tenantMatchesUpdate();
+		}
+
+		// (Optional) Allow reads on needed supporting collections (customers, etc.)
+		// Customers collection & nested credit ledger
+		match /customers/{id} {
+			// Reads allowed to signed-in users (or open if you want POS kiosk access without auth)
+			allow get, list: if isSignedIn();
+			// Create minimal customer
+			allow create: if isSignedIn();
+			// Restrict updates to allowed known fields only (prevents arbitrary field injection)
+			function validCustomerUpdate() {
+				// Only restrict the CHANGED keys, not the entire document key set.
+				return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+					'name','email','phone','address','status','loyaltyDiscount','loyaltyPoints','loyaltyUpdatedAt',
+					'lastInvoiceNumber','lastInvoiceTotal','loyaltyEarnedLast','loyaltyRedeemedLast','totalSpend',
+					'creditBalance','creditUpdatedAt','createdAt','tenantId'
+				]);
+			}
+			// Allow a very restricted unauthenticated credit balance delta (kiosk mode) – OPTIONAL.
+			function isSimpleCreditDelta() {
+				return request.auth == null &&
+				  request.resource.data.diff(resource.data).changedKeys().hasOnly(['creditBalance','creditUpdatedAt']) &&
+				  (request.resource.data.creditBalance is number);
+			}
+			allow update: if (isSignedIn() && validCustomerUpdate()) || isSimpleCreditDelta();
+			allow delete: if false; // block deletes (adjust if needed)
+
+			// Nested credit ledger entries: append-only create, readable for signed-in users
+			match /credit_ledger/{entry} {
+				function validLedgerCreate() {
+					return request.resource.data.keys().hasOnly(['type','amount','balanceAfter','invoiceNumber','timestamp'])
+						&& request.resource.data.type in ['add_sale','repayment']
+						&& (request.resource.data.amount is number)
+						&& (request.resource.data.balanceAfter is number);
+				}
+				allow get, list: if isSignedIn();
+				allow create: if isSignedIn() && validLedgerCreate();
+				allow update, delete: if false; // immutable ledger
+			}
+		}
+
+		// Invoices collection: create only (immutable after write except server processes)
+		match /invoices/{invoiceId} {
+			function validInvoiceCreate() {
+				return request.resource.data.keys().hasAll(['invoiceNumber','customerName','subtotal','grandTotal','status'])
+					&& (request.resource.data.grandTotal is number)
+					&& (request.resource.data.subtotal is number)
+					&& (request.resource.data.status in ['Paid','on_credit']);
+			}
+			allow get, list: if isSignedIn();
+			allow create: if isSignedIn() && validInvoiceCreate();
+			allow update: if false; // prevent tampering client-side
+			allow delete: if false;
+		}
+
+		// Settings documents (e.g. loyalty_config) – needed for loyalty points calculation
+		match /settings/{id} {
+			// Allow read of loyalty configuration to authenticated POS sessions
+			allow get, list: if isSignedIn();
+			// Only authenticated sessions can create/update settings (e.g., from admin panel)
+			allow create, update: if isSignedIn();
+			allow delete: if false; // safeguard
+		}
+
+		// Fallback deny all other access
+		match /{document=**} {
+			allow read, write: if false;
+		}
+	}
+}
+

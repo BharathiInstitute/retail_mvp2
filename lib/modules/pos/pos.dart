@@ -163,6 +163,11 @@ class _PosPageState extends State<PosPage> {
   void completeSale() {
     if (cart.isEmpty) return _snack('Cart is empty');
 
+    // If credit payment selected, record credit before clearing cart
+    if (selectedPaymentMode == PaymentMode.credit) {
+      _applyCreditLedger();
+    }
+
     // Update stock
     for (final item in cart.values) {
       item.product.stock -= item.qty;
@@ -507,6 +512,20 @@ class _PosPageState extends State<PosPage> {
           ...taxesByRate.entries.map((e) => _kv('GST ${e.key}%', e.value)),
           const Divider(),
           _kv('Grand Total', grandTotal, bold: true),
+          if (selectedCustomer != null && selectedCustomer!.id != 'walkin')
+            Padding(
+              padding: const EdgeInsets.only(top:4.0,bottom: 4.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children:[
+                  const Text('Credit Balance', style: TextStyle(fontSize:12,fontWeight: FontWeight.w500)),
+                  Text(
+                    '₹${(selectedCustomer!.creditBalance).toStringAsFixed(2)}',
+                    style: const TextStyle(fontSize:12,fontWeight: FontWeight.w600),
+                  )
+                ],
+              ),
+            ),
           const SizedBox(height: 10),
           // Payment mode quick buttons
           Row(children: [
@@ -514,7 +533,7 @@ class _PosPageState extends State<PosPage> {
             const SizedBox(width: 8),
             Expanded(child: _payModeButton(PaymentMode.upi, 'UPI', Icons.qr_code)),
             const SizedBox(width: 8),
-            Expanded(child: _payModeButton(PaymentMode.card, 'Card', Icons.credit_card)),
+            Expanded(child: _payModeButton(PaymentMode.credit, 'Credit', Icons.receipt_long)),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -540,7 +559,17 @@ class _PosPageState extends State<PosPage> {
   Widget _payModeButton(PaymentMode mode, String label, IconData icon) {
     final selected = selectedPaymentMode == mode;
     return OutlinedButton.icon(
-      onPressed: () => setState(() => selectedPaymentMode = mode),
+      onPressed: () async {
+        if (mode == PaymentMode.credit) {
+          if (selectedCustomer == null || selectedCustomer!.id == 'walkin') {
+            _snack('Select a saved customer to use Credit');
+            return;
+          }
+          final ok = await _promptCreditAmount();
+          if (!ok) return; // user cancelled
+        }
+        setState(() => selectedPaymentMode = mode);
+      },
       icon: Icon(icon, color: selected ? Theme.of(context).colorScheme.primary : null),
       label: Text(label),
       style: OutlinedButton.styleFrom(
@@ -554,6 +583,85 @@ class _PosPageState extends State<PosPage> {
         ),
       ),
     );
+  }
+
+  Future<bool> _promptCreditAmount() async {
+    final controller = TextEditingController(text: grandTotal.toStringAsFixed(2));
+    final result = await showDialog<double>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Credit Amount'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Grand Total: ₹${grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: controller,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Credit Amount (₹)', border: OutlineInputBorder()),
+                ),
+              ],
+            ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () {
+                final v = double.tryParse(controller.text.trim());
+                if (v == null || v <= 0) {
+                  _snack('Enter valid amount');
+                  return;
+                }
+                Navigator.pop(ctx, v);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null) return false;
+    _pendingCreditAmount = result;
+    return true;
+  }
+
+  double? _pendingCreditAmount;
+
+  Future<void> _applyCreditLedger() async {
+    if (_pendingCreditAmount == null) {
+      // fallback: use grandTotal
+      _pendingCreditAmount = grandTotal;
+    }
+    final amt = _pendingCreditAmount!;
+    if (selectedCustomer == null || selectedCustomer!.id == 'walkin') return;
+    final old = selectedCustomer!.creditBalance;
+    final updated = old + amt;
+    final cust = selectedCustomer!;
+    // Update local model (since demo list) – replace in customers list
+    final idx = customers.indexWhere((c) => c.id == cust.id);
+    if (idx != -1) {
+      customers[idx] = Customer(
+        id: cust.id,
+        name: cust.name,
+        email: cust.email,
+        phone: cust.phone,
+        status: cust.status,
+        totalSpend: cust.totalSpend + grandTotal, // optionally add to spend
+        rewardsPoints: cust.rewardsPoints,
+        discountPercent: cust.discountPercent,
+        creditBalance: updated,
+      );
+      setState(() => selectedCustomer = customers[idx]);
+    }
+    // Firestore persistence if we have a reference path pattern: customers collection assumed
+    try {
+      await FirebaseFirestore.instance.collection('customers').doc(cust.id).update({'creditBalance': updated});
+    } catch (e) {
+      // Non-fatal, show snackbar
+      _snack('Credit save pending (offline?)');
+    }
+    _pendingCreditAmount = null;
   }
 
   // Payment split row removed
@@ -633,6 +741,7 @@ class Customer {
   final double totalSpend;
   final double rewardsPoints; // allow fractional points
   final double discountPercent; // derived suggested discount
+  final double creditBalance; // running outstanding credit (customer owes)
 
   Customer({
     required this.id,
@@ -643,6 +752,7 @@ class Customer {
     this.totalSpend = 0.0,
   this.rewardsPoints = 0.0,
     this.discountPercent = 0.0,
+  this.creditBalance = 0.0,
   });
 
   factory Customer.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -669,16 +779,20 @@ class Customer {
       discount = loyaltyDisc.toDouble();
     } else {
       switch (tier) {
-        case 'gold':
-          discount = 10; break;
-        case 'silver':
-          discount = 5; break;
-        case 'bronze':
-          discount = 2; break;
+        case 'gold': {
+          discount = 10; break; }
+        case 'silver': {
+          discount = 5; break; }
+        case 'bronze': {
+          discount = 2; break; }
         default:
           discount = 0;
       }
     }
+  final creditRaw = data['creditBalance'] ?? data['khathaBalance']; // migrate old field
+  double credit = 0;
+  if (creditRaw is num) credit = creditRaw.toDouble();
+  else if (creditRaw is String) credit = double.tryParse(creditRaw) ?? 0;
   return Customer(
       id: doc.id,
       name: name,
@@ -688,6 +802,7 @@ class Customer {
       totalSpend: spend,
       rewardsPoints: rewards,
       discountPercent: discount,
+      creditBalance: credit,
     );
   }
 }
@@ -709,10 +824,15 @@ class HeldOrder {
   HeldOrder({required this.id, required this.timestamp, required this.items, required this.discountType, required this.discountValueText});
 }
 
-enum PaymentMode { cash, upi, card, wallet }
+enum PaymentMode { cash, upi, credit, wallet }
 
 extension PaymentModeX on PaymentMode {
-  String get label => switch (this) { PaymentMode.cash => 'Cash', PaymentMode.upi => 'UPI', PaymentMode.card => 'Card', PaymentMode.wallet => 'Wallet' };
+  String get label => switch (this) {
+    PaymentMode.cash => 'Cash',
+    PaymentMode.upi => 'UPI',
+  PaymentMode.credit => 'Credit',
+    PaymentMode.wallet => 'Wallet'
+  };
 }
 
 // Payment split model removed
