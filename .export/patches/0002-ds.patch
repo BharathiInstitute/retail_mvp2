@@ -1,0 +1,24 @@
+From 5e4501a9aeafb6a67631ed7abbacaabd33d04cfe Mon Sep 17 00:00:00 2001
+From: jyo <bharathiinstitute1@gmail.com>
+Date: Thu, 9 Oct 2025 16:07:02 +0530
+Subject: [PATCH 2/5] ds
+
+---
+ lib/modules/printing_demo/print_demo.dart | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/lib/modules/printing_demo/print_demo.dart b/lib/modules/printing_demo/print_demo.dart
+index fe8f8df..96cc600 100644
+--- a/lib/modules/printing_demo/print_demo.dart
++++ b/lib/modules/printing_demo/print_demo.dart
+@@ -1,3 +1,7 @@
++<<<<<<< HEAD
++import 'dart:convert';
++=======
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+ import 'package:flutter/material.dart';
+ 
+ /// Legacy printing demo removed. This placeholder kept only so existing routes don't break.
+-- 
+2.50.0.windows.2
+

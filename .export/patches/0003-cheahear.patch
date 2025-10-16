@@ -1,0 +1,364 @@
+From c5b83af35c3ed83d2b66d84eba13dc7624f1b10f Mon Sep 17 00:00:00 2001
+From: jyo <bharathiinstitute1@gmail.com>
+Date: Thu, 16 Oct 2025 11:42:19 +0530
+Subject: [PATCH 3/5] cheahear
+
+---
+ .../inventory/inventory_repository.dart       | 10 +++
+ .../inventory/stock_movements_screen.dart     | 52 ++++++++++------
+ lib/modules/inventory/transfers_screen.dart   | 24 +++++++-
+ lib/modules/pos/pos.dart                      | 61 +++++++------------
+ 4 files changed, 88 insertions(+), 59 deletions(-)
+
+diff --git a/lib/modules/inventory/inventory_repository.dart b/lib/modules/inventory/inventory_repository.dart
+index 5d5efa7..6dfcac7 100644
+--- a/lib/modules/inventory/inventory_repository.dart
++++ b/lib/modules/inventory/inventory_repository.dart
+@@ -393,7 +393,11 @@ class ProductDoc {
+             .whereType<BatchDoc>()
+             .toList() ??
+         const <BatchDoc>[];
++<<<<<<< HEAD
++    double toDouble(dynamic v) {
++=======
+     double toDoubleLocal(dynamic v) {
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+       if (v == null) return 0.0;
+       if (v is double) return v;
+       if (v is int) return v.toDouble();
+@@ -406,9 +410,15 @@ class ProductDoc {
+       barcode: (m['barcode'] ?? '') as String,
+       name: (m['name'] ?? '') as String,
+       description: m['description'] as String?,
++<<<<<<< HEAD
++      unitPrice: toDouble(m['unitPrice']),
++      mrpPrice: m['mrpPrice'] == null ? null : toDouble(m['mrpPrice']),
++      costPrice: m['costPrice'] == null ? null : toDouble(m['costPrice']),
++=======
+   unitPrice: toDoubleLocal(m['unitPrice']),
+   mrpPrice: m['mrpPrice'] == null ? null : toDoubleLocal(m['mrpPrice']),
+   costPrice: m['costPrice'] == null ? null : toDoubleLocal(m['costPrice']),
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+       taxPct: m['taxPct'] as num?,
+       variants: (m['variants'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[],
+       categoryId: m['categoryId'] as String?,
+diff --git a/lib/modules/inventory/stock_movements_screen.dart b/lib/modules/inventory/stock_movements_screen.dart
+index 46b5458..fee8959 100644
+--- a/lib/modules/inventory/stock_movements_screen.dart
++++ b/lib/modules/inventory/stock_movements_screen.dart
+@@ -152,9 +152,15 @@ final _movementsProvider = StreamProvider.autoDispose<List<MovementRecord>>((ref
+ 
+ MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+   final m = d.data();
++<<<<<<< HEAD
++  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
++  return MovementRecord(
++    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
++=======
+   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
+   return MovementRecord(
+     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+     type: (m['type'] ?? '') as String,
+     sku: (m['sku'] ?? '') as String,
+     name: (m['name'] ?? '') as String,
+@@ -164,7 +170,11 @@ MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
+     totalAfter: (m['totalAfter'] as num?)?.toInt(),
+     note: m['note'] as String?,
++<<<<<<< HEAD
++    updatedAt: ts(m['updatedAt']),
++=======
+     updatedAt: tsLocal(m['updatedAt']),
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+     updatedBy: m['updatedBy'] as String?,
+   );
+ }
+@@ -345,59 +355,65 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
+             final user = ref.read(authStateProvider);
+             final delta = _parseDelta();
+             setState(() => _submitting = true);
++            // Capture values needed across async gaps
++            final sku = _selected!.sku;
++            final name = _selected!.name;
++            final noteVal = _noteCtrl.text.trim();
+             ProductDoc? after;
+             try {
+-              // Persist change
+               await repo.applyStockMovement(
+-                sku: _selected!.sku,
++                sku: sku,
+                 location: _location,
+                 deltaQty: delta,
+                 type: _type,
+-                note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
++                note: noteVal.isEmpty ? null : noteVal,
+                 updatedBy: user?.email,
+               );
+-              after = await repo.getProduct(_selected!.sku);
+-              // Store movement history document
++              after = await repo.getProduct(sku);
+               final firestore = FirebaseFirestore.instance;
+               await firestore.collection('inventory_movements').add({
+                 'createdAt': FieldValue.serverTimestamp(),
+                 'type': _type,
+-                'sku': _selected!.sku,
+-                'name': _selected!.name,
++                'sku': sku,
++                'name': name,
+                 'location': _location,
+                 'deltaQty': delta,
+                 'storeAfter': after?.stockAt('Store'),
+                 'warehouseAfter': after?.stockAt('Warehouse'),
+-                'totalAfter': after?.totalStock,
+-                'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
++                'totalAfter': after == null ? null : after.stockAt('Store') + after.stockAt('Warehouse'),
++                'note': noteVal.isEmpty ? null : noteVal,
+                 'updatedAt': after?.updatedAt,
+                 'updatedBy': after?.updatedBy,
+               });
+             } catch (err) {
+-              if (mounted) {
+-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
+-              }
++              if (!mounted) return; // abort if unmounted
++              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
+               setState(() => _submitting = false);
+               return;
+             }
++            if (!mounted) return;
+             final record = MovementRecord(
+               date: DateTime.now(),
+               type: _type,
+-              sku: _selected!.sku,
+-              name: _selected!.name,
++              sku: sku,
++              name: name,
+               location: _location,
+               deltaQty: delta,
+-              storeAfter: after?.stockAt('Store'),
+-              warehouseAfter: after?.stockAt('Warehouse'),
+-              totalAfter: after?.totalStock,
+-              note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
++              storeAfter: after?.stockAt('Store') ?? 0,
++              warehouseAfter: after?.stockAt('Warehouse') ?? 0,
++              totalAfter: after == null ? 0 : after.stockAt('Store') + after.stockAt('Warehouse'),
++              note: noteVal.isEmpty ? null : noteVal,
+               updatedAt: after?.updatedAt,
+               updatedBy: after?.updatedBy,
+             );
++<<<<<<< HEAD
++            Navigator.pop(context, record);
++=======
+             if (mounted) {
+               final nav = Navigator.of(context);
+               if (nav.mounted) nav.pop(record);
+             }
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+           },
+           child: _submitting
+               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+diff --git a/lib/modules/inventory/transfers_screen.dart b/lib/modules/inventory/transfers_screen.dart
+index 9a5b161..fc67c6a 100644
+--- a/lib/modules/inventory/transfers_screen.dart
++++ b/lib/modules/inventory/transfers_screen.dart
+@@ -161,9 +161,15 @@ final _transfersProvider = StreamProvider.autoDispose<List<TransferRecord>>((ref
+ 
+ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+   final m = d.data();
++<<<<<<< HEAD
++  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
++  return TransferRecord(
++    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
++=======
+   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
+   return TransferRecord(
+     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+     sku: (m['sku'] ?? '') as String,
+     name: (m['name'] ?? '') as String,
+     from: (m['from'] ?? '') as String,
+@@ -173,7 +179,11 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+     storeAfter: (m['storeAfter'] as num?)?.toInt(),
+     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
+     totalAfter: (m['totalAfter'] as num?)?.toInt(),
++<<<<<<< HEAD
++    updatedAt: ts(m['updatedAt']),
++=======
+     updatedAt: tsLocal(m['updatedAt']),
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+     updatedBy: m['updatedBy'] as String?,
+   );
+ }
+@@ -365,14 +375,17 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
+                     );
+                     final after = await repo.getProduct(_selected!.sku);
+                     final firestore = FirebaseFirestore.instance;
++                    final noteVal = _noteCtrl.text.trim();
++                    final skuVal = _selected!.sku;
++                    final nameVal = _selected!.name;
+                     await firestore.collection('inventory_transfers').add({
+                       'createdAt': FieldValue.serverTimestamp(),
+-                      'sku': _selected!.sku,
+-                      'name': _selected!.name,
++                      'sku': skuVal,
++                      'name': nameVal,
+                       'from': _from,
+                       'to': _to,
+                       'qty': qty,
+-                      'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
++                      'note': noteVal.isEmpty ? null : noteVal,
+                       'storeAfter': after?.stockAt('Store'),
+                       'warehouseAfter': after?.stockAt('Warehouse'),
+                       'totalAfter': after == null ? null : (after.stockAt('Store') + after.stockAt('Warehouse')),
+@@ -386,10 +399,15 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
+                     setState(() => _submitting = false);
+                     return;
+                   }
++<<<<<<< HEAD
++                  if (!mounted) return;
++                  Navigator.pop(context); // stream refresh
++=======
+                   if (mounted) {
+                     final nav = Navigator.of(context);
+                     if (nav.mounted) nav.pop(); // stream refresh
+                   }
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+                 },
+           child: _submitting
+               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+diff --git a/lib/modules/pos/pos.dart b/lib/modules/pos/pos.dart
+index 0f97479..6516daa 100644
+--- a/lib/modules/pos/pos.dart
++++ b/lib/modules/pos/pos.dart
+@@ -1,6 +1,8 @@
+-import 'package:flutter/material.dart';
+ import 'package:cloud_firestore/cloud_firestore.dart';
+ 
++<<<<<<< HEAD
++// POS shared models and enums (no UI in this file)
++=======
+ // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
+ 
+ class PosPage extends StatefulWidget {
+@@ -679,6 +681,7 @@ class _PosPageState extends State<PosPage> {
+ }
+ 
+ // Demo Models & Data structures
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+ 
+ class Product {
+   final String sku;
+@@ -743,14 +746,14 @@ class Customer {
+   final double discountPercent; // derived suggested discount
+   final double creditBalance; // running outstanding credit (customer owes)
+ 
+-  Customer({
++  const Customer({
+     required this.id,
+     required this.name,
+     this.email,
+     this.phone,
+     this.status,
+     this.totalSpend = 0.0,
+-  this.rewardsPoints = 0.0,
++    this.rewardsPoints = 0.0,
+     this.discountPercent = 0.0,
+   this.creditBalance = 0.0,
+   });
+@@ -763,7 +766,7 @@ class Customer {
+     final spendRaw = data['totalSpend'];
+     final spend = spendRaw is num ? spendRaw.toDouble() : double.tryParse('$spendRaw') ?? 0.0;
+     // Use stored loyaltyPoints if present, else fallback
+-  double rewards = 0;
++    double rewards = 0;
+     final lp = data['loyaltyPoints'];
+     if (lp is num) {
+       rewards = lp.toDouble();
+@@ -779,21 +782,37 @@ class Customer {
+       discount = loyaltyDisc.toDouble();
+     } else {
+       switch (tier) {
++<<<<<<< HEAD
++        case 'gold':
++          discount = 10;
++          break;
++        case 'silver':
++          discount = 5;
++          break;
++        case 'bronze':
++          discount = 2;
++          break;
++=======
+         case 'gold': {
+           discount = 10; break; }
+         case 'silver': {
+           discount = 5; break; }
+         case 'bronze': {
+           discount = 2; break; }
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+         default:
+           discount = 0;
+       }
+     }
++<<<<<<< HEAD
++    return Customer(
++=======
+   final creditRaw = data['creditBalance'] ?? data['khathaBalance']; // migrate old field
+   double credit = 0;
+   if (creditRaw is num) credit = creditRaw.toDouble();
+   else if (creditRaw is String) credit = double.tryParse(creditRaw) ?? 0;
+   return Customer(
++>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
+       id: doc.id,
+       name: name,
+       email: (data['email'] as String?)?.trim(),
+@@ -835,8 +854,6 @@ extension PaymentModeX on PaymentMode {
+   };
+ }
+ 
+-// Payment split model removed
+-
+ enum DiscountType { none, percent, flat }
+ 
+ extension DiscountTypeX on DiscountType {
+@@ -844,36 +861,4 @@ extension DiscountTypeX on DiscountType {
+ }
+ 
+ 
+-class _HeldOrdersDialog extends StatelessWidget {
+-  final List<HeldOrder> orders;
+-  const _HeldOrdersDialog({required this.orders});
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    return AlertDialog(
+-      title: const Text('Held Orders'),
+-      content: SizedBox(
+-        width: 480,
+-        height: 360,
+-        child: orders.isEmpty
+-            ? const Center(child: Text('No held orders'))
+-            : ListView.separated(
+-                itemCount: orders.length,
+-                separatorBuilder: (_, __) => const Divider(height: 1),
+-                itemBuilder: (_, i) {
+-                  final o = orders[i];
+-                  final total = o.items.fold<double>(0, (s, it) => s + it.product.price * it.qty);
+-                  return ListTile(
+-                    title: Text(o.id),
+-                    subtitle: Text('${o.items.length} items · ₹${total.toStringAsFixed(2)}'),
+-                  );
+-                },
+-              ),
+-      ),
+-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+-    );
+-  }
+-}
+-
+-
+ 
+-- 
+2.50.0.windows.2
+
