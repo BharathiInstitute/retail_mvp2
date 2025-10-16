@@ -152,9 +152,9 @@ final _movementsProvider = StreamProvider.autoDispose<List<MovementRecord>>((ref
 
 MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
-  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+  DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return MovementRecord(
-    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
     type: (m['type'] ?? '') as String,
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
@@ -164,7 +164,7 @@ MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
     totalAfter: (m['totalAfter'] as num?)?.toInt(),
     note: m['note'] as String?,
-    updatedAt: ts(m['updatedAt']),
+  updatedAt: tsLocal(m['updatedAt']),
     updatedBy: m['updatedBy'] as String?,
   );
 }
@@ -396,7 +396,10 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               updatedAt: after?.updatedAt,
               updatedBy: after?.updatedBy,
             );
-            Navigator.pop(context, record);
+            if (mounted) {
+              final nav = Navigator.of(context);
+              if (nav.mounted) nav.pop(record);
+            }
           },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

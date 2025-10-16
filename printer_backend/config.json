@@ -1,4 +1,6 @@
 {
-  "defaultPrinter": null,
-  "settings": {}
+  "defaultPrinter": "POS58(2)",
+  "settings": {
+    "monochrome": true
+  }
 }

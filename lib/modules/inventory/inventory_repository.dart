@@ -393,7 +393,7 @@ class ProductDoc {
             .whereType<BatchDoc>()
             .toList() ??
         const <BatchDoc>[];
-    double toDouble(dynamic v) {
+    double toDoubleLocal(dynamic v) {
       if (v == null) return 0.0;
       if (v is double) return v;
       if (v is int) return v.toDouble();
@@ -406,9 +406,9 @@ class ProductDoc {
       barcode: (m['barcode'] ?? '') as String,
       name: (m['name'] ?? '') as String,
       description: m['description'] as String?,
-      unitPrice: toDouble(m['unitPrice']),
-      mrpPrice: m['mrpPrice'] == null ? null : toDouble(m['mrpPrice']),
-      costPrice: m['costPrice'] == null ? null : toDouble(m['costPrice']),
+      unitPrice: toDoubleLocal(m['unitPrice']),
+      mrpPrice: m['mrpPrice'] == null ? null : toDoubleLocal(m['mrpPrice']),
+      costPrice: m['costPrice'] == null ? null : toDoubleLocal(m['costPrice']),
       taxPct: m['taxPct'] as num?,
       variants: (m['variants'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[],
       categoryId: m['categoryId'] as String?,

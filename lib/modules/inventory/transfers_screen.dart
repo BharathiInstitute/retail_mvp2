@@ -161,9 +161,9 @@ final _transfersProvider = StreamProvider.autoDispose<List<TransferRecord>>((ref
 
 TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
-  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+  DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return TransferRecord(
-    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
     from: (m['from'] ?? '') as String,
@@ -173,7 +173,7 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     storeAfter: (m['storeAfter'] as num?)?.toInt(),
     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
     totalAfter: (m['totalAfter'] as num?)?.toInt(),
-    updatedAt: ts(m['updatedAt']),
+    updatedAt: tsLocal(m['updatedAt']),
     updatedBy: m['updatedBy'] as String?,
   );
 }
@@ -389,8 +389,10 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     setState(() => _submitting = false);
                     return;
                   }
-                  if (!mounted) return;
-                  Navigator.pop(context); // stream refresh
+                  if (mounted) {
+                    final nav = Navigator.of(context);
+                    if (nav.mounted) nav.pop(); // stream refresh
+                  }
                 },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

@@ -7,6 +7,7 @@ import 'core/auth/auth.dart';
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
+import 'modules/pos/pos_cashier.dart';
 import 'modules/inventory/inventory.dart';
 import 'modules/invoices/invoices.dart';
 import 'modules/invoices/invoices_tabs.dart';
@@ -249,6 +250,19 @@ class AppShell extends ConsumerWidget {
         title: const Text('Retail ERP MVP'),
         actions: [
           IconButton(onPressed: () {}, icon: const Icon(Icons.brightness_6)),
+          // Cashier icon placed beside theme toggle as requested
+          Tooltip(
+            message: 'Cashier',
+            child: IconButton(
+              icon: const Icon(Icons.account_circle_outlined),
+              onPressed: () {
+                // Open cashier screen on top of current route stack
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PosCashierScreen()),
+                );
+              },
+            ),
+          ),
           if (user != null)
             PopupMenuButton<String>(
               itemBuilder: (context) => [
@@ -262,8 +276,9 @@ class AppShell extends ConsumerWidget {
               ],
               onSelected: (v) async {
                 if (v == 'signout') {
+                  final routerCtx = context; // capture before async gap
                   await ref.read(authRepositoryProvider).signOut();
-                  if (context.mounted) context.go('/login');
+                  if (routerCtx.mounted) routerCtx.go('/login');
                 }
               },
               icon: const Icon(Icons.person_outline),
@@ -287,9 +302,12 @@ class AppShell extends ConsumerWidget {
                         leading: Icon(e.icon),
                         title: Text(e.label),
                         selected: navigationShell.currentIndex == e.branchIndex,
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          _goBranch(context, e.branchIndex);
+                        onTap: () async {
+                          final tapCtx = context; // capture before async gap
+                          // Avoid popping the last page off the GoRouter stack.
+                          await Navigator.of(tapCtx).maybePop();
+                          if (!tapCtx.mounted) return;
+                          _goBranch(tapCtx, e.branchIndex);
                         },
                       ),
                   ],
