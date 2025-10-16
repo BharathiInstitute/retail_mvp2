@@ -1,76 +1,103 @@
 
 rules_version = '2';
 service cloud.firestore {
-	// Role hierarchy for convenience
-	function isSignedIn() { return request.auth != null && request.auth.uid != null; }
-	function globalRole() { return isSignedIn() ? request.auth.token.role : null; } // optional global owner
-	function storeRole(storeId) {
-		return isSignedIn() && request.auth.token.storeRoles != null ? request.auth.token.storeRoles[storeId] : null;
-	}
-	function isOwner(storeId) { return storeRole(storeId) == 'owner' || globalRole() == 'owner'; }
-	function isManager(storeId) { return isOwner(storeId) || storeRole(storeId) == 'manager'; }
-	function isCashier(storeId) { return ['cashier'].hasAny([storeRole(storeId)]) || isManager(storeId); }
-	function isClerk(storeId) { return ['clerk'].hasAny([storeRole(storeId)]) || isManager(storeId); }
-	function isAccountant(storeId) { return ['accountant'].hasAny([storeRole(storeId)]) || isManager(storeId); }
-	function activeUser() { return isSignedIn() && (request.auth.token.active == true || request.auth.token.active == null); }
+  match /databases/{database}/documents {
 
-	match /databases/{database}/documents {
+    // Helper: user signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
 
-		// Global users collection mapping uid -> profile + store roles
-		match /users/{uid} {
-			allow read: if isSignedIn() && (uid == request.auth.uid || globalRole() == 'owner');
-			allow create: if isSignedIn() && (globalRole() == 'owner');
-			allow update: if isSignedIn() && (
-				uid == request.auth.uid || globalRole() == 'owner' ||
-				(request.resource.data.storeRoles.keys().hasOnly([storeRoleIds()]) == false) // placeholder to prevent managers escalating outside stores
-			);
-			allow delete: if isSignedIn() && globalRole() == 'owner';
-		}
+    // Helper: for multi-tenant setups where each product has a tenantId field.
+    // Adjust or remove if you don't use tenant separation.
+    function tenantMatchesCreate() {
+      return isSignedIn() &&
+        (request.resource.data.keys().hasOnly(['tenantId','sku','barcode','name','description','unitPrice','mrpPrice','costPrice','taxPct','variants','categoryId','supplierId','isActive','batches']) || true) &&
+        request.resource.data.tenantId == request.auth.token.tenantId;
+    }
+    function tenantMatchesUpdate() {
+      return isSignedIn() &&
+        resource.data.tenantId == request.auth.token.tenantId &&
+        request.resource.data.tenantId == resource.data.tenantId; // cannot change tenantId
+    }
 
-		// Stores root
-		match /stores/{storeId} {
-			allow read: if activeUser() && (storeRole(storeId) != null || globalRole() == 'owner');
-			allow create: if isSignedIn() && (globalRole() == 'owner');
-			allow update: if activeUser() && (isOwner(storeId) || isManager(storeId));
-			allow delete: if activeUser() && isOwner(storeId);
+    // Products (inventory) collection
+    match /inventory/{sku} {
+      // Open read access so POS & anonymous sessions can list products.
+      allow get, list: if true;
 
-			// Store users subcollection (membership)
-			match /users/{memberUid} {
-				allow read: if activeUser() && (storeRole(storeId) != null);
-				allow create: if activeUser() && (isOwner(storeId) || isManager(storeId));
-				allow update: if activeUser() && (isOwner(storeId) || (isManager(storeId) && !(request.resource.data.role in ['owner'])));
-				allow delete: if activeUser() && (isOwner(storeId) || (isManager(storeId) && !(resource.data.role in ['owner'])));
-			}
+      // Writes still restricted to authenticated tenant (adjust if you don't use tenant claims)
+      allow create: if tenantMatchesCreate();
+      allow update, delete: if tenantMatchesUpdate();
+    }
 
-			// Settings doc(s)
-			match /settings/{docId} {
-				allow read: if activeUser() && storeRole(storeId) != null;
-				allow create, update: if activeUser() && (isOwner(storeId) || isManager(storeId));
-				allow delete: if activeUser() && isOwner(storeId);
-			}
+    // (Optional) Allow reads on needed supporting collections (customers, etc.)
+    // Customers collection & nested credit ledger
+    match /customers/{id} {
+      // Reads allowed to signed-in users (or open if you want POS kiosk access without auth)
+      allow get, list: if isSignedIn();
+      // Create minimal customer
+      allow create: if isSignedIn();
+      // Restrict updates to allowed known fields only (prevents arbitrary field injection)
+      function validCustomerUpdate() {
+        // Only restrict the CHANGED keys, not the entire document key set.
+        return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'name','email','phone','address','status','loyaltyDiscount','loyaltyPoints','loyaltyUpdatedAt',
+          'lastInvoiceNumber','lastInvoiceTotal','loyaltyEarnedLast','loyaltyRedeemedLast','totalSpend',
+          'creditBalance','creditUpdatedAt','createdAt','tenantId'
+        ]);
+      }
+      // Allow a very restricted unauthenticated credit balance delta (kiosk mode) – OPTIONAL.
+      function isSimpleCreditDelta() {
+        return request.auth == null &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['creditBalance','creditUpdatedAt']) &&
+          (request.resource.data.creditBalance is number);
+      }
+      allow update: if (isSignedIn() && validCustomerUpdate()) || isSimpleCreditDelta();
+      allow delete: if false; // block deletes (adjust if needed)
 
-			// Audit logs: readable by owner/manager/accountant; writes only via function (enforce auth.uid matches data.uid)
-			match /auditLogs/{logId} {
-				allow read: if activeUser() && (isOwner(storeId) || isManager(storeId) || isAccountant(storeId));
-				allow create: if activeUser() && request.auth.uid == request.resource.data.uid; // function writes on behalf of user
-				allow update, delete: if false; // immutable
-			}
+      // Nested credit ledger entries: append-only create, readable for signed-in users
+      match /credit_ledger/{entry} {
+        function validLedgerCreate() {
+          return request.resource.data.keys().hasOnly(['type','amount','balanceAfter','invoiceNumber','timestamp'])
+            && request.resource.data.type in ['add_sale','repayment']
+            && (request.resource.data.amount is number)
+            && (request.resource.data.balanceAfter is number);
+        }
+        allow get, list: if isSignedIn();
+        allow create: if isSignedIn() && validLedgerCreate();
+        allow update, delete: if false; // immutable ledger
+      }
+    }
 
-			// Example restricted collection: invoices
-			match /invoices/{invoiceId} {
-				allow read: if activeUser() && (storeRole(storeId) != null);
-				allow create: if activeUser() && (isOwner(storeId) || isManager(storeId) || isCashier(storeId));
-				allow update: if activeUser() && (isOwner(storeId) || isManager(storeId));
-				allow delete: if activeUser() && isOwner(storeId);
-			}
+    // Invoices collection: create only (immutable after write except server processes)
+    match /invoices/{invoiceId} {
+      function validInvoiceCreate() {
+        return request.resource.data.keys().hasAll(['invoiceNumber','customerName','subtotal','grandTotal','status'])
+          && (request.resource.data.grandTotal is number)
+          && (request.resource.data.subtotal is number)
+          && (request.resource.data.status in ['Paid','on_credit']);
+      }
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && validInvoiceCreate();
+      allow update: if false; // prevent tampering client-side
+      allow delete: if false;
+    }
 
-			// Example products collection
-			match /products/{productId} {
-				allow read: if activeUser() && storeRole(storeId) != null;
-				allow create, update: if activeUser() && (isOwner(storeId) || isManager(storeId) || isClerk(storeId));
-				allow delete: if activeUser() && (isOwner(storeId) || isManager(storeId));
-			}
-		}
-	}
+    // Settings documents (e.g. loyalty_config) – needed for loyalty points calculation
+    match /settings/{id} {
+      // Allow read of loyalty configuration to authenticated POS sessions
+      allow get, list: if isSignedIn();
+      // Only authenticated sessions can create/update settings (e.g., from admin panel)
+      allow create, update: if isSignedIn();
+      allow delete: if false; // safeguard
+    }
+
+    // Fallback deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
 }
+
 

@@ -63,6 +63,7 @@ class Customer {
   final double totalSpend;
   final double rewardsPoints; // allow fractional points
   final double discountPercent; // derived suggested discount
+  final double creditBalance; // running outstanding credit (customer owes)
 
   const Customer({
     required this.id,
@@ -73,6 +74,7 @@ class Customer {
     this.totalSpend = 0.0,
     this.rewardsPoints = 0.0,
     this.discountPercent = 0.0,
+  this.creditBalance = 0.0,
   });
 
   factory Customer.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -99,19 +101,17 @@ class Customer {
       discount = loyaltyDisc.toDouble();
     } else {
       switch (tier) {
-        case 'gold':
-          discount = 10;
-          break;
-        case 'silver':
-          discount = 5;
-          break;
-        case 'bronze':
-          discount = 2;
-          break;
+        case 'gold': { discount = 10; break; }
+        case 'silver': { discount = 5; break; }
+        case 'bronze': { discount = 2; break; }
         default:
           discount = 0;
       }
     }
+    final creditRaw = data['creditBalance'] ?? data['khathaBalance']; // migrate old field
+    double credit = 0;
+    if (creditRaw is num) credit = creditRaw.toDouble();
+    else if (creditRaw is String) credit = double.tryParse(creditRaw) ?? 0;
     return Customer(
       id: doc.id,
       name: name,
@@ -121,6 +121,7 @@ class Customer {
       totalSpend: spend,
       rewardsPoints: rewards,
       discountPercent: discount,
+      creditBalance: credit,
     );
   }
 }
@@ -142,10 +143,15 @@ class HeldOrder {
   HeldOrder({required this.id, required this.timestamp, required this.items, required this.discountType, required this.discountValueText});
 }
 
-enum PaymentMode { cash, upi, card, wallet }
+enum PaymentMode { cash, upi, credit, wallet }
 
 extension PaymentModeX on PaymentMode {
-  String get label => switch (this) { PaymentMode.cash => 'Cash', PaymentMode.upi => 'UPI', PaymentMode.card => 'Card', PaymentMode.wallet => 'Wallet' };
+  String get label => switch (this) {
+    PaymentMode.cash => 'Cash',
+    PaymentMode.upi => 'UPI',
+  PaymentMode.credit => 'Credit',
+    PaymentMode.wallet => 'Wallet'
+  };
 }
 
 enum DiscountType { none, percent, flat }

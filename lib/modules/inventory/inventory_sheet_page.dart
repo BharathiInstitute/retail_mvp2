@@ -192,8 +192,9 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
       final repo = ref.read(inventoryRepoProvider);
       final tenantFallback = existingBySku.values.isEmpty ? user.uid : existingBySku.values.first.tenantId;
 
+      final rootContext = context;
       await showDialog(
-        context: context,
+        context: rootContext,
         barrierDismissible: false,
         builder: (dialogCtx) {
           // Kick off async processing after first frame
@@ -287,14 +288,16 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
       );
 
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(rootContext);
       if (processed == totalOps) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload complete')));
+        messenger.showSnackBar(const SnackBar(content: Text('Upload complete')));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload incomplete ($processed/$totalOps). See log.')));
+        messenger.showSnackBar(SnackBar(content: Text('Upload incomplete ($processed/$totalOps). See log.')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(SnackBar(content: Text('Upload failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _uploading = false);

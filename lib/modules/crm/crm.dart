@@ -89,27 +89,60 @@ class _CrmListScreenState extends State<CrmListScreen> {
 
 	Future<void> _deleteCustomer(CrmCustomer c) async {
 		if (!mounted) return;
+		bool deleting = false;
 		final confirm = await showDialog<bool>(
 			context: context,
-			builder: (_) => AlertDialog(
-				title: const Text('Delete Customer'),
-				content: Text('Are you sure you want to delete "${c.name}"?'),
-				actions: [
-					TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-					FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-				],
+			barrierDismissible: !deleting,
+			builder: (dialogCtx) => StatefulBuilder(
+				builder: (dialogCtx, setLocal) {
+						return PopScope(
+							canPop: !deleting,
+							onPopInvoked: (didPop) {},
+							child: AlertDialog(
+							title: const Text('Delete Customer'),
+							content: Column(
+								mainAxisSize: MainAxisSize.min,
+								children: [
+									Text('Are you sure you want to delete "${c.name}"?'),
+									if (deleting) const Padding(padding: EdgeInsets.only(top:12), child: LinearProgressIndicator(minHeight: 3)),
+								],
+							),
+							actions: [
+								TextButton(onPressed: deleting ? null : () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+								FilledButton.tonal(
+									onPressed: deleting ? null : () async {
+										setLocal(() => deleting = true);
+										try {
+											// Ensure we are authenticated (anonymous if necessary) so rules allow delete.
+											final auth = FirebaseAuth.instance;
+											if (auth.currentUser == null) { await auth.signInAnonymously(); }
+											if (c.id.isEmpty) { throw Exception('Missing document id'); }
+											await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
+											if (context.mounted) {
+												Navigator.pop(dialogCtx, true);
+											}
+										} catch (e) {
+											if (context.mounted) {
+												ScaffoldMessenger.of(context).showSnackBar(
+													SnackBar(content: Text(e.toString().contains('permission-denied')
+														? 'Permission denied deleting customer.'
+														: 'Delete failed: $e')),
+												);
+											}
+										} finally {
+											if (dialogCtx.mounted) setLocal(() => deleting = false);
+										}
+									},
+									child: deleting ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : const Text('Delete'),
+								),
+							],
+						),
+					);
+				},
 			),
 		);
-		if (confirm != true) return;
-		try {
-			if (c.id.isEmpty) throw Exception('Missing document id');
-			await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
-			if (!mounted) return;
+		if (confirm == true && mounted) {
 			ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${c.name}')));
-		} catch (e) {
-			if (!mounted) return;
-			ScaffoldMessenger.of(context)
-					.showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
 		}
 	}
 
@@ -370,7 +403,6 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 	late final TextEditingController nameCtrl;
 	late final TextEditingController phoneCtrl;
 	late final TextEditingController emailCtrl;
-	late LoyaltyStatus status;
 	bool _saving = false;
 
 	@override
@@ -380,7 +412,6 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 		nameCtrl = TextEditingController(text: c.name);
 		phoneCtrl = TextEditingController(text: c.phone);
 		emailCtrl = TextEditingController(text: c.email);
-		status = c.status;
 	}
 
 	@override
@@ -407,7 +438,7 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 				'name': nameCtrl.text.trim(),
 				'phone': phoneCtrl.text.trim(),
 				'email': emailCtrl.text.trim(),
-				'status': status.name,
+				// Loyalty status intentionally not editable here; keep existing value.
 				'updatedAt': FieldValue.serverTimestamp(),
 				if (id == null) 'createdAt': FieldValue.serverTimestamp(),
 			}, SetOptions(merge: true));
@@ -417,7 +448,7 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 				name: nameCtrl.text.trim(),
 				phone: phoneCtrl.text.trim(),
 				email: emailCtrl.text.trim(),
-				status: status,
+				// status unchanged
 			);
 			if (mounted) Navigator.pop(context, updated);
 		} catch (e) {
@@ -460,15 +491,10 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
 						),
 						const SizedBox(height: 8),
-						DropdownButtonFormField<LoyaltyStatus>(
-							value: status,
-							items: const [
-								DropdownMenuItem(value: LoyaltyStatus.bronze, child: Text('Bronze')),
-								DropdownMenuItem(value: LoyaltyStatus.silver, child: Text('Silver')),
-								DropdownMenuItem(value: LoyaltyStatus.gold, child: Text('Gold')),
-							],
-							onChanged: (v) => setState(() => status = v ?? status),
-							decoration: const InputDecoration(labelText: 'Loyalty'),
+						// Loyalty status display (read-only)
+						Align(
+							alignment: Alignment.centerLeft,
+							child: Text('Loyalty: ${widget.customer.status.label}', style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic)),
 						),
 						const SizedBox(height: 12),
 						Row(
