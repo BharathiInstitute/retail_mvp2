@@ -13,7 +13,7 @@
 
 import 'dart:io';
 import 'dart:convert';
-import 'invoice_models.dart';
+import '../pos_invoices/invoice_models.dart';
 import 'print_settings.dart';
 
 /// Public entry used by POS UI (conditionally imported).

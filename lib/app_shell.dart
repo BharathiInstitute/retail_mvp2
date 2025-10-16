@@ -9,16 +9,16 @@ import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
 import 'modules/pos/pos_cashier.dart';
 import 'modules/inventory/inventory.dart';
-import 'modules/invoices/invoices.dart';
+import 'modules/invoices/sales_invoices.dart';
 import 'modules/invoices/invoices_tabs.dart';
 import 'modules/crm/crm.dart';
 import 'modules/accounting/accounting.dart';
 import 'modules/loyalty/loyalty.dart';
 import 'modules/admin/admin.dart';
 // Auth screens
-import 'modules/auth/login_screen.dart';
-import 'modules/auth/register_screen.dart';
-import 'modules/auth/forgot_password_screen.dart';
+import 'core/auth/login_screen.dart';
+import 'core/auth/register_screen.dart';
+import 'core/auth/forgot_password_screen.dart';
 
 // ===== Inlined app state (from previous app_state.dart) =====
 import 'dart:async';

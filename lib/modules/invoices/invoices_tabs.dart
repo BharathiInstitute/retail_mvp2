@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'invoices.dart';
+import 'sales_invoices.dart';
 import 'purchse_invoice.dart';
-import 'package:retail_mvp2/dev/gstr3b_demo_seed.dart';
+// Seed helper removed; demo seeding disabled.
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Persist the last selected tab index across navigation using Riverpod.
@@ -78,12 +78,8 @@ class _InvoicesTabsScreenState extends ConsumerState<InvoicesTabsScreen> with Si
 class _SalesTab extends StatelessWidget {
   const _SalesTab();
   Future<void> _seed(BuildContext context) async {
-    try {
-      await seedGstr3bDemoData();
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo sales invoices seeded.')));
-    } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seed failed: $e')));
-    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo seed removed.')));
   }
   @override
   Widget build(BuildContext context) {
@@ -110,12 +106,8 @@ class _SalesTab extends StatelessWidget {
 class _PurchasesTab extends StatelessWidget {
   const _PurchasesTab();
   Future<void> _seedPurchases(BuildContext context) async {
-    try {
-      await seedGstr3bDemoData();
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo purchase invoices seeded (shared seed).')));
-    } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seed failed: $e')));
-    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo seed removed.')));
   }
 
   @override

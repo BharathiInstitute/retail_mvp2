@@ -368,12 +368,12 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                 'name': name,
                 'location': _location,
                 'deltaQty': delta,
-                'storeAfter': after?.stockAt('Store'),
-                'warehouseAfter': after?.stockAt('Warehouse'),
-                'totalAfter': after == null ? null : after.stockAt('Store') + after.stockAt('Warehouse'),
+                'storeAfter': after != null ? after.stockAt('Store') : 0,
+                'warehouseAfter': after != null ? after.stockAt('Warehouse') : 0,
+                'totalAfter': after != null ? after.stockAt('Store') + after.stockAt('Warehouse') : 0,
                 'note': noteVal.isEmpty ? null : noteVal,
-                'updatedAt': after?.updatedAt,
-                'updatedBy': after?.updatedBy,
+                'updatedAt': after != null ? after.updatedAt : null,
+                'updatedBy': after != null ? after.updatedBy : null,
               });
             } catch (err) {
               if (!mounted) return; // abort if unmounted
@@ -389,12 +389,12 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               name: name,
               location: _location,
               deltaQty: delta,
-              storeAfter: after?.stockAt('Store') ?? 0,
-              warehouseAfter: after?.stockAt('Warehouse') ?? 0,
-              totalAfter: after == null ? 0 : after.stockAt('Store') + after.stockAt('Warehouse'),
+              storeAfter: after != null ? after.stockAt('Store') : 0,
+              warehouseAfter: after != null ? after.stockAt('Warehouse') : 0,
+              totalAfter: after != null ? after.stockAt('Store') + after.stockAt('Warehouse') : 0,
               note: noteVal.isEmpty ? null : noteVal,
-              updatedAt: after?.updatedAt,
-              updatedBy: after?.updatedBy,
+              updatedAt: after != null ? after.updatedAt : null,
+              updatedBy: after != null ? after.updatedBy : null,
             );
             if (mounted) {
               final nav = Navigator.of(context);

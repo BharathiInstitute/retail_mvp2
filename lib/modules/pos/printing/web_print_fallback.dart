@@ -3,7 +3,7 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:async';
 import 'dart:html' as html;
-import 'invoice_models.dart';
+import '../pos_invoices/invoice_models.dart';
 import 'package:flutter/foundation.dart';
 
 /// Opens a new tab/window and injects printable HTML, then triggers browser print.

@@ -13,17 +13,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import 'invoice_models.dart';
-import 'invoice_pdf.dart' as pdf_gen; // For PDF generation (email attachment only; download removed)
-import 'invoice_email_service.dart';
+import 'pos_invoices/invoice_models.dart';
+import 'pos_invoices/invoice_pdf.dart' as pdf_gen; // For PDF generation (email attachment only; download removed)
+import 'pos_invoices/invoice_email_service.dart';
 import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav.dart';
 import '../inventory/inventory_repository.dart';
 import 'pos_checkout.dart';
 import 'credit_service.dart';
 import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
-import 'windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
-import 'web_print_fallback_stub.dart' if (dart.library.js) 'web_print_fallback.dart';
+import 'printing/windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
+import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'web_print_fallback.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
 const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);

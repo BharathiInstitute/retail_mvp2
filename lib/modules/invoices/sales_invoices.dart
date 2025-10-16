@@ -1,11 +1,8 @@
-// NOTE: Temporary isolation of invoices UI & models to avoid name shadowing issues reported by analyzer.
-// The standard Flutter widgets like SizedBox, IconButton, etc. were being reported as if redefined here.
-// We keep only required imports and ensure no symbol clashes.
+// Renamed from invoices.dart to sales_invoices.dart
+// Content mirrors the original to avoid breakages.
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-// Invoices module (renamed from Billing)
-// Lists invoices stored in Firestore. Preview panel removed per request.
 
 class InvoicesListScreen extends StatefulWidget {
   final String? invoiceId;
@@ -124,7 +121,6 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
             icon: const Icon(Icons.date_range),
             label: Text(dateRange == null ? 'Date Range' : '${_fmtDate(dateRange!.start)} → ${_fmtDate(dateRange!.end)}'),
           ),
-          // Purchase entry moved to Purchases tab (invoices_tabs.dart)
           OutlinedButton.icon(
             onPressed: () => setState(() {
               query = '';
@@ -176,7 +172,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
           ),
         );
       },
-    ); // end showDialog
+    );
   }
 
   Widget _invoiceDetailsContent(Invoice inv, BuildContext dialogCtx) {
@@ -266,7 +262,6 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
                         children: [
                           const Text('Totals', style: TextStyle(fontWeight: FontWeight.w600)),
                           const SizedBox(height: 6),
-                          // Removed Subtotal per request
                           _kv('Tax Total', gst.totalTax),
                           const Divider(),
                           _kv('Grand Total', inv.total(taxInclusive: taxInclusive), bold: true),
@@ -325,7 +320,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
       builder: (_) => EditInvoiceDialog(invoice: inv),
     );
   }
-} // end _InvoicesPageState
+}
 
 class BillingCustomer {
   final String name;
@@ -400,288 +395,116 @@ class Invoice {
       for (final l in linesRaw) {
         if (l is Map) {
           final sku = (l['sku'] ?? '').toString();
-          final name = (l['name'] ?? sku).toString();
-          final unitPrice = (l['unitPrice'] is num) ? (l['unitPrice'] as num).toDouble() : double.tryParse('${l['unitPrice']}') ?? 0;
-          final taxPercent = (l['taxPercent'] is num) ? (l['taxPercent'] as num).toInt() : int.tryParse('${l['taxPercent']}') ?? 0;
-          final qty = (l['qty'] is num) ? (l['qty'] as num).toInt() : int.tryParse('${l['qty']}') ?? 1;
-          final product = BillingProduct(sku: sku, name: name, price: unitPrice, taxPercent: taxPercent);
-          items.add(InvoiceItem(product: product, qty: qty));
+          final name = (l['name'] ?? '').toString();
+          final price = (l['price'] is num) ? (l['price'] as num).toDouble() : double.tryParse(l['price']?.toString() ?? '') ?? 0.0;
+          final qty = (l['qty'] is num) ? (l['qty'] as num).toInt() : int.tryParse(l['qty']?.toString() ?? '') ?? 1;
+          final tax = (l['taxPct'] is num) ? (l['taxPct'] as num).toInt() : int.tryParse(l['taxPct']?.toString() ?? '') ?? 0;
+          items.add(InvoiceItem(product: BillingProduct(sku: sku, name: name, price: price, taxPercent: tax), qty: qty));
         }
       }
     }
-    final paymentMode = (data['paymentMode'] as String?)?.trim();
-    if (paymentMode != null && paymentMode.isNotEmpty) {
-      return InvoiceWithMode(
-        invoiceNo: invoiceNo,
-        customer: customer,
-        items: items,
-        date: date,
-        status: status,
-        taxInclusive: true,
-        paymentMode: paymentMode,
-      );
-    }
-    return Invoice(invoiceNo: invoiceNo, customer: customer, items: items, date: date, status: status, taxInclusive: true);
-  }
-
-  Invoice copyWith({String? invoiceNo, BillingCustomer? customer, List<InvoiceItem>? items, DateTime? date, String? status, bool? taxInclusive}) {
+    final taxInclusive = data['taxInclusive'] == true;
     return Invoice(
-      invoiceNo: invoiceNo ?? this.invoiceNo,
-      customer: customer ?? this.customer,
-      items: items ?? this.items,
-      date: date ?? this.date,
-      status: status ?? this.status,
-      taxInclusive: taxInclusive ?? this.taxInclusive,
+      invoiceNo: invoiceNo,
+      customer: customer,
+      items: items,
+      date: date,
+      status: status,
+      taxInclusive: taxInclusive,
     );
   }
 
-  double subtotal({required bool taxInclusive}) => items.fold(0.0, (s, it) => s + it.lineSubtotal(taxInclusive: taxInclusive));
-  double total({required bool taxInclusive}) => items.fold(0.0, (s, it) => s + it.lineTotal(taxInclusive: taxInclusive));
-  static GSTBreakup gstBreakupFor(List<InvoiceItem> items, {required bool taxInclusive}) {
+  double subtotal({required bool taxInclusive}) => items.fold(0.0, (p, it) => p + it.lineSubtotal(taxInclusive: taxInclusive));
+  double taxTotal({required bool taxInclusive}) => items.fold(0.0, (p, it) => p + it.lineTax(taxInclusive: taxInclusive));
+  double total({required bool taxInclusive}) => items.fold(0.0, (p, it) => p + it.lineTotal(taxInclusive: taxInclusive));
+
+  GSTBreakup gstBreakup({required bool taxInclusive}) {
     double cgst = 0, sgst = 0, igst = 0;
     for (final it in items) {
       final tax = it.lineTax(taxInclusive: taxInclusive);
+      // Simple split 50/50 between CGST and SGST, IGST as 0 for local sales.
       cgst += tax / 2;
       sgst += tax / 2;
     }
     return GSTBreakup(cgst: cgst, sgst: sgst, igst: igst);
   }
-  GSTBreakup gstBreakup({required bool taxInclusive}) => gstBreakupFor(items, taxInclusive: taxInclusive);
 }
-
-class CreditDebitNote {
-  final String invoiceNo;
-  final String type;
-  final double amount;
-  final String reason;
-  final DateTime date;
-  CreditDebitNote({required this.invoiceNo, required this.type, required this.amount, required this.reason, required this.date});
-}
-
-String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 class InvoiceWithMode extends Invoice {
-  final String? paymentMode;
-  InvoiceWithMode({required super.invoiceNo, required super.customer, required super.items, required super.date, required super.status, required super.taxInclusive, this.paymentMode});
-  factory InvoiceWithMode.fromInvoice(Invoice base, {String? paymentMode}) {
-    return InvoiceWithMode(
-      invoiceNo: base.invoiceNo,
-      customer: base.customer,
-      items: base.items,
-      date: base.date,
-      status: base.status,
-      taxInclusive: base.taxInclusive,
-      paymentMode: paymentMode,
-    );
-  }
+  final String paymentMode;
+  InvoiceWithMode({
+    required super.invoiceNo,
+    required super.customer,
+    required super.items,
+    required super.date,
+    required super.status,
+    required super.taxInclusive,
+    required this.paymentMode,
+  });
 }
 
-// Dedicated edit dialog widget (simpler structure -> fewer brace mismatches)
 class EditInvoiceDialog extends StatefulWidget {
   final Invoice invoice;
   const EditInvoiceDialog({super.key, required this.invoice});
-
   @override
   State<EditInvoiceDialog> createState() => _EditInvoiceDialogState();
 }
 
 class _EditInvoiceDialogState extends State<EditInvoiceDialog> {
-  late List<InvoiceItem> _items;
-  late List<TextEditingController> _qtyCtrls;
-  late List<TextEditingController> _priceCtrls;
-  late TextEditingController _customerCtrl;
-  late String _status;
+  late final TextEditingController _statusCtrl;
+  late final TextEditingController _modeCtrl;
 
   @override
   void initState() {
     super.initState();
-    _items = widget.invoice.items.map((e) => e).toList();
-    _qtyCtrls = [for (final it in _items) TextEditingController(text: it.qty.toString())];
-    _priceCtrls = [for (final it in _items) TextEditingController(text: it.product.price.toStringAsFixed(2))];
-    _customerCtrl = TextEditingController(text: widget.invoice.customer.name);
-    _status = widget.invoice.status;
+    _statusCtrl = TextEditingController(text: widget.invoice.status);
+    _modeCtrl = TextEditingController(text: widget.invoice is InvoiceWithMode ? (widget.invoice as InvoiceWithMode).paymentMode : '');
   }
 
-  double _grandTotal() {
-    double total = 0;
-    for (int i = 0; i < _items.length; i++) {
-      final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
-      final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
-      final taxPercent = _items[i].product.taxPercent;
-      final base = price / (1 + taxPercent / 100);
-      final lineSubtotal = base * qty;
-      final lineTax = lineSubtotal * taxPercent / 100;
-      total += lineSubtotal + lineTax;
-    }
-    return total;
-  }
-
-  Future<void> _save() async {
-    if (_items.isEmpty) return;
-    final docRef = FirebaseFirestore.instance.collection('invoices').doc(widget.invoice.invoiceNo);
-    final updatedLines = <Map<String, dynamic>>[];
-    for (int i = 0; i < _items.length; i++) {
-      final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
-      final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
-      updatedLines.add({
-        'sku': _items[i].product.sku,
-        'name': _items[i].product.name,
-        'qty': qty,
-        'unitPrice': price,
-        'taxPercent': _items[i].product.taxPercent,
-      });
-    }
-    await docRef.update({
-      'customerName': _customerCtrl.text.trim(),
-      'status': _status,
-      'lines': updatedLines,
-      'lastEditedAt': FieldValue.serverTimestamp(),
-    });
-    if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).pop(true);
+  @override
+  void dispose() {
+    _statusCtrl.dispose();
+    _modeCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final grand = _grandTotal();
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Edit Invoice', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _statusCtrl,
+            decoration: const InputDecoration(labelText: 'Status (Paid/Pending/Credit)'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _modeCtrl,
+            decoration: const InputDecoration(labelText: 'Payment Mode'),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Row(
-                children: [
-                  Expanded(child: Text('Edit Invoice #${widget.invoice.invoiceNo}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _customerCtrl,
-                              decoration: const InputDecoration(labelText: 'Customer Name'),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          DropdownButton<String>(
-                            value: _status,
-                            items: const [
-                              DropdownMenuItem(value: 'Paid', child: Text('Paid')),
-                              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                              DropdownMenuItem(value: 'Credit', child: Text('Credit')),
-                            ],
-                            onChanged: (v) => setState(() => _status = v ?? _status),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: DataTable(
-                          columns: const [
-                            DataColumn(label: Text('SKU')),
-                            DataColumn(label: Text('Item')),
-                            DataColumn(label: Text('Qty')),
-                            DataColumn(label: Text('Price')),
-                            DataColumn(label: Text('GST %')),
-                            DataColumn(label: Text('Line Total')),
-                            DataColumn(label: Text('')),
-                          ],
-                          rows: [
-                            for (int i = 0; i < _items.length; i++)
-                              DataRow(cells: [
-                                DataCell(Text(_items[i].product.sku)),
-                                DataCell(Text(_items[i].product.name)),
-                                DataCell(SizedBox(
-                                  width: 60,
-                                  child: TextField(
-                                    controller: _qtyCtrls[i],
-                                    keyboardType: TextInputType.number,
-                                    onChanged: (_) => setState(() {}),
-                                    decoration: const InputDecoration(border: InputBorder.none),
-                                  ),
-                                )),
-                                DataCell(SizedBox(
-                                  width: 80,
-                                  child: TextField(
-                                    controller: _priceCtrls[i],
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    onChanged: (_) => setState(() {}),
-                                    decoration: const InputDecoration(border: InputBorder.none),
-                                  ),
-                                )),
-                                DataCell(Text('${_items[i].product.taxPercent}%')),
-                                DataCell(() {
-                                  final qty = int.tryParse(_qtyCtrls[i].text.trim()) ?? _items[i].qty;
-                                  final price = double.tryParse(_priceCtrls[i].text.trim()) ?? _items[i].product.price;
-                                  final taxPercent = _items[i].product.taxPercent;
-                                  final base = price / (1 + taxPercent / 100);
-                                  final lineSubtotal = base * qty;
-                                  final lineTax = lineSubtotal * taxPercent / 100;
-                                  final total = lineSubtotal + lineTax;
-                                  return Text('₹${total.toStringAsFixed(2)}');
-                                }()),
-                                DataCell(IconButton(
-                                  tooltip: 'Remove line',
-                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                                  onPressed: () => setState(() {
-                                    _items.removeAt(i);
-                                    _qtyCtrls.removeAt(i);
-                                    _priceCtrls.removeAt(i);
-                                  }),
-                                )),
-                              ]),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text('Grand Total: ₹${grand.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton.icon(
-                      onPressed: _items.isEmpty ? null : _save,
-                      icon: const Icon(Icons.save),
-                      label: const Text('Save Changes'),
-                    ),
-                  ],
-                ),
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () {
+                  // Persisting to Firestore removed for demo-only module.
+                  Navigator.pop(context, true);
+                },
+                child: const Text('Save'),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
+String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}' ;

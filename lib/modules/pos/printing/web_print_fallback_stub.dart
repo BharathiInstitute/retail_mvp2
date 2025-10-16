@@ -1,5 +1,5 @@
 // Fallback stub for non-web platforms: returns false meaning not handled.
-import 'invoice_models.dart';
+import '../pos_invoices/invoice_models.dart';
 
 Future<bool> webFallbackPrintInvoice(InvoiceData invoice) async {
   return false; // Not supported off-web.

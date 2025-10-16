@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/auth/auth.dart' show authRepositoryProvider;
+import 'auth.dart' show authRepositoryProvider;
 
-class LoginScreen extends ConsumerStatefulWidget {
-	const LoginScreen({super.key});
+class RegisterScreen extends ConsumerStatefulWidget {
+	const RegisterScreen({super.key});
 
 	@override
-	ConsumerState<LoginScreen> createState() => _LoginScreenState();
+	ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> {
+class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 	final _formKey = GlobalKey<FormState>();
 	final _emailCtrl = TextEditingController();
 	final _passwordCtrl = TextEditingController();
@@ -29,7 +29,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 		setState(() { _loading = true; _error = null; });
 		final repo = ref.read(authRepositoryProvider);
 		try {
-			await repo.signInWithEmailPassword(
+			await repo.createUserWithEmailPassword(
 				email: _emailCtrl.text.trim(),
 				password: _passwordCtrl.text,
 			);
@@ -44,7 +44,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 	@override
 	Widget build(BuildContext context) {
 		return Scaffold(
-			appBar: AppBar(title: const Text('Sign in')),
+			appBar: AppBar(title: const Text('Create account')),
 			body: Center(
 				child: ConstrainedBox(
 					constraints: const BoxConstraints(maxWidth: 420),
@@ -67,7 +67,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 										const SizedBox(height: 12),
 										TextFormField(
 											controller: _passwordCtrl,
-											autofillHints: const [AutofillHints.password],
+											autofillHints: const [AutofillHints.newPassword],
 											obscureText: true,
 											decoration: const InputDecoration(labelText: 'Password'),
 											validator: (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
@@ -78,16 +78,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 										const SizedBox(height: 12),
 										FilledButton(
 											onPressed: _loading ? null : _submit,
-											child: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Sign in'),
+											child: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Create account'),
 										),
 										const SizedBox(height: 12),
 										TextButton(
-											onPressed: _loading ? null : () => context.push('/forgot'),
-											child: const Text('Forgot password?'),
-										),
-										TextButton(
-											onPressed: _loading ? null : () => context.push('/register'),
-											child: const Text('Create an account'),
+											onPressed: _loading ? null : () => context.go('/login'),
+											child: const Text('Back to sign in'),
 										),
 									],
 								),

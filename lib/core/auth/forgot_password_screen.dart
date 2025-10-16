@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/auth/auth.dart' show authRepositoryProvider;
+import 'auth.dart' show authRepositoryProvider;
 
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
 	const ForgotPasswordScreen({super.key});

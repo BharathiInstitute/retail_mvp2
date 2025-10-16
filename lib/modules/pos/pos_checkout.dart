@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'pos.dart';
-import 'print_settings.dart';
+import 'printing/print_settings.dart';
 
 class CheckoutPanel extends StatefulWidget {
   final Stream<List<Customer>> customersStream;
