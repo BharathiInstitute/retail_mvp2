@@ -152,9 +152,15 @@ final _movementsProvider = StreamProvider.autoDispose<List<MovementRecord>>((ref
 
 MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
+<<<<<<< HEAD
+  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+  return MovementRecord(
+    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+=======
   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return MovementRecord(
     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
     type: (m['type'] ?? '') as String,
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
@@ -164,7 +170,11 @@ MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
     totalAfter: (m['totalAfter'] as num?)?.toInt(),
     note: m['note'] as String?,
+<<<<<<< HEAD
+    updatedAt: ts(m['updatedAt']),
+=======
     updatedAt: tsLocal(m['updatedAt']),
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
     updatedBy: m['updatedBy'] as String?,
   );
 }
@@ -345,59 +355,65 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
             final user = ref.read(authStateProvider);
             final delta = _parseDelta();
             setState(() => _submitting = true);
+            // Capture values needed across async gaps
+            final sku = _selected!.sku;
+            final name = _selected!.name;
+            final noteVal = _noteCtrl.text.trim();
             ProductDoc? after;
             try {
-              // Persist change
               await repo.applyStockMovement(
-                sku: _selected!.sku,
+                sku: sku,
                 location: _location,
                 deltaQty: delta,
                 type: _type,
-                note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                note: noteVal.isEmpty ? null : noteVal,
                 updatedBy: user?.email,
               );
-              after = await repo.getProduct(_selected!.sku);
-              // Store movement history document
+              after = await repo.getProduct(sku);
               final firestore = FirebaseFirestore.instance;
               await firestore.collection('inventory_movements').add({
                 'createdAt': FieldValue.serverTimestamp(),
                 'type': _type,
-                'sku': _selected!.sku,
-                'name': _selected!.name,
+                'sku': sku,
+                'name': name,
                 'location': _location,
                 'deltaQty': delta,
                 'storeAfter': after?.stockAt('Store'),
                 'warehouseAfter': after?.stockAt('Warehouse'),
-                'totalAfter': after?.totalStock,
-                'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                'totalAfter': after == null ? null : after.stockAt('Store') + after.stockAt('Warehouse'),
+                'note': noteVal.isEmpty ? null : noteVal,
                 'updatedAt': after?.updatedAt,
                 'updatedBy': after?.updatedBy,
               });
             } catch (err) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
-              }
+              if (!mounted) return; // abort if unmounted
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
               setState(() => _submitting = false);
               return;
             }
+            if (!mounted) return;
             final record = MovementRecord(
               date: DateTime.now(),
               type: _type,
-              sku: _selected!.sku,
-              name: _selected!.name,
+              sku: sku,
+              name: name,
               location: _location,
               deltaQty: delta,
-              storeAfter: after?.stockAt('Store'),
-              warehouseAfter: after?.stockAt('Warehouse'),
-              totalAfter: after?.totalStock,
-              note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+              storeAfter: after?.stockAt('Store') ?? 0,
+              warehouseAfter: after?.stockAt('Warehouse') ?? 0,
+              totalAfter: after == null ? 0 : after.stockAt('Store') + after.stockAt('Warehouse'),
+              note: noteVal.isEmpty ? null : noteVal,
               updatedAt: after?.updatedAt,
               updatedBy: after?.updatedBy,
             );
+<<<<<<< HEAD
+            Navigator.pop(context, record);
+=======
             if (mounted) {
               final nav = Navigator.of(context);
               if (nav.mounted) nav.pop(record);
             }
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
           },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

@@ -161,9 +161,15 @@ final _transfersProvider = StreamProvider.autoDispose<List<TransferRecord>>((ref
 
 TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
+<<<<<<< HEAD
+  DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+  return TransferRecord(
+    date: ts(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+=======
   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return TransferRecord(
     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
     from: (m['from'] ?? '') as String,
@@ -173,7 +179,11 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     storeAfter: (m['storeAfter'] as num?)?.toInt(),
     warehouseAfter: (m['warehouseAfter'] as num?)?.toInt(),
     totalAfter: (m['totalAfter'] as num?)?.toInt(),
+<<<<<<< HEAD
+    updatedAt: ts(m['updatedAt']),
+=======
     updatedAt: tsLocal(m['updatedAt']),
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
     updatedBy: m['updatedBy'] as String?,
   );
 }
@@ -365,14 +375,17 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     );
                     final after = await repo.getProduct(_selected!.sku);
                     final firestore = FirebaseFirestore.instance;
+                    final noteVal = _noteCtrl.text.trim();
+                    final skuVal = _selected!.sku;
+                    final nameVal = _selected!.name;
                     await firestore.collection('inventory_transfers').add({
                       'createdAt': FieldValue.serverTimestamp(),
-                      'sku': _selected!.sku,
-                      'name': _selected!.name,
+                      'sku': skuVal,
+                      'name': nameVal,
                       'from': _from,
                       'to': _to,
                       'qty': qty,
-                      'note': _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+                      'note': noteVal.isEmpty ? null : noteVal,
                       'storeAfter': after?.stockAt('Store'),
                       'warehouseAfter': after?.stockAt('Warehouse'),
                       'totalAfter': after == null ? null : (after.stockAt('Store') + after.stockAt('Warehouse')),
@@ -386,10 +399,15 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     setState(() => _submitting = false);
                     return;
                   }
+<<<<<<< HEAD
+                  if (!mounted) return;
+                  Navigator.pop(context); // stream refresh
+=======
                   if (mounted) {
                     final nav = Navigator.of(context);
                     if (nav.mounted) nav.pop(); // stream refresh
                   }
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
                 },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

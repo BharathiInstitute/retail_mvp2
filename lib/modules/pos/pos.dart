@@ -1,6 +1,8 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+<<<<<<< HEAD
+// POS shared models and enums (no UI in this file)
+=======
 // Standalone POS Screen UI with demo data and full feature coverage (no external deps)
 
 class PosPage extends StatefulWidget {
@@ -679,6 +681,7 @@ class _PosPageState extends State<PosPage> {
 }
 
 // Demo Models & Data structures
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
 
 class Product {
   final String sku;
@@ -743,14 +746,14 @@ class Customer {
   final double discountPercent; // derived suggested discount
   final double creditBalance; // running outstanding credit (customer owes)
 
-  Customer({
+  const Customer({
     required this.id,
     required this.name,
     this.email,
     this.phone,
     this.status,
     this.totalSpend = 0.0,
-  this.rewardsPoints = 0.0,
+    this.rewardsPoints = 0.0,
     this.discountPercent = 0.0,
   this.creditBalance = 0.0,
   });
@@ -763,7 +766,7 @@ class Customer {
     final spendRaw = data['totalSpend'];
     final spend = spendRaw is num ? spendRaw.toDouble() : double.tryParse('$spendRaw') ?? 0.0;
     // Use stored loyaltyPoints if present, else fallback
-  double rewards = 0;
+    double rewards = 0;
     final lp = data['loyaltyPoints'];
     if (lp is num) {
       rewards = lp.toDouble();
@@ -779,21 +782,37 @@ class Customer {
       discount = loyaltyDisc.toDouble();
     } else {
       switch (tier) {
+<<<<<<< HEAD
+        case 'gold':
+          discount = 10;
+          break;
+        case 'silver':
+          discount = 5;
+          break;
+        case 'bronze':
+          discount = 2;
+          break;
+=======
         case 'gold': {
           discount = 10; break; }
         case 'silver': {
           discount = 5; break; }
         case 'bronze': {
           discount = 2; break; }
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
         default:
           discount = 0;
       }
     }
+<<<<<<< HEAD
+    return Customer(
+=======
   final creditRaw = data['creditBalance'] ?? data['khathaBalance']; // migrate old field
   double credit = 0;
   if (creditRaw is num) credit = creditRaw.toDouble();
   else if (creditRaw is String) credit = double.tryParse(creditRaw) ?? 0;
   return Customer(
+>>>>>>> 225ee36 (POS: silent web printing pipeline + Windows silent fallback; backend server hardened; credit service (add/repay/mixed) transactional; cashier screen; print settings UI. Also: config default printer, safe enums, and cleanup of legacy demo.)
       id: doc.id,
       name: name,
       email: (data['email'] as String?)?.trim(),
@@ -835,44 +854,10 @@ extension PaymentModeX on PaymentMode {
   };
 }
 
-// Payment split model removed
-
 enum DiscountType { none, percent, flat }
 
 extension DiscountTypeX on DiscountType {
   String get label => switch (this) { DiscountType.none => 'None', DiscountType.percent => 'Percent %', DiscountType.flat => 'Flat ₹' };
-}
-
-
-class _HeldOrdersDialog extends StatelessWidget {
-  final List<HeldOrder> orders;
-  const _HeldOrdersDialog({required this.orders});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Held Orders'),
-      content: SizedBox(
-        width: 480,
-        height: 360,
-        child: orders.isEmpty
-            ? const Center(child: Text('No held orders'))
-            : ListView.separated(
-                itemCount: orders.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final o = orders[i];
-                  final total = o.items.fold<double>(0, (s, it) => s + it.product.price * it.qty);
-                  return ListTile(
-                    title: Text(o.id),
-                    subtitle: Text('${o.items.length} items · ₹${total.toStringAsFixed(2)}'),
-                  );
-                },
-              ),
-      ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-    );
-  }
 }
 
 
