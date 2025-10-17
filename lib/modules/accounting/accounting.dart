@@ -122,14 +122,20 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 				final up = data['unitPrice'];
 				if (up is num) {
 				  unitPrice = up.toDouble();
-				} else if (up != null) unitPrice = double.tryParse(up.toString()) ?? 0;
+				} else if (up != null) {
+				  unitPrice = double.tryParse(up.toString()) ?? 0;
+				}
 				final batches = (data['batches'] as List?)?.whereType<Map>().toList() ?? const <Map>[];
 				int qty = 0;
 				for (final b in batches) {
 					final q = b['qty'];
 					if (q is int) {
 					  qty += q;
-					} else if (q is num) qty += q.toInt(); else if (q != null) qty += int.tryParse(q.toString()) ?? 0;
+					} else if (q is num) {
+					  qty += q.toInt();
+					} else if (q != null) {
+					  qty += int.tryParse(q.toString()) ?? 0;
+					}
 				}
 				total += unitPrice * qty;
 			}

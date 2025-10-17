@@ -11,7 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth.dart';
-import 'inventory_repository.dart';
+import 'Products/inventory_repository.dart';
 
 /// Unified Products Import screen (CSV/XLSX): pick → preview → import → summary
 class ImportProductsScreen extends ConsumerStatefulWidget {

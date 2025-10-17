@@ -368,3 +368,213 @@ exports.createUserAccount = functions.region('us-central1').https.onCall(async (
 	}
 });
 
+// -------------------------------------------------------------
+// setInitialOwner (callable)
+// -------------------------------------------------------------
+// Sets the very first owner if and only if no current owner exists.
+// Only callable by a signed-in user; no special role is required for
+// the first setup, but once an owner exists, only that owner can change.
+// UI calls this when there is no owner doc found.
+exports.setInitialOwner = functions.region('us-central1').https.onCall(async (data, context) => {
+	try {
+		if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+		const { uid } = data || {};
+		if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+		const usersCol = admin.firestore().collection('users');
+		const existingOwnerSnap = await usersCol.where('role', '==', 'owner').limit(1).get();
+		if (!existingOwnerSnap.empty) {
+			throw new functions.https.HttpsError('failed-precondition', 'Owner already exists');
+		}
+
+		// Promote target user to owner
+		await admin.auth().setCustomUserClaims(uid, { role: 'owner' });
+		const now = admin.firestore.FieldValue.serverTimestamp();
+		const uref = usersCol.doc(uid);
+		const udoc = await uref.get();
+		if (udoc.exists) {
+			await uref.update({ role: 'owner', updatedAt: now });
+		} else {
+			await uref.set({ role: 'owner', createdAt: now, updatedAt: now });
+		}
+
+		return { ok: true, uid };
+	} catch (err) {
+		console.error('setInitialOwner error', err);
+		if (err instanceof functions.https.HttpsError) throw err;
+		throw new functions.https.HttpsError('internal', err?.message || String(err));
+	}
+});
+
+// -------------------------------------------------------------
+// transferOwnership (callable)
+// -------------------------------------------------------------
+// Only current owner can transfer ownership to another existing user.
+exports.transferOwnership = functions.region('us-central1').https.onCall(async (data, context) => {
+	try {
+		if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+		const callerUid = context.auth.uid;
+		const claims = context.auth.token || {};
+		let callerRole = claims.role;
+		if (!callerRole) {
+			try {
+				const callerDoc = await admin.firestore().collection('users').doc(callerUid).get();
+				callerRole = callerDoc.exists ? callerDoc.get('role') : undefined;
+			} catch (_) {}
+		}
+		if (callerRole !== 'owner') {
+			throw new functions.https.HttpsError('permission-denied', 'Only owner can transfer ownership');
+		}
+
+		const { newOwnerUid } = data || {};
+		if (!newOwnerUid) throw new functions.https.HttpsError('invalid-argument', 'newOwnerUid required');
+		if (newOwnerUid === callerUid) {
+			throw new functions.https.HttpsError('failed-precondition', 'Already owner');
+		}
+
+		const usersCol = admin.firestore().collection('users');
+		// Ensure target exists
+		const targetAuth = await admin.auth().getUser(newOwnerUid);
+		if (!targetAuth || !targetAuth.uid) {
+			throw new functions.https.HttpsError('not-found', 'Target user not found');
+		}
+
+		const now = admin.firestore.FieldValue.serverTimestamp();
+		const callerRef = usersCol.doc(callerUid);
+		const targetRef = usersCol.doc(newOwnerUid);
+
+		// Transactionally update Firestore docs
+		await admin.firestore().runTransaction(async (tx) => {
+			const callerDoc = await tx.get(callerRef);
+			const targetDoc = await tx.get(targetRef);
+			if (!callerDoc.exists || callerDoc.get('role') !== 'owner') {
+				throw new functions.https.HttpsError('permission-denied', 'Caller not owner');
+			}
+			if (!targetDoc.exists) {
+				tx.set(targetRef, { role: 'owner', createdAt: now, updatedAt: now }, { merge: true });
+			} else {
+				tx.update(targetRef, { role: 'owner', updatedAt: now });
+			}
+			// Demote caller to manager by default (you can customize)
+			tx.update(callerRef, { role: 'manager', updatedAt: now });
+		});
+
+		// Update custom claims
+		await admin.auth().setCustomUserClaims(newOwnerUid, { role: 'owner' });
+		await admin.auth().setCustomUserClaims(callerUid, { role: 'manager' });
+
+		return { ok: true, newOwnerUid };
+	} catch (err) {
+		console.error('transferOwnership error', err);
+		if (err instanceof functions.https.HttpsError) throw err;
+		throw new functions.https.HttpsError('internal', err?.message || String(err));
+	}
+});
+
+// -------------------------------------------------------------
+// updateUserAccount (callable)
+// -------------------------------------------------------------
+// Update displayName/role/stores of a user. Only owner may set role=owner.
+// Manager can update others but cannot promote to owner.
+exports.updateUserAccount = functions.region('us-central1').https.onCall(async (data, context) => {
+	try {
+		if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+		const { uid, displayName, role, stores } = data || {};
+		if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+		const claims = context.auth.token || {};
+		let callerRole = claims.role;
+		if (!callerRole) {
+			try {
+				const callerDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
+				callerRole = callerDoc.exists ? callerDoc.get('role') : undefined;
+			} catch (_) {}
+		}
+		if (!callerRole || !['owner','manager'].includes(String(callerRole))) {
+			throw new functions.https.HttpsError('permission-denied', 'Insufficient privileges');
+		}
+
+		// Role validation
+		const allowRoles = new Set(['owner','manager','accountant','cashier','clerk']);
+		let targetRole = role;
+		if (targetRole && !allowRoles.has(targetRole)) {
+			throw new functions.https.HttpsError('invalid-argument', 'Invalid role');
+		}
+		if (targetRole === 'owner' && callerRole !== 'owner') {
+			throw new functions.https.HttpsError('permission-denied', 'Only owner can assign owner role');
+		}
+
+		const updates = {};
+		if (displayName && typeof displayName === 'string') updates.displayName = displayName;
+		if (Array.isArray(stores)) updates.stores = stores.filter(s => typeof s === 'string' && s.trim());
+		if (targetRole) updates.role = targetRole;
+		updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+
+		const userRef = admin.firestore().collection('users').doc(uid);
+		const exists = (await userRef.get()).exists;
+		if (!exists) {
+			await userRef.set(Object.assign({ createdAt: updates.updatedAt }, updates), { merge: true });
+		} else {
+			await userRef.update(updates);
+		}
+
+		// Sync custom claims if role changed
+		if (targetRole) {
+			await admin.auth().setCustomUserClaims(uid, { role: targetRole });
+		}
+		if (displayName) {
+			try { await admin.auth().updateUser(uid, { displayName }); } catch (_) {}
+		}
+		return { ok: true, uid, updates };
+	} catch (err) {
+		console.error('updateUserAccount error', err);
+		if (err instanceof functions.https.HttpsError) throw err;
+		throw new functions.https.HttpsError('internal', err?.message || String(err));
+	}
+});
+
+// -------------------------------------------------------------
+// deleteUserAccount (callable)
+// -------------------------------------------------------------
+// Only owner or manager can delete, but owner user cannot be deleted.
+exports.deleteUserAccount = functions.region('us-central1').https.onCall(async (data, context) => {
+	try {
+		if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+		const { uid } = data || {};
+		if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+		const claims = context.auth.token || {};
+		let callerRole = claims.role;
+		if (!callerRole) {
+			try {
+				const callerDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
+				callerRole = callerDoc.exists ? callerDoc.get('role') : undefined;
+			} catch (_) {}
+		}
+		if (!callerRole || !['owner','manager'].includes(String(callerRole))) {
+			throw new functions.https.HttpsError('permission-denied', 'Insufficient privileges');
+		}
+
+		// Prevent deleting current owner
+		const targetDoc = await admin.firestore().collection('users').doc(uid).get();
+		const targetRole = targetDoc.exists ? (targetDoc.get('role') || '') : '';
+		if (targetRole === 'owner') {
+			throw new functions.https.HttpsError('failed-precondition', 'Cannot delete owner account');
+		}
+
+		// Delete auth user and profile
+		try { await admin.auth().deleteUser(uid); } catch (e) {
+			// If already deleted in auth, continue to clear firestore
+			if (!/auth\/user-not-found/.test(e?.code || '')) {
+				throw e;
+			}
+		}
+		await admin.firestore().collection('users').doc(uid).delete();
+		return { ok: true, uid };
+	} catch (err) {
+		console.error('deleteUserAccount error', err);
+		if (err instanceof functions.https.HttpsError) throw err;
+		throw new functions.https.HttpsError('internal', err?.message || String(err));
+	}
+});
+

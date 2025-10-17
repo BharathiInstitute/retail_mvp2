@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/auth.dart';
-import 'Products/inventory_repository.dart' show ProductDoc; // Product model type
-import 'Products/inventory.dart' show inventoryRepoProvider, productsStreamProvider; // reuse providers from Products module
+import 'inventory_repository.dart';
+import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider; // reuse providers
 
 /// Spreadsheet-like inventory management using PlutoGrid.
 /// Features:
@@ -162,8 +162,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
         return;
       }
 
-  // Confirm plan & show progress dialog
-      final messengerRoot = ScaffoldMessenger.of(context);
+      // Confirm plan & show progress dialog
       final proceed = await showDialog<bool>(
         context: context,
         builder: (dialogCtx) => AlertDialog(
@@ -186,7 +185,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
           ],
         ),
       );
-  if (proceed != true) return;
+      if (proceed != true) return;
 
       int processed = 0;
       String phase = 'Starting';
@@ -291,7 +290,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
       );
 
       if (!mounted) return;
-      final messenger = messengerRoot;
+      final messenger = ScaffoldMessenger.of(rootContext);
       if (processed == totalOps) {
         messenger.showSnackBar(const SnackBar(content: Text('Upload complete')));
       } else {

@@ -86,7 +86,11 @@ final _ledgerEntriesProvider = StreamProvider<List<_LedgerEntryLite>>((ref) {
       final summary = (data['summary'] as Map?) ?? const {};
       double grand = 0;
       final raw = summary['grandTotal'];
-      if (raw is num) grand = raw.toDouble(); else grand = double.tryParse(raw?.toString() ?? '0') ?? 0;
+      if (raw is num) {
+        grand = raw.toDouble();
+      } else {
+        grand = double.tryParse(raw?.toString() ?? '0') ?? 0;
+      }
       final method = (data['paymentMode'] ?? (data['payment']?['mode'] ?? 'Unknown')).toString();
       return _LedgerEntryLite(0, grand, method);
     }).toList();
@@ -111,6 +115,7 @@ final _ledgerEntriesProvider = StreamProvider<List<_LedgerEntryLite>>((ref) {
 /// Derives payment split percentages (cash / upi / card) from ledger entries.
 /// If no data, returns zeros.
 final paymentSplitProvider = StreamProvider<Map<String, double>>((ref) {
+  // ignore: deprecated_member_use
   return ref.watch(_ledgerEntriesProvider.stream).map((entries) {
     final Map<String, double> netBy = {};
     for (final e in entries) {
@@ -163,7 +168,9 @@ final topSellingProductsProvider = StreamProvider<List<Map<String, dynamic>>>((r
       'revenue': e.value.revenue,
     }).toList();
     list.sort((a,b) => (b['revenue'] as double).compareTo(a['revenue'] as double));
-    if (list.length > 10) list.removeRange(10, list.length);
+    if (list.length > 10) {
+      list.removeRange(10, list.length);
+    }
     return list;
   });
 });
@@ -189,13 +196,24 @@ final inventoryAlertsProvider = StreamProvider<List<Map<String, dynamic>>>((ref)
       for (final b in batches) {
         final q = b['qty'];
         int qty = 0;
-        if (q is int) qty = q; else if (q is num) qty = q.toInt(); else if (q != null) qty = int.tryParse(q.toString()) ?? 0;
+        if (q is int) {
+          qty = q;
+        } else if (q is num) {
+          qty = q.toInt();
+        } else if (q != null) {
+          qty = int.tryParse(q.toString()) ?? 0;
+        }
         totalQty += qty;
         final exp = b['expiry'];
         DateTime? expDt;
-        if (exp is Timestamp) expDt = exp.toDate();
-        else if (exp is DateTime) expDt = exp; else if (exp != null) {
-          try { expDt = DateTime.parse(exp.toString()); } catch(_) {}
+        if (exp is Timestamp) {
+          expDt = exp.toDate();
+        } else if (exp is DateTime) {
+          expDt = exp;
+        } else if (exp != null) {
+          try {
+            expDt = DateTime.parse(exp.toString());
+          } catch (_) {}
         }
         if (expDt != null && (nearestExpiry == null || expDt.isBefore(nearestExpiry))) {
           nearestExpiry = expDt;
@@ -216,7 +234,9 @@ final inventoryAlertsProvider = StreamProvider<List<Map<String, dynamic>>>((ref)
       }
     }
     alerts.sort((a,b) => (a['product'] as String).compareTo(b['product'] as String));
-    if (alerts.length > 10) alerts.removeRange(10, alerts.length); // limit to 10
+    if (alerts.length > 10) {
+      alerts.removeRange(10, alerts.length); // limit to 10
+    }
     return alerts;
   });
 });

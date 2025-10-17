@@ -2,12 +2,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
-import 'inventory_repository.dart';
-import 'csv_utils.dart';
+import 'Products/inventory_repository.dart';
+import 'Products/csv_utils.dart';
 import 'download_helper_stub.dart' if (dart.library.html) 'download_helper_web.dart';
 import 'import_products_screen.dart' show ImportProductsScreen;
-import 'inventory.dart'; // access shared providers
-import 'inventory_repository.dart' show ProductDoc; // product model
+import 'Products/inventory.dart'; // access shared providers
+import 'Products/inventory_repository.dart' show ProductDoc; // product model
 
 // Public copy of active filter enum (was private in inventory.dart)
 enum ActiveFilter { all, active, inactive }
@@ -30,11 +30,13 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
   final Map<String,String> _noteOverrides = {};
   final Map<String,_AuditMeta> _overrideMeta = {}; // tracks last update timestamp + user
   String _search = '';
-  ActiveFilter _activeFilter = ActiveFilter.all;
-  int _gstFilter = -1;
+  // Removed Active and GST dropdown filters per request
 
   String _fmtDateTime(DateTime d){
     return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')} ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+  }
+  String _fmtDate(DateTime d){
+    return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
   }
 
   @override
@@ -46,10 +48,8 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     if(q.isNotEmpty){
       it = it.where((p)=> p.sku.toLowerCase().contains(q) || p.name.toLowerCase().contains(q) || p.barcode.toLowerCase().contains(q));
     }
-    if(_activeFilter!=ActiveFilter.all){
-      final want = _activeFilter == ActiveFilter.active; it = it.where((p)=>p.isActive==want);
-    }
-    if(_gstFilter!=-1){ it = it.where((p)=>(p.taxPct??0)==_gstFilter); }
+    // Active and GST filters removed
+    // No forced date filter here; we'll group by date and render day-wise cards below.
     return it.toList();
   }
 
@@ -70,34 +70,13 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
               ),
             ),
           ),
-          const SizedBox(width:16),
-          Transform.translate(
-            offset: const Offset(0,-4),
-            child: DropdownButton<ActiveFilter>(
-              value: _activeFilter,
-              onChanged:(v)=>setState(()=>_activeFilter=v??ActiveFilter.all),
-              items: const [
-                DropdownMenuItem(value:ActiveFilter.all, child: Text('All')),
-                DropdownMenuItem(value:ActiveFilter.active, child: Text('Active')),
-                DropdownMenuItem(value:ActiveFilter.inactive, child: Text('Inactive')),
-              ],
-            ),
+          const SizedBox(width:12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.inventory_2_outlined),
+            label: const Text('Audit'),
+            onPressed: _openQuickAudit,
           ),
           const SizedBox(width:16),
-          Transform.translate(
-            offset: const Offset(0,-4),
-            child: DropdownButton<int>(
-              value: _gstFilter,
-              onChanged:(v)=>setState(()=>_gstFilter=v??-1),
-              items: const [
-                DropdownMenuItem(value:-1, child: Text('GST: All')),
-                DropdownMenuItem(value:0, child: Text('GST 0%')),
-                DropdownMenuItem(value:5, child: Text('GST 5%')),
-                DropdownMenuItem(value:12, child: Text('GST 12%')),
-                DropdownMenuItem(value:18, child: Text('GST 18%')),
-              ],
-            ),
-          ),
           const Spacer(),
           Builder(builder: (context){
             final user = ref.watch(authStateProvider); final isSignedIn = user!=null;
@@ -120,74 +99,128 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
           child: Text('Tip: Click any row to edit stock counts & add a note.', style: Theme.of(context).textTheme.bodySmall),
         ),
         Expanded(
-          child: Card(
-            child: async.when(
-              data:(products){
-                if(products.isEmpty){ return const Center(child: Text('No products available.')); }
-                final filtered = _applyFilters(products);
-                if(filtered.isEmpty){ return const Center(child: Text('No products match filters.')); }
-                return LayoutBuilder(builder:(context,constraints){
-                  final table = DataTable(
-                    columnSpacing:32,
-                    headingRowHeight:40,
-                    dataRowMinHeight:38,
-                    dataRowMaxHeight:44,
-                    showCheckboxColumn: false,
-                    columns: const [
-                      DataColumn(label: Text('SKU')),
-                      DataColumn(label: Text('Name')),
-                      DataColumn(label: Text('Barcode')),
-                      DataColumn(label: Text('Unit Price'), numeric: true),
-                      DataColumn(label: Text('GST %'), numeric: true),
-                      DataColumn(label: Text('Store'), numeric: true),
-                      DataColumn(label: Text('Warehouse'), numeric: true),
-                      DataColumn(label: Text('Total'), numeric: true),
-                      DataColumn(label: Text('Updated Date')),
-                      DataColumn(label: Text('Updated By')),
-                      DataColumn(label: Text('Note')),
-                    ],
-                    rows:[
-                      for(final p in filtered) DataRow(
-                        onSelectChanged: (_)=> _openEditDialog(p),
-                        cells: [
-                          DataCell(Text(p.sku)),
-                          DataCell(Text(p.name)),
-                          DataCell(Text(p.barcode)),
-                          DataCell(Align(alignment: Alignment.centerRight, child: Text('₹${p.unitPrice.toStringAsFixed(2)}'))),
-                          DataCell(Align(alignment: Alignment.centerRight, child: Text((p.taxPct ?? 0).toString()))),
-                          DataCell(_stockCell(p, isStore: true)),
-                          DataCell(_stockCell(p, isStore: false)),
-                          DataCell(Align(alignment: Alignment.centerRight, child: Text((( _storeOverrides[p.sku] ?? p.stockAt('Store')) + (_whOverrides[p.sku] ?? p.stockAt('Warehouse')) ).toString()))),
-                          DataCell(Text(
-                            _overrideMeta[p.sku] != null
-                              ? _fmtDateTime(_overrideMeta[p.sku]!.updatedAt)
-                              : (p.updatedAt != null ? _fmtDateTime(p.updatedAt!) : '-')
-                          )),
-                          DataCell(Text(
-                            _overrideMeta[p.sku]?.updatedBy ?? (p.updatedBy ?? '-')
-                          )),
-                          DataCell(SizedBox(width:220, child: Text(_noteOverrides[p.sku] ?? p.auditNote ?? '-', maxLines:2, overflow: TextOverflow.ellipsis))),
+          child: async.when(
+            data:(products){
+              if(products.isEmpty){ return const Center(child: Text('No products available.')); }
+              final filtered = _applyFilters(products);
+              if(filtered.isEmpty){ return const Center(child: Text('No products match filters.')); }
+
+              // Group by day (effective updated date)
+              final Map<String, List<ProductDoc>> groups = {};
+              DateTime? eff(ProductDoc p) => _overrideMeta[p.sku]?.updatedAt ?? p.updatedAt;
+              for(final p in filtered){
+                final dt = eff(p);
+                if (dt == null) continue; // skip items with no date
+                final key = _fmtDate(DateTime(dt.year, dt.month, dt.day));
+                groups.putIfAbsent(key, ()=> <ProductDoc>[]).add(p);
+              }
+              final keys = groups.keys.toList()
+                ..sort((a,b){
+                  return b.compareTo(a); // YYYY-MM-DD desc
+                });
+
+              return ListView.builder(
+                padding: const EdgeInsets.only(bottom: 8),
+                itemCount: keys.length,
+                itemBuilder: (context, i){
+                  final key = keys[i];
+                  final items = groups[key]!..sort((a,b){
+                    final da = eff(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    final db = eff(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
+                    return db.compareTo(da);
+                  });
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4),
+                            child: Row(
+                                children:[
+                                  Text(key, style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(width: 12),
+                                Text('(${items.length})', style: Theme.of(context).textTheme.bodySmall),
+                              ],
+                            ),
+                          ),
+                          LayoutBuilder(builder:(context,constraints){
+                            final table = DataTable(
+                              columnSpacing:32,
+                              headingRowHeight:40,
+                              dataRowMinHeight:38,
+                              dataRowMaxHeight:44,
+                              showCheckboxColumn: false,
+                              columns: const [
+                                DataColumn(label: Text('SKU')),
+                                DataColumn(label: Text('Name')),
+                                DataColumn(label: Text('Barcode')),
+                                DataColumn(label: Text('Unit Price'), numeric: true),
+                                DataColumn(label: Text('GST %'), numeric: true),
+                                DataColumn(label: Text('Store'), numeric: true),
+                                DataColumn(label: Text('Warehouse'), numeric: true),
+                                DataColumn(label: Text('Total'), numeric: true),
+                                DataColumn(label: Text('Updated Date')),
+                                DataColumn(label: Text('Updated By')),
+                                DataColumn(label: Text('Note')),
+                              ],
+                              rows:[
+                                for(final p in items) DataRow(
+                                  onSelectChanged: (_)=> _openEditDialog(p),
+                                  cells: [
+                                    DataCell(Text(p.sku)),
+                                    DataCell(Text(p.name)),
+                                    DataCell(Text(p.barcode)),
+                                    DataCell(Align(alignment: Alignment.centerRight, child: Text('₹${p.unitPrice.toStringAsFixed(2)}'))),
+                                    DataCell(Align(alignment: Alignment.centerRight, child: Text((p.taxPct ?? 0).toString()))),
+                                    DataCell(_stockCell(p, isStore: true)),
+                                    DataCell(_stockCell(p, isStore: false)),
+                                    DataCell(Align(alignment: Alignment.centerRight, child: Text((( _storeOverrides[p.sku] ?? p.stockAt('Store')) + (_whOverrides[p.sku] ?? p.stockAt('Warehouse')) ).toString()))),
+                                    DataCell(Text(
+                                      _overrideMeta[p.sku] != null
+                                        ? _fmtDateTime(_overrideMeta[p.sku]!.updatedAt)
+                                        : (p.updatedAt != null ? _fmtDateTime(p.updatedAt!) : '-')
+                                    )),
+                                    DataCell(Text(
+                                      _overrideMeta[p.sku]?.updatedBy ?? (p.updatedBy ?? '-')
+                                    )),
+                                    DataCell(SizedBox(width:220, child: Text(_noteOverrides[p.sku] ?? p.auditNote ?? '-', maxLines:2, overflow: TextOverflow.ellipsis))),
+                                  ],
+                                ),
+                              ],
+                            );
+                            return SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: ConstrainedBox(constraints: BoxConstraints(minWidth: constraints.maxWidth), child: table),
+                            );
+                          }),
                         ],
                       ),
-                    ],
-                  );
-                  return SingleChildScrollView(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(constraints: BoxConstraints(minWidth: constraints.maxWidth), child: table),
                     ),
                   );
-                });
-              },
-              error:(e,st)=> Center(child: Text('Error: $e')),
-              loading: ()=> const Center(child: CircularProgressIndicator()),
-            ),
+                },
+              );
+            },
+            error:(e,st)=> Center(child: Text('Error: $e')),
+            loading: ()=> const Center(child: CircularProgressIndicator()),
           ),
         ),
         const SizedBox(height:8),
         Text('Changes here are LOCAL audit overrides. They do NOT modify the product master data.', style: Theme.of(context).textTheme.bodySmall),
       ]),
     );
+  }
+
+  Future<void> _openQuickAudit() async {
+    final p = await showDialog<ProductDoc>(
+      context: context,
+      builder: (_) => const _ProductPickerDialog(),
+    );
+    if (p != null) {
+      await _openEditDialog(p);
+    }
   }
 
   Widget _stockCell(ProductDoc p, {required bool isStore}){
@@ -340,6 +373,68 @@ class _AuditEditDialogState extends State<_AuditEditDialog> {
           },
           child: const Text('Save'),
         ),
+      ],
+    );
+  }
+}
+
+// Simple product picker for quick Audit button
+class _ProductPickerDialog extends ConsumerStatefulWidget {
+  const _ProductPickerDialog();
+  @override
+  ConsumerState<_ProductPickerDialog> createState() => _ProductPickerDialogState();
+}
+
+class _ProductPickerDialogState extends ConsumerState<_ProductPickerDialog> {
+  final _qCtrl = TextEditingController();
+  @override
+  void dispose(){ _qCtrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context){
+    final async = ref.watch(productsStreamProvider);
+    return AlertDialog(
+      title: const Text('Pick a product'),
+      content: SizedBox(
+        width: 480,
+        child: async.when(
+          data: (list){
+            final q = _qCtrl.text.trim().toLowerCase();
+            final results = q.isEmpty
+                ? list.take(30).toList()
+                : list.where((p)=> p.sku.toLowerCase().contains(q) || p.name.toLowerCase().contains(q) || p.barcode.toLowerCase().contains(q)).take(30).toList();
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _qCtrl,
+                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Search SKU/Name/Barcode'),
+                  onChanged: (_)=> setState((){}),
+                ),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: results.length,
+                    itemBuilder: (_, i){
+                      final p = results[i];
+                      return ListTile(
+                        dense: true,
+                        title: Text('${p.sku} • ${p.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: p.barcode.isNotEmpty ? Text(p.barcode) : null,
+                        onTap: ()=> Navigator.pop(context, p),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+          error: (e,_)=> SizedBox(width: 360, child: Text('Error: $e')),
+          loading: ()=> const SizedBox(width: 360, height: 160, child: Center(child: CircularProgressIndicator())),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel')),
       ],
     );
   }

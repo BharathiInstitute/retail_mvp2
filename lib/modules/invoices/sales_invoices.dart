@@ -28,7 +28,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
         for (final d in snap.docs) {
           final data = d.data();
           try {
-            list.add(Invoice.fromFirestore(data));
+            list.add(Invoice.fromFirestore(data, docId: d.id));
           } catch (_) {}
         }
         return list;
@@ -168,15 +168,146 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
           insetPadding: const EdgeInsets.all(16),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980, maxHeight: 720),
-            child: _invoiceDetailsContent(inv, dialogCtx),
+            child: StreamBuilder<Invoice>(
+              stream: _singleInvoiceStream(inv),
+              builder: (context, snap) {
+                final current = snap.data ?? inv;
+                return InvoiceDetailsContent(
+                  invoice: current,
+                  dialogCtx: dialogCtx,
+                  taxInclusive: taxInclusive,
+                  onDelete: (inv) => _deleteInvoice(inv, dialogCtx),
+                );
+              },
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _invoiceDetailsContent(Invoice inv, BuildContext dialogCtx) {
-    final gst = inv.gstBreakup(taxInclusive: taxInclusive);
+  Stream<Invoice> _singleInvoiceStream(Invoice inv) {
+    final col = FirebaseFirestore.instance.collection('invoices');
+    if (inv.docId != null) {
+      return col.doc(inv.docId).snapshots().where((d) => d.exists).map((d) {
+        final data = d.data() as Map<String, dynamic>;
+        return Invoice.fromFirestore(data, docId: d.id);
+      });
+    } else {
+      return col.where('invoiceNumber', isEqualTo: inv.invoiceNo).limit(1).snapshots().map((qs) {
+        if (qs.docs.isEmpty) return inv;
+        final d = qs.docs.first;
+        return Invoice.fromFirestore(d.data(), docId: d.id);
+      });
+    }
+  }
+
+  Widget _statusChip(String status) {
+    Color c = Colors.grey;
+    if (status == 'Paid') c = Colors.green;
+    if (status == 'Pending') c = Colors.orange;
+    if (status == 'Credit') c = Colors.purple;
+    return Chip(label: Text(status), backgroundColor: c.withValues(alpha: 0.15));
+  }
+
+  Future<void> _deleteInvoice(Invoice inv, BuildContext dialogCtx) async {
+    try {
+      final col = FirebaseFirestore.instance.collection('invoices');
+      if (inv.docId != null) {
+        await col.doc(inv.docId).delete();
+      } else {
+        // Fallback to invoice number
+        try {
+          final q = await col.where('invoiceNumber', isEqualTo: inv.invoiceNo).limit(1).get();
+          if (q.docs.isNotEmpty) {
+            await q.docs.first.reference.delete();
+          } else {
+            await col.doc(inv.invoiceNo).delete();
+          }
+        } catch (_) {
+          await col.doc(inv.invoiceNo).delete();
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invoice deleted')));
+        // Close details dialog
+        if (Navigator.of(dialogCtx, rootNavigator: true).canPop()) {
+          Navigator.of(dialogCtx, rootNavigator: true).pop();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
+    }
+  }
+}
+
+class InvoiceDetailsContent extends StatefulWidget {
+  final Invoice invoice;
+  final BuildContext dialogCtx;
+  final bool taxInclusive;
+  final Future<void> Function(Invoice inv) onDelete;
+  const InvoiceDetailsContent({super.key, required this.invoice, required this.dialogCtx, required this.taxInclusive, required this.onDelete});
+
+  @override
+  State<InvoiceDetailsContent> createState() => _InvoiceDetailsContentState();
+}
+
+class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
+  bool editing = false;
+  final List<_SalesItemRow> rows = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFromInvoice(widget.invoice);
+  }
+
+  @override
+  void didUpdateWidget(covariant InvoiceDetailsContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!editing && (oldWidget.invoice != widget.invoice)) {
+      rows.clear();
+      _loadFromInvoice(widget.invoice);
+      setState(() {});
+    }
+  }
+
+  void _loadFromInvoice(Invoice inv) {
+    for (final it in inv.items) {
+      rows.add(_SalesItemRow(
+        sku: it.product.sku,
+        name: TextEditingController(text: it.product.name),
+        qty: TextEditingController(text: it.qty.toString()),
+        price: TextEditingController(text: it.product.price.toStringAsFixed(2)),
+        taxPercent: it.product.taxPercent,
+      ));
+    }
+    if (rows.isEmpty) {
+      rows.add(_SalesItemRow(
+        sku: '',
+        name: TextEditingController(),
+        qty: TextEditingController(text: '1'),
+        price: TextEditingController(text: '0'),
+        taxPercent: 0,
+      ));
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final r in rows) { r.dispose(); }
+    super.dispose();
+  }
+
+  double _toD(TextEditingController c) => double.tryParse(c.text.trim()) ?? 0.0;
+  int _toI(TextEditingController c) => int.tryParse(c.text.trim()) ?? 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final inv = widget.invoice;
+    final gst = inv.gstBreakup(taxInclusive: widget.taxInclusive);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -190,19 +321,52 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
-              FilledButton.icon(
+              if (!editing)
+                FilledButton.icon(
+                  onPressed: () => setState(() => editing = true),
+                  icon: const Icon(Icons.edit),
+                  label: const Text('Edit'),
+                )
+              else ...[
+                TextButton(
+                  onPressed: () => setState(() { editing = false; }),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _save,
+                  child: const Text('Save'),
+                ),
+              ],
+              const SizedBox(width: 8),
+              TextButton.icon(
                 onPressed: () async {
-                  await _showEditSalesInvoice(inv, dialogCtx);
+                  final confirm = await showDialog<bool>(
+                    context: widget.dialogCtx,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Delete invoice?'),
+                      content: const Text('This will permanently delete this sales invoice. This action cannot be undone.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) await widget.onDelete(inv);
                 },
-                icon: const Icon(Icons.edit),
-                label: const Text('Edit'),
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                label: const Text('Delete', style: TextStyle(color: Colors.red)),
               ),
               const SizedBox(width: 8),
               _statusChip(inv.status),
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Close',
-                onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+                onPressed: () => Navigator.of(widget.dialogCtx, rootNavigator: true).pop(),
                 icon: const Icon(Icons.close),
               ),
             ],
@@ -218,30 +382,54 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('SKU')),
-                        DataColumn(label: Text('Item')),
-                        DataColumn(label: Text('Qty')),
-                        DataColumn(label: Text('Price')),
-                        DataColumn(label: Text('GST %')),
-                        DataColumn(label: Text('Line Total')),
-                      ],
-                      rows: [
-                        for (final it in inv.items)
-                          DataRow(cells: [
-                            DataCell(Text(it.product.sku)),
-                            DataCell(Text(it.product.name)),
-                            DataCell(Text(it.qty.toString())),
-                            DataCell(Text('₹${it.product.price.toStringAsFixed(2)}')),
-                            DataCell(Text('${it.product.taxPercent}%')),
-                            DataCell(Text('₹${it.lineTotal(taxInclusive: taxInclusive).toStringAsFixed(2)}')),
-                          ]),
+                  if (!editing)
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: const [
+                          DataColumn(label: Text('SKU')),
+                          DataColumn(label: Text('Item')),
+                          DataColumn(label: Text('Qty')),
+                          DataColumn(label: Text('Price')),
+                          DataColumn(label: Text('GST %')),
+                          DataColumn(label: Text('Line Total')),
+                        ],
+                        rows: [
+                          for (final it in inv.items)
+                            DataRow(cells: [
+                              DataCell(Text(it.product.sku)),
+                              DataCell(Text(it.product.name)),
+                              DataCell(Text(it.qty.toString())),
+                              DataCell(Text('₹${it.product.price.toStringAsFixed(2)}')),
+                              DataCell(Text('${it.product.taxPercent}%')),
+                              DataCell(Text('₹${it.lineTotal(taxInclusive: widget.taxInclusive).toStringAsFixed(2)}')),
+                            ]),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        const Text('Items', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        IconButton(
+                          tooltip: 'Add Item',
+                          onPressed: () => setState(() {
+                            rows.add(_SalesItemRow(
+                              sku: '',
+                              name: TextEditingController(),
+                              qty: TextEditingController(text: '1'),
+                              price: TextEditingController(text: '0'),
+                              taxPercent: 0,
+                            ));
+                          }),
+                          icon: const Icon(Icons.add),
+                        ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    for (int i = 0; i < rows.length; i++) _editRow(i),
+                  ],
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 24,
@@ -264,7 +452,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
                           const SizedBox(height: 6),
                           _kv('Tax Total', gst.totalTax),
                           const Divider(),
-                          _kv('Grand Total', inv.total(taxInclusive: taxInclusive), bold: true),
+                          _kv('Grand Total', inv.total(taxInclusive: widget.taxInclusive), bold: true),
                         ],
                       ),
                     ],
@@ -281,13 +469,80 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton(
-                onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(),
+                onPressed: () => Navigator.of(widget.dialogCtx, rootNavigator: true).pop(),
                 child: const Text('Close'),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _editRow(int index) {
+    final r = rows[index];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 120,
+            child: TextFormField(
+              initialValue: r.sku,
+              decoration: const InputDecoration(labelText: 'SKU'),
+              onChanged: (v) => r.sku = v.trim(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextFormField(
+              controller: r.name,
+              decoration: const InputDecoration(labelText: 'Item'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 80,
+            child: TextFormField(
+              controller: r.qty,
+              keyboardType: const TextInputType.numberWithOptions(decimal: false),
+              decoration: const InputDecoration(labelText: 'Qty'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 120,
+            child: TextFormField(
+              controller: r.price,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Unit Price ₹'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 110,
+            child: DropdownButtonFormField<int>(
+              initialValue: r.taxPercent,
+              items: const [0, 5, 12, 18, 28]
+                  .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
+                  .toList(),
+              onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
+              decoration: const InputDecoration(labelText: 'Tax Rate'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Remove',
+            onPressed: rows.length <= 1
+                ? null
+                : () => setState(() {
+                      final rem = rows.removeAt(index);
+                      rem.dispose();
+                    }),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
     );
   }
 
@@ -313,12 +568,48 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
     return Chip(label: Text(status), backgroundColor: c.withValues(alpha: 0.15));
   }
 
-  Future<void> _showEditSalesInvoice(Invoice inv, BuildContext dialogCtx) async {
-    await showDialog<bool>(
-      context: dialogCtx,
-      useRootNavigator: true,
-      builder: (_) => EditInvoiceDialog(invoice: inv),
-    );
+  Future<void> _save() async {
+    final List<Map<String, dynamic>> lines = [];
+    final Map<int, double> taxesByRate = {};
+    double subtotal = 0, discountTotal = 0, taxTotal = 0, grandTotal = 0;
+    for (final r in rows) {
+      final name = r.name.text.trim();
+      final qty = _toI(r.qty);
+      final unitPrice = _toD(r.price);
+      final taxPct = r.taxPercent;
+      if (name.isEmpty || qty <= 0) continue;
+      final base = unitPrice * qty;
+      final discount = 0.0;
+      final tax = (base - discount) * (taxPct / 100);
+      final total = base - discount + tax;
+      subtotal += base;
+      discountTotal += discount;
+      taxTotal += tax;
+      grandTotal += total;
+      taxesByRate.update(taxPct, (v) => v + tax, ifAbsent: () => tax);
+      lines.add({
+        'sku': r.sku,
+        'name': name,
+        'qty': qty,
+        'unitPrice': unitPrice,
+        'taxPercent': taxPct,
+        'lineSubtotal': base,
+        'discount': discount,
+        'tax': tax,
+        'lineTotal': total,
+      });
+    }
+    final ref = await findInvoiceDocRef(widget.invoice.invoiceNo, docId: widget.invoice.docId);
+    await ref.update({
+      'lines': lines,
+      'subtotal': subtotal,
+      'discountTotal': discountTotal,
+      'taxTotal': taxTotal,
+      'grandTotal': grandTotal,
+      'taxesByRate': taxesByRate.map((k, v) => MapEntry(k.toString(), v)),
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+    if (mounted) setState(() => editing = false);
   }
 }
 
@@ -373,10 +664,11 @@ class Invoice {
   final DateTime date;
   final String status;
   final bool taxInclusive;
+  final String? docId; // Firestore document ID
 
-  Invoice({required this.invoiceNo, required this.customer, required this.items, required this.date, required this.status, required this.taxInclusive});
+  Invoice({required this.invoiceNo, required this.customer, required this.items, required this.date, required this.status, required this.taxInclusive, this.docId});
 
-  factory Invoice.fromFirestore(Map<String, dynamic> data) {
+  factory Invoice.fromFirestore(Map<String, dynamic> data, {String? docId}) {
     final invoiceNo = (data['invoiceNumber'] ?? data['invoiceNo'] ?? '').toString();
     final customerName = (data['customerName'] ?? 'Walk-in Customer').toString();
     final customer = BillingCustomer(name: customerName);
@@ -396,9 +688,34 @@ class Invoice {
         if (l is Map) {
           final sku = (l['sku'] ?? '').toString();
           final name = (l['name'] ?? '').toString();
-          final price = (l['price'] is num) ? (l['price'] as num).toDouble() : double.tryParse(l['price']?.toString() ?? '') ?? 0.0;
+          // Prefer POS schema fields; fallback to legacy and safe derivations
+          double price = 0.0;
+          if (l['price'] is num) {
+            price = (l['price'] as num).toDouble();
+          } else if (l['unitPrice'] is num) {
+            price = (l['unitPrice'] as num).toDouble();
+          } else {
+            price = double.tryParse(l['price']?.toString() ?? '') ??
+                    double.tryParse(l['unitPrice']?.toString() ?? '') ?? 0.0;
+          }
           final qty = (l['qty'] is num) ? (l['qty'] as num).toInt() : int.tryParse(l['qty']?.toString() ?? '') ?? 1;
-          final tax = (l['taxPct'] is num) ? (l['taxPct'] as num).toInt() : int.tryParse(l['taxPct']?.toString() ?? '') ?? 0;
+          // If unit price still zero, try deriving from lineSubtotal/qty
+          if ((price == 0 || price.isNaN) && qty > 0) {
+            final lineSubtotal = (l['lineSubtotal'] is num)
+                ? (l['lineSubtotal'] as num).toDouble()
+                : double.tryParse(l['lineSubtotal']?.toString() ?? '') ?? 0.0;
+            if (lineSubtotal > 0) {
+              price = lineSubtotal / qty;
+            }
+          }
+          int tax = 0;
+          if (l['taxPct'] is num) {
+            tax = (l['taxPct'] as num).toInt();
+          } else if (l['taxPercent'] is num) {
+            tax = (l['taxPercent'] as num).toInt();
+          } else {
+            tax = int.tryParse(l['taxPct']?.toString() ?? '') ?? int.tryParse(l['taxPercent']?.toString() ?? '') ?? 0;
+          }
           items.add(InvoiceItem(product: BillingProduct(sku: sku, name: name, price: price, taxPercent: tax), qty: qty));
         }
       }
@@ -411,6 +728,7 @@ class Invoice {
       date: date,
       status: status,
       taxInclusive: taxInclusive,
+      docId: docId,
     );
   }
 
@@ -439,72 +757,31 @@ class InvoiceWithMode extends Invoice {
     required super.date,
     required super.status,
     required super.taxInclusive,
+    super.docId,
     required this.paymentMode,
   });
 }
 
-class EditInvoiceDialog extends StatefulWidget {
-  final Invoice invoice;
-  const EditInvoiceDialog({super.key, required this.invoice});
-  @override
-  State<EditInvoiceDialog> createState() => _EditInvoiceDialogState();
+// Edit dialog removed per request; inline Delete is available in details view.
+
+class _SalesItemRow {
+  String sku;
+  final TextEditingController name;
+  final TextEditingController qty;
+  final TextEditingController price;
+  int taxPercent;
+  _SalesItemRow({required this.sku, required this.name, required this.qty, required this.price, required this.taxPercent});
+  void dispose() { name.dispose(); qty.dispose(); price.dispose(); }
 }
 
-class _EditInvoiceDialogState extends State<EditInvoiceDialog> {
-  late final TextEditingController _statusCtrl;
-  late final TextEditingController _modeCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _statusCtrl = TextEditingController(text: widget.invoice.status);
-    _modeCtrl = TextEditingController(text: widget.invoice is InvoiceWithMode ? (widget.invoice as InvoiceWithMode).paymentMode : '');
-  }
-
-  @override
-  void dispose() {
-    _statusCtrl.dispose();
-    _modeCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Edit Invoice', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _statusCtrl,
-            decoration: const InputDecoration(labelText: 'Status (Paid/Pending/Credit)'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _modeCtrl,
-            decoration: const InputDecoration(labelText: 'Payment Mode'),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () {
-                  // Persisting to Firestore removed for demo-only module.
-                  Navigator.pop(context, true);
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  Future<DocumentReference<Map<String, dynamic>>> findInvoiceDocRef(String invoiceNo, {String? docId}) async {
+  final col = FirebaseFirestore.instance.collection('invoices');
+  if (docId != null) return col.doc(docId);
+  try {
+    final q = await col.where('invoiceNumber', isEqualTo: invoiceNo).limit(1).get();
+    if (q.docs.isNotEmpty) return q.docs.first.reference;
+  } catch (_) {}
+  return col.doc(invoiceNo);
 }
 
 String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}' ;

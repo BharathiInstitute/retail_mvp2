@@ -43,8 +43,11 @@ class CustomerCreditService {
       final data = snap.data() ?? <String, dynamic>{};
       final prevRaw = data['creditBalance'] ?? data['khathaBalance'] ?? 0;
       double prev = 0;
-      if (prevRaw is num) prev = prevRaw.toDouble();
-      else if (prevRaw is String) prev = double.tryParse(prevRaw) ?? 0;
+      if (prevRaw is num) {
+        prev = prevRaw.toDouble();
+      } else if (prevRaw is String) {
+        prev = double.tryParse(prevRaw) ?? 0;
+      }
       final next = prev + amount;
       tx.update(custRef, {
         'creditBalance': next,
@@ -171,8 +174,11 @@ class CustomerCreditService {
       final data = snap.data() ?? <String, dynamic>{};
       final prevRaw = data['creditBalance'] ?? data['khathaBalance'] ?? 0;
       double prev = 0;
-      if (prevRaw is num) prev = prevRaw.toDouble();
-      else if (prevRaw is String) prev = double.tryParse(prevRaw) ?? 0;
+      if (prevRaw is num) {
+        prev = prevRaw.toDouble();
+      } else if (prevRaw is String) {
+        prev = double.tryParse(prevRaw) ?? 0;
+      }
       return CreditOpResult(
         previousBalance: prev,
         newBalance: prev,

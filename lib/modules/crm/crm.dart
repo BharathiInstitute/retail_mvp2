@@ -95,9 +95,9 @@ class _CrmListScreenState extends State<CrmListScreen> {
 			barrierDismissible: !deleting,
 			builder: (dialogCtx) => StatefulBuilder(
 				builder: (dialogCtx, setLocal) {
-						return PopScope(
+												return PopScope(
 							canPop: !deleting,
-							onPopInvoked: (didPop) {},
+													onPopInvokedWithResult: (didPop, result) {},
 							child: AlertDialog(
 							title: const Text('Delete Customer'),
 							content: Column(
@@ -117,13 +117,15 @@ class _CrmListScreenState extends State<CrmListScreen> {
 											final auth = FirebaseAuth.instance;
 											if (auth.currentUser == null) { await auth.signInAnonymously(); }
 											if (c.id.isEmpty) { throw Exception('Missing document id'); }
+											final nav = Navigator.of(dialogCtx);
 											await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
-											if (context.mounted) {
-												Navigator.pop(dialogCtx, true);
+											if (nav.mounted) {
+												nav.pop(true);
 											}
 										} catch (e) {
-											if (context.mounted) {
-												ScaffoldMessenger.of(context).showSnackBar(
+											if (dialogCtx.mounted) {
+												final messenger = ScaffoldMessenger.of(dialogCtx);
+												messenger.showSnackBar(
 													SnackBar(content: Text(e.toString().contains('permission-denied')
 														? 'Permission denied deleting customer.'
 														: 'Delete failed: $e')),
@@ -219,6 +221,7 @@ class _CrmListScreenState extends State<CrmListScreen> {
 											final c = list[i];
 											return ListTile(
 												onTap: () => _editCustomer(c.copy()),
+												onLongPress: () => _deleteCustomer(c),
 												leading: CircleAvatar(child: Text(c.initials)),
 												title: Row(
 													children: [
@@ -227,28 +230,12 @@ class _CrmListScreenState extends State<CrmListScreen> {
 													],
 												),
 												subtitle: Text('${c.email} • ${c.phone}'),
-												trailing: Row(
-													mainAxisSize: MainAxisSize.min,
+												trailing: Column(
+													mainAxisAlignment: MainAxisAlignment.center,
+													crossAxisAlignment: CrossAxisAlignment.end,
 													children: [
-														Column(
-															mainAxisAlignment: MainAxisAlignment.center,
-															crossAxisAlignment: CrossAxisAlignment.end,
-															children: [
-																Text('₹${c.totalSpend.toStringAsFixed(2)}'),
-																Text('Last: ${_fmtDate(c.lastVisit)}', style: const TextStyle(fontSize: 12)),
-															],
-														),
-														const SizedBox(width: 8),
-														IconButton(
-															tooltip: 'Edit',
-															icon: const Icon(Icons.edit),
-															onPressed: () => _editCustomer(c.copy()),
-														),
-														IconButton(
-															tooltip: 'Delete',
-															icon: const Icon(Icons.delete_outline),
-															onPressed: () => _deleteCustomer(c),
-														),
+														Text('₹${c.totalSpend.toStringAsFixed(2)}'),
+														Text('Last: ${_fmtDate(c.lastVisit)}', style: const TextStyle(fontSize: 12)),
 													],
 												),
 											);

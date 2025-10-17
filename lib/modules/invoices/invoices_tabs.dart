@@ -77,26 +77,13 @@ class _InvoicesTabsScreenState extends ConsumerState<InvoicesTabsScreen> with Si
 
 class _SalesTab extends StatelessWidget {
   const _SalesTab();
-  Future<void> _seed(BuildContext context) async {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo seed removed.')));
-  }
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          FilledButton.icon(onPressed: () => _seed(context), icon: const Icon(Icons.cloud_download_outlined), label: const Text('Seed Demo Invoices')),
-          FilledButton.tonalIcon(onPressed: () async {
-            if (!context.mounted) return;
-            showDialog(context: context, builder: (_) => const AlertDialog(
-              title: Text('GSTR-3B Summary'),
-              content: Text('GST computation service removed. Reintroduce gstr3b_service.dart to enable.'),
-            ));
-          }, icon: const Icon(Icons.summarize_outlined), label: const Text('Compute GSTR-3B (Disabled)')),
-        ]),
-        const SizedBox(height: 12),
+        // Controls removed per request
+        const SizedBox(height: 4),
         const Expanded(child: InvoicesListScreen()),
       ]),
     );
@@ -105,10 +92,6 @@ class _SalesTab extends StatelessWidget {
 
 class _PurchasesTab extends StatelessWidget {
   const _PurchasesTab();
-  Future<void> _seedPurchases(BuildContext context) async {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo seed removed.')));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +106,6 @@ class _PurchasesTab extends StatelessWidget {
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('New Purchase Invoice'),
             ),
-            OutlinedButton.icon(onPressed: () => _seedPurchases(context), icon: const Icon(Icons.cloud_download_outlined), label: const Text('Seed Demo Purchases')),
           ]),
           const SizedBox(height: 12),
           Expanded(child: _PurchasesList()),
@@ -276,10 +258,45 @@ void _showPurchaseDetails(BuildContext listContext, String docId, Map<String, dy
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Close')),
+          TextButton.icon(
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: dialogCtx,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Delete invoice?'),
+                  content: const Text('This will permanently delete this purchase invoice. This action cannot be undone.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                try {
+                  await FirebaseFirestore.instance.collection('purchase_invoices').doc(docId).delete();
+                  if (listContext.mounted) {
+                    ScaffoldMessenger.of(listContext).showSnackBar(const SnackBar(content: Text('Purchase invoice deleted')));
+                  }
+                  if (Navigator.of(dialogCtx).canPop()) Navigator.of(dialogCtx).pop();
+                } catch (e) {
+                  if (listContext.mounted) {
+                    ScaffoldMessenger.of(listContext).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+                  }
+                }
+              }
+            },
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
           FilledButton.icon(
             onPressed: () {
               // Close details then open edit dialog using original list context (prevents blank flash)
-              Navigator.of(dialogCtx).pop();
+              final nav = Navigator.of(dialogCtx);
+              nav.pop();
               Future.microtask(() => showEditPurchaseInvoiceDialog(listContext, docId, data));
             },
             icon: const Icon(Icons.edit),

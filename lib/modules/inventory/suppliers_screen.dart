@@ -112,38 +112,36 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                         ],
                         rows: [
                           for (final s in filtered)
-                            DataRow(cells: [
-                              DataCell(Text(s.name)),
-                              DataCell(SizedBox(width: 300, child: Text(s.address))),
-                              DataCell(Text(s.phone)),
-                              DataCell(Text(s.email)),
-                              DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-                                IconButton(
-                                  tooltip: 'Edit',
-                                  icon: const Icon(Icons.edit_outlined),
-                                  onPressed: () => _openEditDialog(s),
-                                ),
-                                IconButton(
-                                  tooltip: 'Call',
-                                  icon: const Icon(Icons.call),
-                                  onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Call ${s.phone} (demo)')),
+                            DataRow(
+                              onSelectChanged: (selected) {
+                                if (selected == true) {
+                                  _openEditDialog(s);
+                                }
+                              },
+                              onLongPress: () => _deleteSupplier(context, s.id),
+                              cells: [
+                                DataCell(Text(s.name)),
+                                DataCell(SizedBox(width: 300, child: Text(s.address))),
+                                DataCell(Text(s.phone)),
+                                DataCell(Text(s.email)),
+                                DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+                                  IconButton(
+                                    tooltip: 'Call',
+                                    icon: const Icon(Icons.call),
+                                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Call ${s.phone} (demo)')),
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Email',
-                                  icon: const Icon(Icons.email_outlined),
-                                  onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Email ${s.email} (demo)')),
+                                  IconButton(
+                                    tooltip: 'Email',
+                                    icon: const Icon(Icons.email_outlined),
+                                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Email ${s.email} (demo)')),
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Delete',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => _deleteSupplier(context, s.id),
-                                ),
-                              ])),
-                            ]),
+                                ])),
+                              ],
+                            ),
                         ],
                       );
                       return SingleChildScrollView(
@@ -194,20 +192,21 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   Future<void> _deleteSupplier(BuildContext context, String id) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Delete Supplier'),
         content: const Text('Are you sure?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
         ],
       ),
     );
     if (ok != true) return;
-  final repo = ref.read(supplierRepoProvider);
-  await repo.deleteSupplier(id: id);
+    final repo = ref.read(supplierRepoProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    await repo.deleteSupplier(id: id);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier deleted')));
+    messenger.showSnackBar(const SnackBar(content: Text('Supplier deleted')));
   }
 }
 

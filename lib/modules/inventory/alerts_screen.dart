@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'inventory_repository.dart';
+import 'Products/inventory_repository.dart';
 
 // Threshold constants
 const int kLowStockThreshold = 5;

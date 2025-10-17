@@ -199,7 +199,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     final totals = _computeTotals();
   final balance = ((totals.grand - _toDouble(paidCtrl)).clamp(0, double.infinity)).toDouble();
     return AlertDialog(
-      title: const Text('New Purchase Invoice'),
+      title: Text(widget.existingId == null ? 'New Purchase Invoice' : 'Edit Purchase Invoice'),
       content: SizedBox(
         width: 820,
         height: 620,
@@ -256,6 +256,37 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         ),
       ),
       actions: [
+        if (widget.existingId != null)
+          TextButton.icon(
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Delete invoice?'),
+                  content: const Text('This will permanently delete this purchase invoice. This action cannot be undone.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true) return;
+              try {
+                await _deleteInvoice();
+                if (!mounted) return;
+                _toast(context, 'Invoice deleted');
+                Navigator.of(context).pop(); // close the edit dialog
+              } catch (e) {
+                _toast(context, 'Delete failed: $e');
+              }
+            },
+          ),
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
           onPressed: () {
@@ -293,6 +324,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               if ((payload['invoiceNo'] as String).isNotEmpty) return payload['invoiceNo'];
               try { return await _generateInvoiceNo(); } catch (_) { return null; }
             }
+            final nav = Navigator.of(context);
             maybeGen().then((gen) {
               if (gen != null) payload['invoiceNo'] = gen;
               return _saveToFirestore(payload);
@@ -305,7 +337,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 });
               }
               if (mounted) {
-                Navigator.pop(context);
+                nav.pop();
                 _toast(context, 'Purchase saved');
               }
             }).catchError((e) { _toast(context, 'Save failed: $e'); return null; });
@@ -314,6 +346,15 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         ),
       ],
     );
+  }
+
+  Future<void> _deleteInvoice() async {
+    final id = widget.existingId;
+    if (id == null || id.isEmpty) return;
+    final col = FirebaseFirestore.instance.collection('purchase_invoices');
+    await col.doc(id).delete();
+    // Note: We are not auto-reversing inventory stock here to avoid unintended side effects.
+    // If required later, implement a safe reversal flow with audit and proper confirmation.
   }
 
   Future<void> _saveToFirestore(Map<String, dynamic> data) async {
@@ -432,7 +473,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 200,
           child: DropdownButtonFormField<PurchaseType>(
-            value: type,
+            initialValue: type,
             items: PurchaseType.values
                 .map((t) => DropdownMenuItem(value: t, child: Text(_purchaseTypeLabel(t))))
                 .toList(),
@@ -465,7 +506,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 160,
           child: DropdownButtonFormField<String>(
-            value: paymentMode,
+            initialValue: paymentMode,
             items: const [
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
               DropdownMenuItem(value: 'Bank', child: Text('Bank')),
@@ -550,7 +591,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           SizedBox(
             width: 120,
             child: DropdownButtonFormField<int>(
-              value: r.gstRate,
+              initialValue: r.gstRate,
               items: const [0, 5, 12, 18, 28]
                   .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
                   .toList(),
@@ -775,7 +816,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
         if (current.isNotEmpty && !items.contains(current)) items.add(current);
         return DropdownButtonFormField<String>(
           isExpanded: true,
-            value: current.isEmpty ? null : current,
+            initialValue: current.isEmpty ? null : current,
             items: items
                 .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                 .toList(),

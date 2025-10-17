@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse providers
+import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse providers
 import '../../core/auth/auth.dart';
-import 'inventory_repository.dart';
+import 'Products/inventory_repository.dart';
 
 /// Transfers screen with Firestore-backed history (inventory_transfers collection)
 class TransfersScreen extends ConsumerStatefulWidget {
@@ -84,7 +84,14 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                           ],
                           rows: [
                             for (final t in filtered)
-                              DataRow(cells: [
+                              DataRow(
+                                onSelectChanged: (selected) {
+                                  if (selected == true) {
+                                    _openEditTransfer(t);
+                                  }
+                                },
+                                onLongPress: () => _confirmDeleteTransfer(t),
+                                cells: [
                                 DataCell(Text(_fmtDateTime(t.date))),
                                 DataCell(Text(t.sku)),
                                 DataCell(Text(t.name)),
@@ -96,8 +103,9 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                 DataCell(Text(t.totalAfter?.toString() ?? '-')),
                                 DataCell(Text(t.updatedAt == null ? '-' : _fmtDateTime(t.updatedAt!))),
                                 DataCell(Text(t.updatedBy ?? '-')),
-                                DataCell(SizedBox(width: 200, child: Text(t.note ?? ''))),
-                              ]),
+                                  DataCell(SizedBox(width: 200, child: Text(t.note ?? ''))),
+                                ],
+                              ),
                           ],
                         ),
                       ),
@@ -118,9 +126,147 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
       builder: (_) => const _TransferDialog(),
     );
   }
+
+  Future<void> _openEditTransfer(TransferRecord t) async {
+    if (t.id == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot edit: missing document id')));
+      }
+      return;
+    }
+    final formKey = GlobalKey<FormState>();
+    String from = t.from;
+    String to = t.to;
+    final qtyCtrl = TextEditingController(text: t.qty.toString());
+    final noteCtrl = TextEditingController(text: t.note ?? '');
+    final user = ref.read(authStateProvider);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Edit Transfer'),
+        content: Form(
+          key: formKey,
+          child: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SKU: ${t.sku} • ${t.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: from,
+                      items: const ['Store', 'Warehouse']
+                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (v) => from = v ?? from,
+                      decoration: const InputDecoration(labelText: 'From'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: to,
+                      items: const ['Store', 'Warehouse']
+                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (v) => to = v ?? to,
+                      decoration: const InputDecoration(labelText: 'To'),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: qtyCtrl,
+                  decoration: const InputDecoration(labelText: 'Quantity'),
+                  keyboardType: TextInputType.number,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    final n = int.tryParse(v.trim());
+                    if (n == null || n <= 0) return 'Positive number';
+                    if (from == to) return 'From & To cannot match';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: noteCtrl,
+                  decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional'),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (!(formKey.currentState?.validate() ?? false)) return;
+              Navigator.pop(dialogCtx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    try {
+      final qty = int.parse(qtyCtrl.text.trim());
+      await FirebaseFirestore.instance.collection('inventory_transfers').doc(t.id).update({
+        'from': from,
+        'to': to,
+        'qty': qty,
+        'note': noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedBy': user?.email,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transfer updated')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteTransfer(TransferRecord t) async {
+    if (t.id == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot delete: missing document id')));
+      }
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete Transfer'),
+        content: Text('Delete this transfer for ${t.sku} • ${t.name}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await FirebaseFirestore.instance.collection('inventory_transfers').doc(t.id).delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transfer deleted')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
+    }
+  }
 }
 
 class TransferRecord {
+  final String? id; // Firestore document id
   final DateTime date;
   final String sku;
   final String name;
@@ -134,6 +280,7 @@ class TransferRecord {
   final DateTime? updatedAt;
   final String? updatedBy;
   TransferRecord({
+    this.id,
     required this.date,
     required this.sku,
     required this.name,
@@ -163,6 +310,7 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return TransferRecord(
+    id: d.id,
     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
     sku: (m['sku'] ?? '') as String,
     name: (m['name'] ?? '') as String,
@@ -177,7 +325,6 @@ TransferRecord _transferFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
     updatedBy: m['updatedBy'] as String?,
   );
 }
-
 class _TransferDialog extends ConsumerStatefulWidget {
   const _TransferDialog();
   @override
@@ -289,7 +436,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _from,
+                          initialValue: _from,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -300,7 +447,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _to,
+                          initialValue: _to,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -384,7 +531,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     });
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                      final messenger = ScaffoldMessenger.of(context);
+                      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
                     }
                     setState(() => _submitting = false);
                     return;

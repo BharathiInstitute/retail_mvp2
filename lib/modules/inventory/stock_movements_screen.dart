@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
-import 'inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse existing providers
-import 'inventory_repository.dart'; // for ProductDoc
+import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse existing providers
+import 'Products/inventory_repository.dart'; // for ProductDoc
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Local + Firestore-integrated stock movements screen
@@ -75,20 +75,28 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                     ],
                     rows: [
                       for (final m in filtered)
-                        DataRow(cells: [
-                          DataCell(Text(_fmtDateTime(m.date))),
-                          DataCell(Text(m.type)),
-                          DataCell(Text(m.sku)),
-                          DataCell(Text(m.name)),
-                          DataCell(Text(m.location)),
-                          DataCell(Text(m.deltaQty.toString())),
-                          DataCell(Text(m.storeAfter?.toString() ?? '-')),
-                          DataCell(Text(m.warehouseAfter?.toString() ?? '-')),
-                          DataCell(Text(m.totalAfter?.toString() ?? '-')),
-                          DataCell(Text(m.updatedAt == null ? '-' : _fmtDateTime(m.updatedAt!))),
-                          DataCell(Text(m.updatedBy ?? '-')),
-                          DataCell(SizedBox(width: 180, child: Text(m.note ?? ''))),
-                        ]),
+                        DataRow(
+                          onSelectChanged: (selected) {
+                            if (selected == true) {
+                              _openEditMovement(m);
+                            }
+                          },
+                          onLongPress: () => _confirmDeleteMovement(m),
+                          cells: [
+                            DataCell(Text(_fmtDateTime(m.date))),
+                            DataCell(Text(m.type)),
+                            DataCell(Text(m.sku)),
+                            DataCell(Text(m.name)),
+                            DataCell(Text(m.location)),
+                            DataCell(Text(m.deltaQty.toString())),
+                            DataCell(Text(m.storeAfter?.toString() ?? '-')),
+                            DataCell(Text(m.warehouseAfter?.toString() ?? '-')),
+                            DataCell(Text(m.totalAfter?.toString() ?? '-')),
+                            DataCell(Text(m.updatedAt == null ? '-' : _fmtDateTime(m.updatedAt!))),
+                            DataCell(Text(m.updatedBy ?? '-')),
+                            DataCell(SizedBox(width: 180, child: Text(m.note ?? ''))),
+                          ],
+                        ),
                     ],
                   ),
                 );
@@ -108,9 +116,160 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
     if (result == null) return;
     // Already persisted; Firestore stream will refresh. No local list management now.
   }
+
+  Future<void> _openEditMovement(MovementRecord m) async {
+    if (m.id == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot edit: missing document id')));
+      }
+      return;
+    }
+    // Show same fields as Add dialog; SKU fixed (read-only).
+    final formKey = GlobalKey<FormState>();
+    String type = m.type;
+    String location = m.location;
+    final qtyCtrl = TextEditingController(text: m.deltaQty == 0
+        ? '0'
+        : (m.type == 'Outbound' ? (m.deltaQty.abs()).toString() : (m.type == 'Inbound' ? (m.deltaQty.abs()).toString() : m.deltaQty.toString())));
+    final noteCtrl = TextEditingController(text: m.note ?? '');
+    int parseDelta(String type, String text) {
+      final raw = int.tryParse(text.trim()) ?? 0;
+      if (type == 'Inbound') return raw.abs();
+      if (type == 'Outbound') return -raw.abs();
+      return raw; // Adjust
+    }
+    final user = ref.read(authStateProvider);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Edit Movement'),
+        content: Form(
+          key: formKey,
+          child: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SKU: ${m.sku} • ${m.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: type,
+                      items: const ['Inbound', 'Outbound', 'Adjust']
+                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (v) => type = v ?? type,
+                      decoration: const InputDecoration(labelText: 'Type'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: location,
+                      items: const ['Store', 'Warehouse']
+                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (v) => location = v ?? location,
+                      decoration: const InputDecoration(labelText: 'Location'),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: qtyCtrl,
+                  decoration: InputDecoration(
+                    labelText: type == 'Adjust' ? 'Adjust Qty (can be +/-)' : 'Quantity',
+                    helperText: type == 'Outbound' ? 'Will subtract this quantity' : (type == 'Inbound' ? 'Will add this quantity' : 'Positive or negative'),
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    final n = int.tryParse(v.trim());
+                    if (n == null) return 'Invalid';
+                    if (type == 'Outbound' && n <= 0) return 'Enter positive number';
+                    if (type != 'Outbound' && type != 'Adjust' && n < 0) return 'Cannot be negative';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: noteCtrl,
+                  decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional remarks'),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (!(formKey.currentState?.validate() ?? false)) return;
+              Navigator.pop(dialogCtx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    try {
+      final int newDelta = parseDelta(type, qtyCtrl.text);
+      await FirebaseFirestore.instance.collection('inventory_movements').doc(m.id).update({
+        'type': type,
+        'location': location,
+        'deltaQty': newDelta,
+        'note': noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedBy': user?.email,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movement updated')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteMovement(MovementRecord m) async {
+    if (m.id == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot delete: missing document id')));
+      }
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete Movement'),
+        content: Text('Delete this movement for ${m.sku} • ${m.name}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await FirebaseFirestore.instance.collection('inventory_movements').doc(m.id).delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movement deleted')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
+    }
+  }
 }
 
 class MovementRecord {
+  final String? id; // Firestore document id
   final DateTime date;
   final String type;
   final String sku;
@@ -124,6 +283,7 @@ class MovementRecord {
   final DateTime? updatedAt;
   final String? updatedBy;
   MovementRecord({
+    this.id,
     required this.date,
     required this.type,
     required this.sku,
@@ -154,6 +314,7 @@ MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
   final m = d.data();
   DateTime? tsLocal(dynamic v) => v is Timestamp ? v.toDate() : null;
   return MovementRecord(
+    id: d.id,
     date: tsLocal(m['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0),
     type: (m['type'] ?? '') as String,
     sku: (m['sku'] ?? '') as String,
@@ -281,7 +442,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _type,
+                          initialValue: _type,
                           items: const ['Inbound', 'Outbound', 'Adjust']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -292,7 +453,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _location,
+                          initialValue: _location,
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -343,6 +504,8 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
             if (_selected == null) return;
             final repo = ref.read(inventoryRepoProvider);
             final user = ref.read(authStateProvider);
+            final nav = Navigator.of(context);
+            final messenger = ScaffoldMessenger.of(context);
             final delta = _parseDelta();
             setState(() => _submitting = true);
             // Capture values needed across async gaps
@@ -368,16 +531,16 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                 'name': name,
                 'location': _location,
                 'deltaQty': delta,
-                'storeAfter': after != null ? after.stockAt('Store') : 0,
-                'warehouseAfter': after != null ? after.stockAt('Warehouse') : 0,
-                'totalAfter': after != null ? after.stockAt('Store') + after.stockAt('Warehouse') : 0,
+                'storeAfter': after?.stockAt('Store') ?? 0,
+                'warehouseAfter': after?.stockAt('Warehouse') ?? 0,
+                'totalAfter': (after?.stockAt('Store') ?? 0) + (after?.stockAt('Warehouse') ?? 0),
                 'note': noteVal.isEmpty ? null : noteVal,
-                'updatedAt': after != null ? after.updatedAt : null,
-                'updatedBy': after != null ? after.updatedBy : null,
+                'updatedAt': after?.updatedAt,
+                'updatedBy': after?.updatedBy,
               });
             } catch (err) {
               if (!mounted) return; // abort if unmounted
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $err')));
+              messenger.showSnackBar(SnackBar(content: Text('Failed: $err')));
               setState(() => _submitting = false);
               return;
             }
@@ -389,17 +552,14 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               name: name,
               location: _location,
               deltaQty: delta,
-              storeAfter: after != null ? after.stockAt('Store') : 0,
-              warehouseAfter: after != null ? after.stockAt('Warehouse') : 0,
-              totalAfter: after != null ? after.stockAt('Store') + after.stockAt('Warehouse') : 0,
+              storeAfter: after?.stockAt('Store') ?? 0,
+              warehouseAfter: after?.stockAt('Warehouse') ?? 0,
+              totalAfter: (after?.stockAt('Store') ?? 0) + (after?.stockAt('Warehouse') ?? 0),
               note: noteVal.isEmpty ? null : noteVal,
-              updatedAt: after != null ? after.updatedAt : null,
-              updatedBy: after != null ? after.updatedBy : null,
+              updatedAt: after?.updatedAt,
+              updatedBy: after?.updatedBy,
             );
-            if (mounted) {
-              final nav = Navigator.of(context);
-              if (nav.mounted) nav.pop(record);
-            }
+            if (mounted && nav.mounted) { nav.pop(record); }
           },
           child: _submitting
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))

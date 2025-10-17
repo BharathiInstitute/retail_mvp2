@@ -186,34 +186,38 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
   }
 
   Widget _plansSummary(List<_TierView> tiers){
-    Widget tile(_TierView t, Color c)=>Expanded(child: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.withValues(alpha: .35)),
+    Widget tile(_TierView t, Color c)=>ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: .07),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c.withValues(alpha: .35)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
+          Row(children:[Icon(Icons.workspace_premium_outlined, color:c), const SizedBox(width:6), Text(t.name, style: TextStyle(color:c,fontWeight:FontWeight.w600))]),
+          const SizedBox(height:8),
+          Wrap(spacing:8, runSpacing: 8, children:[
+            Chip(label: Text('${t.pointsPer100.toStringAsFixed(2)} pts / ₹100')),
+            Chip(label: Text('${t.discount.toStringAsFixed(0)}% discount')),
+          ])
+        ]),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-        Row(children:[Icon(Icons.workspace_premium_outlined, color:c), const SizedBox(width:6), Text(t.name, style: TextStyle(color:c,fontWeight:FontWeight.w600))]),
-        const SizedBox(height:8),
-        Wrap(spacing:8, children:[
-          Chip(label: Text('${t.pointsPer100.toStringAsFixed(2)} pts / ₹100')),
-          Chip(label: Text('${t.discount.toStringAsFixed(0)}% discount')),
-        ])
-      ]),
-    ));
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
           Text('Current Tiers (read-only)', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height:8),
-          if(tiers.isEmpty) const Text('No tier configuration found (open settings to configure).') else Row(children:[
-            for(int i=0;i<tiers.length && i<3;i++) ...[
-              tile(tiers[i], _tierColor(i)), if(i<tiers.length-1 && i<2) const SizedBox(width:8),
+          if(tiers.isEmpty) const Text('No tier configuration found (open settings to configure).') else Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (int i = 0; i < tiers.length; i++) tile(tiers[i], _tierColor(i)),
             ],
-            if(tiers.length>3) const SizedBox(width:8), if(tiers.length>3) Text('+${tiers.length-3} more', style: const TextStyle(fontSize:12)),
-          ])
+          )
         ]),
       ),
     );

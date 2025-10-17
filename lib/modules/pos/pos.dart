@@ -101,17 +101,32 @@ class Customer {
       discount = loyaltyDisc.toDouble();
     } else {
       switch (tier) {
-        case 'gold': { discount = 10; break; }
-        case 'silver': { discount = 5; break; }
-        case 'bronze': { discount = 2; break; }
+        case 'gold':
+          {
+            discount = 10;
+            break;
+          }
+        case 'silver':
+          {
+            discount = 5;
+            break;
+          }
+        case 'bronze':
+          {
+            discount = 2;
+            break;
+          }
         default:
           discount = 0;
       }
     }
     final creditRaw = data['creditBalance'] ?? data['khathaBalance']; // migrate old field
     double credit = 0;
-    if (creditRaw is num) credit = creditRaw.toDouble();
-    else if (creditRaw is String) credit = double.tryParse(creditRaw) ?? 0;
+    if (creditRaw is num) {
+      credit = creditRaw.toDouble();
+    } else if (creditRaw is String) {
+      credit = double.tryParse(creditRaw) ?? 0;
+    }
     return Customer(
       id: doc.id,
       name: name,

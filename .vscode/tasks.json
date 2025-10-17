@@ -33,6 +33,65 @@
 			"type": "shell",
 			"command": "flutter analyze",
 			"group": "build"
+		},
+		{
+			"label": "Run flutter analyze",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"problemMatcher": [
+				"$dart-json"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Analyze after adding row handlers",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Analyze after removing Actions column",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Analyze after StockMovements row handlers",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Analyze after edit dialog update",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Analyze after transfers edit/delete",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Repo analyze (full)",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Analyze after suppliers UX change",
+			"type": "shell",
+			"command": "flutter analyze",
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

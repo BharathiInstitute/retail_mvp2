@@ -7,7 +7,6 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -18,12 +17,12 @@ import 'pos_invoices/invoice_pdf.dart' as pdf_gen; // For PDF generation (email 
 import 'pos_invoices/invoice_email_service.dart';
 import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav.dart';
-import '../inventory/inventory_repository.dart';
+import '../inventory/Products/inventory_repository.dart';
 import 'pos_checkout.dart';
 import 'credit_service.dart';
 import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
 import 'printing/windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
-import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'web_print_fallback.dart';
+import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'printing/web_print_fallback.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
 const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);
@@ -677,7 +676,7 @@ class _PosPageState extends State<PosPage> {
       if (kPosVerbose) {
         try {
           final u = FirebaseAuth.instance.currentUser;
-          debugPrint('[LOYALTY][auth] user=' + (u==null ? 'null' : '${u.uid} email=${u.email}'));
+          debugPrint('[LOYALTY][auth] user=${u==null ? 'null' : '${u.uid} email=${u.email}'}');
         } catch (e) {
           debugPrint('[LOYALTY][auth] error $e');
         }
@@ -690,7 +689,11 @@ class _PosPageState extends State<PosPage> {
           final settingsData = settingsSnap.data() ?? {};
           double pointsPerCurrency = 0.01;
           final ppcRaw = settingsData['pointsPerCurrency'];
-          if (ppcRaw is num) pointsPerCurrency = ppcRaw.toDouble(); else if (ppcRaw is String) pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          if (ppcRaw is num) {
+            pointsPerCurrency = ppcRaw.toDouble();
+          } else if (ppcRaw is String) {
+            pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          }
           final rawTiers = <Map<String, dynamic>>[];
           final tiersData = settingsData['tiers'];
           if (tiersData is List) {
@@ -721,7 +724,9 @@ class _PosPageState extends State<PosPage> {
               if (discRaw is num) newDiscount = discRaw.toDouble();
             }
           }
-          if (kPosVerbose) debugPrint('[LOYALTY][tx] prevPoints=$prevPoints earned=$earned redeemed=$redeemedPts newPoints=$newPointsTotal');
+          if (kPosVerbose) {
+            debugPrint('[LOYALTY][tx] prevPoints=$prevPoints earned=$earned redeemed=$redeemedPts newPoints=$newPointsTotal');
+          }
           final update = <String,dynamic>{
             'loyaltyPoints': newPointsTotal,
             'loyaltyUpdatedAt': FieldValue.serverTimestamp(),
@@ -733,23 +738,31 @@ class _PosPageState extends State<PosPage> {
           };
           if (newStatus != null && newStatus.isNotEmpty) {
             update['status'] = newStatus;
-            if (newDiscount != null) update['loyaltyDiscount'] = newDiscount;
+            if (newDiscount != null) {
+              update['loyaltyDiscount'] = newDiscount;
+            }
           }
           tx.update(customerRef, update);
         });
         txSucceeded = true;
       } catch (e, st) {
         lastError = e;
-        if (kPosVerbose) debugPrint('[LOYALTY][tx-fail] $e\n$st');
+        if (kPosVerbose) {
+          debugPrint('[LOYALTY][tx-fail] $e\n$st');
+        }
       }
       if (!txSucceeded) {
         // Attempt fallback non-transactional optimistic update if the error wasn't permission-denied
-  if (lastError is FirebaseException && lastError.code == 'permission-denied') {
-          if (mounted) _snack('Loyalty skipped (no permission)');
+        if (lastError is FirebaseException && lastError.code == 'permission-denied') {
+          if (mounted) {
+            _snack('Loyalty skipped (no permission)');
+          }
           return;
         }
         try {
-          if (kPosVerbose) debugPrint('[LOYALTY][fallback] attempting direct update');
+          if (kPosVerbose) {
+            debugPrint('[LOYALTY][fallback] attempting direct update');
+          }
           final custSnap = await customerRef.get();
           final cdata = custSnap.data() ?? {};
           double prevPoints = (cdata['loyaltyPoints'] is num) ? (cdata['loyaltyPoints'] as num).toDouble() : 0;
@@ -758,7 +771,11 @@ class _PosPageState extends State<PosPage> {
           final settingsSnap = await settingsRef.get();
           final settingsData = settingsSnap.data() ?? {};
           final ppcRaw = settingsData['pointsPerCurrency'];
-          if (ppcRaw is num) pointsPerCurrency = ppcRaw.toDouble(); else if (ppcRaw is String) pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          if (ppcRaw is num) {
+            pointsPerCurrency = ppcRaw.toDouble();
+          } else if (ppcRaw is String) {
+            pointsPerCurrency = double.tryParse(ppcRaw) ?? pointsPerCurrency;
+          }
           earned = double.parse((invoice.grandTotal * pointsPerCurrency).toStringAsFixed(2));
           if (earned < 0) earned = 0;
           final redeemedPts = invoice.redeemedPoints;
@@ -853,8 +870,8 @@ class _PosPageState extends State<PosPage> {
       ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Customer email not available')));
       return;
     }
+    final messenger = ScaffoldMessenger.of(ctx);
     try {
-      final messenger = ScaffoldMessenger.of(ctx);
       messenger.showSnackBar(const SnackBar(content: Text('Generating PDF...')));
       final pdfBytes = await pdf_gen.buildInvoicePdf(inv);
       messenger.showSnackBar(const SnackBar(content: Text('Sending invoice email (PDF)...')));
@@ -870,7 +887,6 @@ class _PosPageState extends State<PosPage> {
       );
       messenger.showSnackBar(const SnackBar(content: Text('Invoice PDF email sent')));
     } catch (e) {
-      final messenger = ScaffoldMessenger.of(ctx);
       messenger.showSnackBar(SnackBar(content: Text('Failed to send PDF email: $e')));
     }
   }
@@ -908,7 +924,11 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  void _snack(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _snack(String msg) {
+    if (!mounted) return; // don't show snackbars after dispose/navigation
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   @override
   Widget build(BuildContext context) {

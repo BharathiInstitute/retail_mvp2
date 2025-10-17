@@ -127,10 +127,8 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
         Row(children: [
           Expanded(child: _payModeButton(context, PaymentMode.cash, 'Cash', Icons.payments)),
           const SizedBox(width: 8),
-            Expanded(child: _payModeButton(context, PaymentMode.upi, 'UPI', Icons.qr_code)),
-            const SizedBox(width: 8),
-            Expanded(child: _payModeButton(context, PaymentMode.credit, 'Credit', Icons.receipt_long)),
-          ]),
+          Expanded(child: _payModeButton(context, PaymentMode.upi, 'UPI', Icons.qr_code)),
+        ]),
         if (widget.selectedPaymentMode == PaymentMode.credit) ...[
           const SizedBox(height: 8),
           TextField(
@@ -149,9 +147,9 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
             payable: widget.payableTotal,
             existingCredit: widget.selectedCustomer?.creditBalance ?? 0,
           ),
-        ],
-        const SizedBox(height: 12),
-        Row(children: [
+  ],
+  const SizedBox(height: 12),
+  Row(children: [
           ElevatedButton.icon(
             onPressed: () { final qp = widget.onQuickPrint; if (qp != null) qp(); },
             icon: const Icon(Icons.print),
@@ -553,8 +551,6 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
     final addrCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
     bool saving = false;
-    // Capture messenger early to avoid using a possibly stale BuildContext after async gaps.
-    final messenger = ScaffoldMessenger.of(context);
     final created = await showDialog<Customer?>(
       context: context,
       barrierDismissible: false,
@@ -606,30 +602,31 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                 onPressed: saving ? null : () async {
                   if (!formKey.currentState!.validate()) return;
                   setLocal(() => saving = true);
+                  final nav = Navigator.of(ctx);
+                  final messenger = ScaffoldMessenger.of(ctx);
                   try {
                     final name = nameCtrl.text.trim();
                     final data = <String, dynamic>{
-                      'name': name,
-                      'email': emailCtrl.text.trim(),
-                      'phone': phoneCtrl.text.trim(),
-                      'address': addrCtrl.text.trim(),
+                      'name': name.isEmpty ? 'Unnamed' : name,
+                      'email': emailCtrl.text.trim().isEmpty ? null : emailCtrl.text.trim(),
+                      'phone': phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+                      'address': addrCtrl.text.trim().isEmpty ? null : addrCtrl.text.trim(),
                       'createdAt': FieldValue.serverTimestamp(),
-                      'totalSpend': 0,
-                      'loyaltyPoints': 0,
+                      'updatedAt': FieldValue.serverTimestamp(),
                     };
                     final doc = await FirebaseFirestore.instance.collection('customers').add(data);
                     final newCustomer = Customer(
                       id: doc.id,
                       name: name.isEmpty ? 'Unnamed' : name,
                       email: emailCtrl.text.trim().isEmpty ? null : emailCtrl.text.trim(),
-                       phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+                      phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
                       status: null,
                       totalSpend: 0,
                       rewardsPoints: 0,
                       discountPercent: 0,
                       creditBalance: 0,
                     );
-                    Navigator.pop(ctx, newCustomer);
+                    nav.pop(newCustomer);
                   } catch (e) {
                     if (kDebugMode) debugPrint('Add customer failed: $e');
                     messenger.showSnackBar(
@@ -637,9 +634,9 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                     );
                   } finally {
                     // Only reset state if the dialog is still visible and we haven't popped.
-                    if (saving && Navigator.of(ctx).mounted) {
+                    if (saving && nav.mounted) {
                       // If we reached here after an error (no pop) keep dialog enabled again.
-                      if (mounted && Navigator.of(ctx).canPop()) {
+                      if (mounted && nav.canPop()) {
                         setLocal(() => saving = false);
                       }
                     }

@@ -5,53 +5,76 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/auth/auth.dart';
+import '../../../core/auth/auth.dart';
+import '../../../core/permissions.dart';
 import 'inventory_repository.dart';
 import 'csv_utils.dart';
-import 'download_helper_stub.dart' if (dart.library.html) 'download_helper_web.dart';
+import '../download_helper_stub.dart' if (dart.library.html) '../download_helper_web.dart';
 import 'barcodes_pdf.dart';
-import 'import_products_screen.dart' show ImportProductsScreen;
-import 'suppliers_screen.dart';
-import 'alerts_screen.dart';
-import 'audit_screen.dart';
-import 'stock_movements_screen.dart';
-import 'transfers_screen.dart';
+import '../import_products_screen.dart' show ImportProductsScreen;
+import '../suppliers_screen.dart';
+import '../alerts_screen.dart';
+import '../audit_screen.dart';
+import '../stock_movements_screen.dart';
+import '../transfers_screen.dart';
 import 'inventory_sheet_page.dart';
 import 'invoice_analysis_page.dart';
 
 // -------------------- Inventory Root Screen (Tabs) --------------------
-class InventoryScreen extends StatefulWidget {
+class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key});
   @override
-  State<InventoryScreen> createState() => _InventoryScreenState();
+  ConsumerState<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> {
+class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+  final owner = ref.watch(ownerProvider).asData?.value ?? false;
+  final perms = ref.watch(permissionsProvider).asData?.value ?? UserPermissions.empty;
+
+  bool canView(String screenKey) => owner || perms.can(screenKey, 'view');
+
+    final tabs = <({String title, Widget widget})>[];
+    if (canView(ScreenKeys.invProducts)) {
+      tabs.add((title: 'Products', widget: _productsTab()));
+    }
+    if (canView(ScreenKeys.invStockMovements)) {
+      tabs.add((title: 'Stock Movements', widget: const StockMovementsScreen()));
+    }
+    if (canView(ScreenKeys.invTransfers)) {
+      tabs.add((title: 'Transfers', widget: const TransfersScreen()));
+    }
+    if (canView(ScreenKeys.invSuppliers)) {
+      tabs.add((title: 'Suppliers', widget: _suppliersTab()));
+    }
+    if (canView(ScreenKeys.invAlerts)) {
+      tabs.add((title: 'Alerts', widget: _alertsTab()));
+    }
+    if (canView(ScreenKeys.invAudit)) {
+      tabs.add((title: 'Audit / Cycle Count', widget: const AuditScreen()));
+    }
+
+    if (tabs.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('No inventory access')), 
+      );
+    }
+
     return DefaultTabController(
-      length: 6,
+      length: tabs.length,
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          title: const TabBar(isScrollable: true, tabs: [
-            Tab(text: 'Products'),
-            Tab(text: 'Stock Movements'),
-            Tab(text: 'Transfers'),
-            Tab(text: 'Suppliers'),
-            Tab(text: 'Alerts'),
-            Tab(text: 'Audit / Cycle Count'),
-          ]),
+          title: TabBar(
+            isScrollable: true,
+            tabs: [for (final t in tabs) Tab(text: t.title)],
+          ),
         ),
-        body: TabBarView(children: [
-          _productsTab(),
-          const StockMovementsScreen(),
-          const TransfersScreen(),
-          _suppliersTab(),
-          _alertsTab(),
-          const AuditScreen(),
-        ]),
+        body: TabBarView(
+          children: [for (final t in tabs) t.widget],
+        ),
       ),
     );
   }
@@ -110,7 +133,11 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
           Transform.translate(
             offset: const Offset(0, -4),
             child: SizedBox(
@@ -154,7 +181,6 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
               ],
             ),
           ),
-          const Spacer(),
           FilledButton.icon(
             onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
             icon: const Icon(Icons.add),
@@ -230,11 +256,19 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                           DataColumn(label: Text('Warehouse')),
                           DataColumn(label: Text('Total')),
                           DataColumn(label: Text('Active')),
-                          DataColumn(label: Text('Actions')),
                         ],
                         rows: [
                           for (final p in filtered)
-                            DataRow(cells: [
+                            DataRow(
+                              // Tap anywhere on the row to edit
+                              onSelectChanged: (selected) {
+                                if (selected == true && isSignedIn) {
+                                  _openEditDialog(context, p);
+                                }
+                              },
+                              // Long-press to delete (confirmation dialog will appear)
+                              onLongPress: isSignedIn ? () => _confirmDelete(context, p) : null,
+                              cells: [
                               DataCell(Text(p.sku)),
                               DataCell(Text(p.name)),
                               DataCell(Text(p.barcode)),
@@ -244,19 +278,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                               DataCell(Text(p.stockAt('Warehouse').toString())),
                               DataCell(Text(p.totalStock.toString())),
                               DataCell(Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: p.isActive ? Colors.green : Colors.red)),
-                              DataCell(Wrap(spacing: 4, children: [
-                                IconButton(
-                                  tooltip: 'Edit',
-                                  icon: const Icon(Icons.edit_outlined),
-                                  onPressed: isSignedIn ? () => _openEditDialog(context, p) : null,
-                                ),
-                                IconButton(
-                                  tooltip: 'Delete',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: isSignedIn ? () => _confirmDelete(context, p) : null,
-                                ),
-                              ])),
-                            ]),
+                              ],
+                            ),
                         ],
                       );
                       return SingleChildScrollView(
@@ -357,12 +380,12 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     final ok = await showDialog<bool>(
       context: context,
       useRootNavigator: false,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Delete Product'),
         content: Text('Are you sure you want to delete ${p.name} (${p.sku})?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
         ],
       ),
     );

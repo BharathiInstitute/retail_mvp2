@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 // Auth providers
 import 'core/auth/auth.dart';
+// Permissions
+import 'core/permissions.dart';
 
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
 import 'modules/pos/pos_cashier.dart';
-import 'modules/inventory/inventory.dart';
+import 'modules/inventory/Products/inventory.dart';
 import 'modules/invoices/sales_invoices.dart';
 import 'modules/invoices/invoices_tabs.dart';
 import 'modules/crm/crm.dart';
@@ -27,6 +29,8 @@ final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authRepo = ref.watch(authRepositoryProvider);
+  final permsAsync = ref.watch(permissionsProvider);
+  final isOwnerAsync = ref.watch(ownerProvider);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
@@ -34,14 +38,58 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/dashboard',
     refreshListenable: GoRouterRefreshStream(authRepo.authStateChanges()),
     redirect: (context, state) {
-      // Simple auth guard
+      // Auth state
       final isLoggedIn = ref.read(authStateProvider) != null;
       final loggingIn = state.matchedLocation.startsWith('/login') ||
           state.matchedLocation.startsWith('/register') ||
           state.matchedLocation.startsWith('/forgot');
-      if (!isLoggedIn && !loggingIn) return '/login';
-      if (isLoggedIn && loggingIn) return '/dashboard';
-      return null;
+
+      // Not logged in: allow auth routes, otherwise send to /login
+      if (!isLoggedIn) return loggingIn ? null : '/login';
+
+      // If on login while logged in, only leave when we know where to go
+      String? computeSafe(UserPermissions perms) {
+        if (perms.can(ScreenKeys.dashboard, 'view')) return '/dashboard';
+        if (perms.can(ScreenKeys.posMain, 'view')) return '/pos';
+        if (perms.can(ScreenKeys.invProducts, 'view')) return '/inventory';
+        if (perms.can(ScreenKeys.invSales, 'view') || perms.can(ScreenKeys.invPurchases, 'view')) return '/invoices';
+        if (perms.can(ScreenKeys.crm, 'view')) return '/crm';
+        if (perms.can(ScreenKeys.accounting, 'view')) return '/accounting';
+        if (perms.can(ScreenKeys.loyalty, 'view')) return '/loyalty';
+        if (perms.can(ScreenKeys.admin, 'view')) return '/admin';
+        return null;
+      }
+
+      // Owner bypass: if owner, allow all routes
+      if (isOwnerAsync.hasValue && (isOwnerAsync.value ?? false)) {
+        if (loggingIn) return '/dashboard';
+        return null;
+      }
+
+      // Wait for permissions to load before making decisions
+      if (!permsAsync.hasValue) return loggingIn ? null : null;
+      final perms = permsAsync.value ?? UserPermissions.empty;
+
+      // If currently on an auth route and logged in, navigate to the first allowed screen if any
+      if (loggingIn) {
+        final safe = computeSafe(perms);
+        // If no safe destination yet, stay on login to avoid loops
+        return safe; // may be null
+      }
+
+      // Guard non-auth routes by view permission
+      final loc = state.matchedLocation;
+      bool allow;
+      if (loc.startsWith('/invoices')) {
+        allow = perms.can(ScreenKeys.invSales, 'view') || perms.can(ScreenKeys.invPurchases, 'view');
+      } else {
+        final key = screenKeyForPath(loc);
+        allow = key == null ? true : perms.can(key, 'view');
+      }
+      if (allow) return null;
+
+      // Otherwise redirect to a safe destination if available, else to /login (will hold there)
+      return computeSafe(perms) ?? '/login';
     },
     routes: [
       // Public auth routes
@@ -240,7 +288,18 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = MediaQuery.of(context).size.width >= 900;
     final user = ref.watch(authStateProvider);
-    final items = _allItems;
+    final permsAsync = ref.watch(permissionsProvider);
+    final isOwner = ref.watch(ownerProvider).asData?.value ?? false;
+    final perms = permsAsync.asData?.value ?? UserPermissions.empty;
+    bool canViewRoute(String route) {
+      if (isOwner) return true; // owner bypass in nav gating
+      if (route.startsWith('/invoices')) {
+        return perms.can(ScreenKeys.invSales, 'view') || perms.can(ScreenKeys.invPurchases, 'view');
+      }
+      final key = screenKeyForPath(route);
+      return key == null ? true : perms.can(key, 'view');
+    }
+    final items = _allItems; // Keep all items visible; block navigation if not allowed
 
     // Compute selected index relative to full list (not filtered)
     int selectedIndex = items.indexWhere((e) => e.branchIndex == navigationShell.currentIndex);
@@ -276,9 +335,24 @@ class AppShell extends ConsumerWidget {
               ],
               onSelected: (v) async {
                 if (v == 'signout') {
-                  final routerCtx = context; // capture before async gap
-                  await ref.read(authRepositoryProvider).signOut();
-                  if (routerCtx.mounted) routerCtx.go('/login');
+                  // Sign out; router redirect will navigate to /login automatically
+                  try {
+                    // Ensure no SnackBars are shown/left over during logout
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    messenger?.clearSnackBars();
+                    // Proactively navigate to login on the root navigator to avoid
+                    // any transient lookups on deactivated contexts.
+                    final rootCtx = _rootNavigatorKey.currentContext;
+                    if (rootCtx != null) {
+                      GoRouter.of(rootCtx).go('/login');
+                    }
+                    // Sign out without awaiting to prevent running code after this
+                    // widget is unmounted during redirect.
+                    // ignore: discarded_futures
+                    Future.microtask(() => ref.read(authRepositoryProvider).signOut());
+                  } catch (_) {
+                    // Ignore sign-out error to avoid context access after widget deactivation
+                  }
                 }
               },
               icon: const Icon(Icons.person_outline),
@@ -302,7 +376,13 @@ class AppShell extends ConsumerWidget {
                         leading: Icon(e.icon),
                         title: Text(e.label),
                         selected: navigationShell.currentIndex == e.branchIndex,
+                        enabled: canViewRoute(e.route),
                         onTap: () async {
+                          if (!canViewRoute(e.route)) {
+                            final m = ScaffoldMessenger.maybeOf(context);
+                            m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+                            return;
+                          }
                           final tapCtx = context; // capture before async gap
                           // Avoid popping the last page off the GoRouter stack.
                           await Navigator.of(tapCtx).maybePop();
@@ -324,7 +404,15 @@ class AppShell extends ConsumerWidget {
                 for (final e in items)
                   NavigationRailDestination(icon: Icon(e.icon), label: Text(e.label)),
               ],
-              onDestinationSelected: (i) => _goBranch(context, items[i].branchIndex),
+              onDestinationSelected: (i) {
+                final target = items[i];
+                if (!canViewRoute(target.route)) {
+                  final m = ScaffoldMessenger.maybeOf(context);
+                  m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+                  return;
+                }
+                _goBranch(context, target.branchIndex);
+              },
             ),
           Expanded(child: navigationShell),
         ],
@@ -337,7 +425,15 @@ class AppShell extends ConsumerWidget {
                 for (final e in items)
                   NavigationDestination(icon: Icon(e.icon), label: e.label),
               ],
-              onDestinationSelected: (i) => _goBranch(context, items[i].branchIndex),
+              onDestinationSelected: (i) {
+                final target = items[i];
+                if (!canViewRoute(target.route)) {
+                  final m = ScaffoldMessenger.maybeOf(context);
+                  m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+                  return;
+                }
+                _goBranch(context, target.branchIndex);
+              },
             ),
     );
   }

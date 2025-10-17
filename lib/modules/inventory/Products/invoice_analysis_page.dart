@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../../core/auth/auth.dart';
-import 'Products/inventory.dart' show inventoryRepoProvider, productsStreamProvider, tenantIdProvider; // reuse providers
-import 'Products/inventory_repository.dart' show ProductDoc, InventoryRepository;
+import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider, tenantIdProvider; // reuse providers
+import 'inventory_repository.dart' show ProductDoc, InventoryRepository;
 
 class InvoiceAnalysisPage extends ConsumerStatefulWidget {
   const InvoiceAnalysisPage({super.key});

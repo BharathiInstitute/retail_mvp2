@@ -7,7 +7,7 @@ import 'print_settings.dart';
 bool globalShowWebPrintSettingsPref = false; // not persisted yet
 
 /// Opens the print settings dialog. If [showPrintButton] is true, a primary 'Print Now' button
-/// is shown and the Future<bool> resolves true only when user chooses to proceed with printing.
+/// is shown and the `Future<bool>` resolves true only when the user chooses to proceed with printing.
 /// When invoked with [showPrintButton], a "Don't show again" checkbox lets the user skip
 /// future auto display before printing (session only for now).
 Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton = false}) async {
