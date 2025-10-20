@@ -12,79 +12,35 @@ import 'csv_utils.dart';
 import '../download_helper_stub.dart' if (dart.library.html) '../download_helper_web.dart';
 import 'barcodes_pdf.dart';
 import '../import_products_screen.dart' show ImportProductsScreen;
-import '../suppliers_screen.dart';
-import '../alerts_screen.dart';
-import '../audit_screen.dart';
-import '../stock_movements_screen.dart';
-import '../transfers_screen.dart';
 import 'inventory_sheet_page.dart';
 import 'invoice_analysis_page.dart';
 
 // -------------------- Inventory Root Screen (Tabs) --------------------
-class InventoryScreen extends ConsumerStatefulWidget {
+class InventoryScreen extends ConsumerWidget {
   const InventoryScreen({super.key});
   @override
-  ConsumerState<InventoryScreen> createState() => _InventoryScreenState();
-}
-
-class _InventoryScreenState extends ConsumerState<InventoryScreen> {
-
-  @override
-  Widget build(BuildContext context) {
-  final owner = ref.watch(ownerProvider).asData?.value ?? false;
-  final perms = ref.watch(permissionsProvider).asData?.value ?? UserPermissions.empty;
-
-  bool canView(String screenKey) => owner || perms.can(screenKey, 'view');
-
-    final tabs = <({String title, Widget widget})>[];
-    if (canView(ScreenKeys.invProducts)) {
-      tabs.add((title: 'Products', widget: _productsTab()));
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Simplified: show Products by default; no TabBar.
+    final owner = ref.watch(ownerProvider).asData?.value ?? false;
+    final perms = ref.watch(permissionsProvider).asData?.value ?? UserPermissions.empty;
+    if (!(owner || perms.can(ScreenKeys.invProducts, 'view'))) {
+      return const Scaffold(body: Center(child: Text('No inventory access')));
     }
-    if (canView(ScreenKeys.invStockMovements)) {
-      tabs.add((title: 'Stock Movements', widget: const StockMovementsScreen()));
-    }
-    if (canView(ScreenKeys.invTransfers)) {
-      tabs.add((title: 'Transfers', widget: const TransfersScreen()));
-    }
-    if (canView(ScreenKeys.invSuppliers)) {
-      tabs.add((title: 'Suppliers', widget: _suppliersTab()));
-    }
-    if (canView(ScreenKeys.invAlerts)) {
-      tabs.add((title: 'Alerts', widget: _alertsTab()));
-    }
-    if (canView(ScreenKeys.invAudit)) {
-      tabs.add((title: 'Audit / Cycle Count', widget: const AuditScreen()));
-    }
-
-    if (tabs.isEmpty) {
-      return const Scaffold(
-        body: Center(child: Text('No inventory access')), 
-      );
-    }
-
-    return DefaultTabController(
-      length: tabs.length,
-      child: Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          title: TabBar(
-            isScrollable: true,
-            tabs: [for (final t in tabs) Tab(text: t.title)],
-          ),
-        ),
-        body: TabBarView(
-          children: [for (final t in tabs) t.widget],
-        ),
-      ),
+    return const Scaffold(
+      body: _CloudProductsView(),
     );
   }
+}
 
-  // ---------- Tab Builders ----------
-  Widget _productsTab() => const _CloudProductsView();
-
-  Widget _suppliersTab() => const SuppliersScreen();
-  Widget _alertsTab() => const AlertsScreen();
-  // Extracted tabs already wired in TabBarView.
+// Standalone Products screen for routing from side menu
+class ProductsStandaloneScreen extends ConsumerWidget {
+  const ProductsStandaloneScreen({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const Scaffold(
+      body: _CloudProductsView(),
+    );
+  }
 }
 
 // -------------------- Products Providers & Views --------------------

@@ -261,6 +261,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             label: const Text('Delete', style: TextStyle(color: Colors.red)),
             onPressed: () async {
+              // Capture UI handles before awaits
+              final nav = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
@@ -280,10 +283,10 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               try {
                 await _deleteInvoice();
                 if (!mounted) return;
-                _toast(context, 'Invoice deleted');
-                Navigator.of(context).pop(); // close the edit dialog
+                messenger.showSnackBar(const SnackBar(content: Text('Invoice deleted')));
+                if (nav.mounted) nav.pop(); // close the edit dialog
               } catch (e) {
-                _toast(context, 'Delete failed: $e');
+                if (mounted) messenger.showSnackBar(SnackBar(content: Text('Delete failed: $e')));
               }
             },
           ),
@@ -325,6 +328,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               try { return await _generateInvoiceNo(); } catch (_) { return null; }
             }
             final nav = Navigator.of(context);
+            final messenger = ScaffoldMessenger.of(context);
             maybeGen().then((gen) {
               if (gen != null) payload['invoiceNo'] = gen;
               return _saveToFirestore(payload);
@@ -332,15 +336,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               // After successfully saving a NEW invoice, adjust inventory (skip if editing or already adjusted)
               if (mounted && widget.existingId == null) {
                 _applyInventoryAdjustments(payload).catchError((e){
+                  if (!mounted) return;
                   // Non-blocking: show warning but keep invoice saved
-                  _toast(context, 'Inventory update failed: $e');
+                  messenger.showSnackBar(SnackBar(content: Text('Inventory update failed: $e')));
                 });
               }
               if (mounted) {
                 nav.pop();
-                _toast(context, 'Purchase saved');
+                messenger.showSnackBar(const SnackBar(content: Text('Purchase saved')));
               }
-            }).catchError((e) { _toast(context, 'Save failed: $e'); return null; });
+            }).catchError((e) { if (mounted) messenger.showSnackBar(SnackBar(content: Text('Save failed: $e'))); return null; });
           },
           child: const Text('Save'),
         ),
@@ -857,6 +862,33 @@ class _ProductAutocomplete extends StatefulWidget {
   State<_ProductAutocomplete> createState() => _ProductAutocompleteState();
 }
 
+// Simple wrapper page used by router for Purchases invoices list
+class PurchasesInvoicesScreen extends StatelessWidget {
+  const PurchasesInvoicesScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              FilledButton.icon(
+                onPressed: () => showPurchaseInvoiceDialog(context),
+                icon: const Icon(Icons.add_shopping_cart),
+                label: const Text('New Purchase Invoice'),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Expanded(child: _PurchasesList()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ProductAutocompleteState extends State<_ProductAutocomplete> {
   _ProductLite? _selected;
   List<_ProductLite> _filtered = const [];
@@ -970,6 +1002,84 @@ class _ProductAutocompleteState extends State<_ProductAutocomplete> {
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+/// Purchase invoices list (replaces legacy _PurchasesList from invoices_tabs.dart)
+class _PurchasesList extends StatelessWidget {
+  const _PurchasesList();
+
+  double _asDouble(dynamic v) {
+    if (v is num) return v.toDouble();
+    return double.tryParse(v?.toString() ?? '') ?? 0.0;
+  }
+
+  String _fmtShortDate(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    try {
+      final d = DateTime.parse(iso);
+      return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final col = FirebaseFirestore.instance.collection('purchase_invoices');
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: col.orderBy('timestampMs', descending: true).snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Center(child: Text('Error loading purchases: ${snap.error}'));
+        }
+        if (!snap.hasData) {
+          return const Center(child: SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2)));
+        }
+        final docs = snap.data!.docs;
+        if (docs.isEmpty) {
+          return const Center(child: Text('No purchase invoices yet'));
+        }
+        return ListView.separated(
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final d = docs[index];
+            final m = d.data();
+            final supplier = (m['supplier'] ?? '') as String;
+            final invoiceNo = (m['invoiceNo'] ?? '') as String;
+            final type = (m['type'] ?? '') as String;
+            final invoiceDate = _fmtShortDate(m['invoiceDate'] as String?);
+            final sum = (m['summary'] as Map?) ?? const {};
+            final grand = _asDouble(sum['grandTotal']);
+            final paid = _asDouble(((m['payment'] as Map?) ?? const {})['paid']);
+
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              title: Row(
+                children: [
+                  Expanded(child: Text(supplier.isEmpty ? '(No supplier)' : supplier, style: const TextStyle(fontWeight: FontWeight.w500))),
+                  const SizedBox(width: 12),
+                  Text(invoiceNo.isEmpty ? '' : '#$invoiceNo'),
+                ],
+              ),
+              subtitle: Wrap(spacing: 12, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                if (type.isNotEmpty) Chip(label: Text(type), visualDensity: VisualDensity.compact),
+                if (invoiceDate.isNotEmpty) Text('Date: $invoiceDate'),
+                Text('Total: ₹${grand.toStringAsFixed(2)}'),
+                Text('Paid: ₹${paid.toStringAsFixed(2)}'),
+              ]),
+              trailing: IconButton(
+                tooltip: 'Edit',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () => showEditPurchaseInvoiceDialog(context, d.id, m),
+              ),
+              onTap: () => showEditPurchaseInvoiceDialog(context, d.id, m),
+            );
+          },
         );
       },
     );

@@ -33,7 +33,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 				email: _emailCtrl.text.trim(),
 				password: _passwordCtrl.text,
 			);
-			if (mounted) context.go('/dashboard');
+			// Do not navigate here; GoRouter redirect will route based on auth state and permissions.
 		} catch (e) {
 			setState(() { _error = e.toString(); });
 		} finally {

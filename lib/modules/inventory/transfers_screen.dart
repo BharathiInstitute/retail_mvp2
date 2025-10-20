@@ -502,6 +502,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                   final user = ref.read(authStateProvider);
                   final qty = int.parse(_qtyCtrl.text.trim());
                   setState(() => _submitting = true);
+                  final messenger = ScaffoldMessenger.of(context);
+                  final nav = Navigator.of(context);
                   try {
                     await repo.applyTransfer(
                       sku: _selected!.sku,
@@ -531,15 +533,13 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     });
                   } catch (e) {
                     if (mounted) {
-                      final messenger = ScaffoldMessenger.of(context);
                       messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
                     }
                     setState(() => _submitting = false);
                     return;
                   }
-                  if (mounted) {
-                    final nav = Navigator.of(context);
-                    if (nav.mounted) nav.pop(); // stream refresh
+                  if (mounted && nav.mounted) {
+                    nav.pop(); // stream refresh
                   }
                 },
           child: _submitting

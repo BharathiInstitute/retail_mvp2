@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/permissions.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class PermissionsTab extends ConsumerStatefulWidget {
   const PermissionsTab({super.key});
@@ -9,11 +9,18 @@ class PermissionsTab extends ConsumerStatefulWidget {
   ConsumerState<PermissionsTab> createState() => _PermissionsTabState();
 }
 
+/// When set to a userId, Permissions (Edit) tab should load that user's permissions
+/// and select them automatically.
+final permissionsEditTargetUserIdProvider = StateProvider<String?>((ref) => null);
+
 class _PermissionsTabState extends ConsumerState<PermissionsTab> {
   String? _selectedUserId;
+  String? _selectedUserName;
+  String? _selectedUserEmail;
   Map<String, Map<String, bool>> _working = {};
   bool _saving = false;
   bool _selectedIsOwner = false;
+  bool _forcedTarget = false; // when navigating from Overview, lock editing to that user
 
   static const _rows = <_ScreenRow>[
     _ScreenRow('Dashboard', ScreenKeys.dashboard, viewOnly: false),
@@ -46,6 +53,13 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
     // Check role first
     final userSnap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final role = (userSnap.data()?['role'] ?? '') as String;
+    // Populate selected user display/email for header
+    final display = (userSnap.data()?['displayName'] as String?)?.trim();
+    final email = (userSnap.data()?['email'] as String?)?.trim();
+    final primary = (display != null && display.isNotEmpty)
+        ? display
+        : ((email != null && email.isNotEmpty) ? email : uid);
+    setState(() { _selectedUserName = primary; _selectedUserEmail = email; });
     final isOwner = role == 'owner';
     if (isOwner) {
       setState(() { _selectedIsOwner = true; _working = _allTrue(); });
@@ -107,18 +121,43 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch for cross-tab triggers
+    final targetUid = ref.watch(permissionsEditTargetUserIdProvider);
+    if (targetUid != null && targetUid != _selectedUserId) {
+      // Kick off load once and clear the target to avoid loops
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        setState(() { _selectedUserId = targetUid; _forcedTarget = true; });
+        await _loadPerms(targetUid);
+      });
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
           Expanded(
-            child: _UserPicker(
-              onSelected: (uid) {
-                setState(() => _selectedUserId = uid);
-                _loadPerms(uid);
-              },
-            ),
+            child: _forcedTarget
+                ? _FixedUserHeader(name: _selectedUserName ?? 'User', email: _selectedUserEmail)
+                : _UserPicker(
+                    selectedUid: _selectedUserId,
+                    onSelected: (uid) {
+                      setState(() => _selectedUserId = uid);
+                      _loadPerms(uid);
+                    },
+                  ),
           ),
+          if (_forcedTarget) ...[
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () {
+                // Allow switching to another user: clear forced target
+                ref.read(permissionsEditTargetUserIdProvider.notifier).state = null;
+                setState(() { _forcedTarget = false; });
+              },
+              icon: const Icon(Icons.swap_horiz),
+              label: const Text('Change user'),
+            ),
+          ],
           const SizedBox(width: 12),
           FilledButton.icon(
             onPressed: _selectedUserId == null || _saving || _selectedIsOwner ? null : _save,
@@ -208,7 +247,8 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
 
 class _UserPicker extends StatelessWidget {
   final void Function(String uid) onSelected;
-  const _UserPicker({required this.onSelected});
+  final String? selectedUid;
+  const _UserPicker({required this.onSelected, this.selectedUid});
 
   @override
   Widget build(BuildContext context) {
@@ -226,9 +266,12 @@ class _UserPicker extends StatelessWidget {
         if (items.isEmpty) {
           return const Text('No users found');
         }
+        final ids = items.map((d) => d.id).toSet();
+        final currentValue = (selectedUid != null && ids.contains(selectedUid)) ? selectedUid : null;
         return DropdownButtonFormField<String>(
           isExpanded: true,
           decoration: const InputDecoration(labelText: 'Select user'),
+          initialValue: currentValue,
           items: [
             for (final d in items)
               (){
@@ -272,5 +315,61 @@ class _ScreenRow {
   final String key;
   final bool viewOnly;
   const _ScreenRow(this.label, this.key, {this.viewOnly = false});
+}
+
+class _FixedUserHeader extends StatelessWidget {
+  final String name;
+  final String? email;
+  const _FixedUserHeader({required this.name, this.email});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(name, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color)),
+                if (email != null && email!.isNotEmpty)
+                  Text(email!, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+          Tooltip(
+            message: 'Editing permissions for this user (from Overview)'.trim(),
+            child: Text('Locked'),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+/// Standalone page for /admin/permissions-edit
+class AdminPermissionsEditPage extends StatelessWidget {
+  const AdminPermissionsEditPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Permissions (Edit)')),
+      body: const Padding(
+        padding: EdgeInsets.all(16),
+        child: PermissionsTab(),
+      ),
+    );
+  }
 }
 

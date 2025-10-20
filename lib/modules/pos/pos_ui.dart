@@ -23,6 +23,7 @@ import 'credit_service.dart';
 import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
 import 'printing/windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
 import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'printing/web_print_fallback.dart';
+import '../../core/app_keys.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
 const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);
@@ -542,102 +543,105 @@ class _PosPageState extends State<PosPage> {
     // Direct print removed (migrated to new Node backend architecture).
 
   if (kPosVerbose) debugPrint('[POS] showing invoice dialog');
-  showDialog(
-        context: context,
-        barrierDismissible: true,
-        builder: (dialogCtx) => AlertDialog(
-              title: const Text('Invoice Preview (GST)'),
-              content: SizedBox(width: 480, child: summary),
-              actions: [
-                // Email first
-                TextButton.icon(
-                  onPressed: () => _emailInvoice(dialogCtx),
-                  icon: const Icon(Icons.email),
-                  label: const Text('Email'),
-                ),
-                // Print beside Email
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-                  onPressed: _isPrinting ? null : () async {
-                    setState(() => _isPrinting = true);
-                    try {
-                      bool directOk = false;
-                      if (kEnableDirectPsPrint) {
-                        try { directOk = await directWindowsPrintInvoice(invoice); } catch (_) { directOk = false; }
-                      }
-                      if (directOk) {
-                        _snack('Invoice printed (direct)');
-                        if (kPosVerbose) debugPrint('[POS] direct print success');
-                      } else {
-                        if (kIsWeb) {
-                          // Web: try backend, then always fall back to browser print
-                          bool backendOk = false;
-                          if (_canUseBackend) {
-                            if (kPosVerbose) debugPrint('[POS] print-invoice POST');
-                            try {
-                              final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
-                                  headers: {'Content-Type': 'application/json'},
-                                  body: jsonEncode({'invoice': invoice.toJson()}));
-                              if (resp.statusCode == 200) {
-                                backendOk = true;
-                                _snack('Invoice printed');
-                                if (kPosVerbose) debugPrint('[POS] backend print success');
-                                return;
-                              } else if (kPosVerbose) {
-                                debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
-                              }
-                            } catch (e) {
-                              if (kPosVerbose) debugPrint('[POS][web] backend print error: $e');
-                            }
-                          }
-                          if (!backendOk) {
-                            if (kWebStrictSilent) {
-                              _snack('Silent print unavailable (backend offline)');
-                            } else {
-                              final handle = webPrintPreopen();
-                              final handled = await webPrintPopulateAndPrint(handle, invoice);
-                              if (handled) {
-                                _snack('Browser print opened');
-                                return;
-                              }
-                              _snack('Print error (popup blocked?)');
-                            }
-                          }
-                        } else {
-                          if (kPosVerbose) debugPrint('[POS] print-invoice POST');
-                          final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
-                              headers: {'Content-Type': 'application/json'},
-                              body: jsonEncode({'invoice': invoice.toJson()}));
-                          if (resp.statusCode == 200) {
-                            _snack('Invoice printed');
-                            if (kPosVerbose) debugPrint('[POS] backend print success');
-                          } else {
-                            _snack('Print failed: ${resp.statusCode} ${resp.body}');
-                            if (kPosVerbose) debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
-                          }
+  _showInvoiceDialog(summary, invoice);
+  }
+
+  void _showInvoiceDialog(Widget summary, InvoiceData invoice) {
+    final dlgRoot = rootNavigatorKey.currentContext;
+    if (dlgRoot == null) return;
+    showDialog(
+      context: dlgRoot,
+      barrierDismissible: true,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Invoice Preview (GST)'),
+        content: SizedBox(width: 480, child: summary),
+        actions: [
+          TextButton.icon(
+            onPressed: () => _emailInvoice(),
+            icon: const Icon(Icons.email),
+            label: const Text('Email'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+            onPressed: _isPrinting ? null : () async {
+              setState(() => _isPrinting = true);
+              try {
+                bool directOk = false;
+                if (kEnableDirectPsPrint) {
+                  try { directOk = await directWindowsPrintInvoice(invoice); } catch (_) { directOk = false; }
+                }
+                if (directOk) {
+                  _snack('Invoice printed (direct)');
+                  if (kPosVerbose) debugPrint('[POS] direct print success');
+                } else {
+                  if (kIsWeb) {
+                    bool backendOk = false;
+                    if (_canUseBackend) {
+                      if (kPosVerbose) debugPrint('[POS] print-invoice POST');
+                      try {
+                        final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({'invoice': invoice.toJson()}));
+                        if (resp.statusCode == 200) {
+                          backendOk = true;
+                          _snack('Invoice printed');
+                          if (kPosVerbose) debugPrint('[POS] backend print success');
+                          return;
+                        } else if (kPosVerbose) {
+                          debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
                         }
+                      } catch (e) {
+                        if (kPosVerbose) debugPrint('[POS][web] backend print error: $e');
                       }
-                    } catch (e) {
-                      _snack('Print error');
-                      if (kPosVerbose) debugPrint('[POS] print error: $e');
-                    } finally {
-                      if (mounted) setState(() => _isPrinting = false);
                     }
-                  },
-                  icon: _isPrinting ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,color: Colors.white)) : const Icon(Icons.print),
-                  label: const Text('Print'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // Use local navigator to avoid popping the shell root route.
-                    if (Navigator.of(dialogCtx).canPop()) {
-                      Navigator.of(dialogCtx).pop();
+                    if (!backendOk) {
+                      if (kWebStrictSilent) {
+                        _snack('Silent print unavailable (backend offline)');
+                      } else {
+                        final handle = webPrintPreopen();
+                        final handled = await webPrintPopulateAndPrint(handle, invoice);
+                        if (handled) {
+                          _snack('Browser print opened');
+                          return;
+                        }
+                        _snack('Print error (popup blocked?)');
+                      }
                     }
-                  },
-                  child: const Text('Close'),
-                ),
-              ],
-            ));
+                  } else {
+                    if (kPosVerbose) debugPrint('[POS] print-invoice POST');
+                    final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                        headers: {'Content-Type': 'application/json'},
+                        body: jsonEncode({'invoice': invoice.toJson()}));
+                    if (resp.statusCode == 200) {
+                      _snack('Invoice printed');
+                      if (kPosVerbose) debugPrint('[POS] backend print success');
+                    } else {
+                      _snack('Print failed: ${resp.statusCode} ${resp.body}');
+                      if (kPosVerbose) debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
+                    }
+                  }
+                }
+              } catch (e) {
+                _snack('Print error');
+                if (kPosVerbose) debugPrint('[POS] print error: $e');
+              } finally {
+                if (mounted) setState(() => _isPrinting = false);
+              }
+            },
+            icon: _isPrinting ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,color: Colors.white)) : const Icon(Icons.print),
+            label: const Text('Print'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (Navigator.of(dialogCtx).canPop()) {
+                Navigator.of(dialogCtx).pop();
+              }
+            },
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---------------- Temporary placeholder cart/product helpers ----------------
@@ -859,22 +863,22 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  Future<void> _emailInvoice(BuildContext ctx) async {
+  Future<void> _emailInvoice() async {
     final inv = lastInvoice;
     if (inv == null) {
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('No invoice snapshot available')));
+      scaffoldMessengerKey.currentState?.showSnackBar(const SnackBar(content: Text('No invoice snapshot available')));
       return;
     }
     final email = inv.customerEmail;
     if (email == null || email.isEmpty) {
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Customer email not available')));
+      scaffoldMessengerKey.currentState?.showSnackBar(const SnackBar(content: Text('Customer email not available')));
       return;
     }
-    final messenger = ScaffoldMessenger.of(ctx);
+    final messenger = scaffoldMessengerKey.currentState;
     try {
-      messenger.showSnackBar(const SnackBar(content: Text('Generating PDF...')));
+      messenger?.showSnackBar(const SnackBar(content: Text('Generating PDF...')));
       final pdfBytes = await pdf_gen.buildInvoicePdf(inv);
-      messenger.showSnackBar(const SnackBar(content: Text('Sending invoice email (PDF)...')));
+      messenger?.showSnackBar(const SnackBar(content: Text('Sending invoice email (PDF)...')));
       final service = InvoiceEmailService();
       await service.sendInvoicePdf(
         customerEmail: email,
@@ -885,9 +889,9 @@ class _PosPageState extends State<PosPage> {
         body: 'Dear ${inv.customerName},\n\nPlease find your invoice attached as PDF.\n\nRegards.',
         filename: '${inv.invoiceNumber}.pdf',
       );
-      messenger.showSnackBar(const SnackBar(content: Text('Invoice PDF email sent')));
+      messenger?.showSnackBar(const SnackBar(content: Text('Invoice PDF email sent')));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed to send PDF email: $e')));
+      messenger?.showSnackBar(SnackBar(content: Text('Failed to send PDF email: $e')));
     }
   }
 
@@ -925,14 +929,16 @@ class _PosPageState extends State<PosPage> {
   }
 
   void _snack(String msg) {
-    if (!mounted) return; // don't show snackbars after dispose/navigation
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    // Use global messenger to avoid using a widget BuildContext across async gaps
+    final messenger = scaffoldMessengerKey.currentState;
     messenger?.showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 1100;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 1280;
+    final isTablet = screenWidth >= 900 && screenWidth < 1280;
     return KeyboardListener(
       focusNode: _scannerFocusNode,
       onKeyEvent: _handleKeyEvent,
@@ -948,9 +954,14 @@ class _PosPageState extends State<PosPage> {
         final allProducts = snapshot.data!;
         _cacheProducts = allProducts;
         final filtered = _filteredProducts(allProducts);
+        final pagePadding = isDesktop ? const EdgeInsets.all(12.0) : (isTablet ? const EdgeInsets.all(8.0) : const EdgeInsets.all(12.0));
         return Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: isWide ? _wideLayout(filtered, allProducts) : _narrowLayout(filtered, allProducts),
+          padding: pagePadding,
+          child: isDesktop
+              ? _wideLayout(filtered, allProducts)
+              : isTablet
+                  ? _tabletLayout(filtered, allProducts)
+                  : _narrowLayout(filtered, allProducts),
         );
       },
     ));
@@ -1079,6 +1090,119 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
+  // Tablet layout: similar to wide but with reduced widths and spacing
+  Widget _tabletLayout(List<Product> filtered, List<Product> allProducts) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 340,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              PosSearchAndScanCard(
+                barcodeController: barcodeCtrl,
+                searchController: searchCtrl,
+                scannerActive: _scannerActive,
+                scannerConnected: _isScannerConnected,
+                onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
+                onBarcodeSubmitted: _scan,
+                onSearchChanged: () => setState(() {}),
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: PosProductList(
+                  products: filtered,
+                  favoriteSkus: favoriteSkus,
+                  onAdd: (p) => addToCart(p),
+                  onToggleFavorite: (p) => setState(() {
+                    if (favoriteSkus.contains(p.sku)) {
+                      favoriteSkus.remove(p.sku);
+                    } else {
+                      favoriteSkus.add(p.sku);
+                    }
+                  }),
+                ),
+              ),
+              const SizedBox(height: 6),
+              PosPopularItemsGrid(
+                allProducts: allProducts,
+                favoriteSkus: favoriteSkus,
+                onAdd: (p) => addToCart(p),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: CartSection(
+            cart: cart,
+            heldOrders: heldOrders,
+            onHold: holdCart,
+            onResumeSelect: (ctx) async {
+              final sel = await showDialog<HeldOrder>(
+                context: ctx,
+                builder: (_) => _HeldOrdersDialog(orders: heldOrders),
+              );
+              if (sel != null) {
+                resumeHeld(sel);
+              }
+              return sel;
+            },
+            onClear: () {
+              setState(() => cart.clear());
+              _snack('Cart cleared');
+            },
+            onChangeQty: (sku, d) => changeQty(sku, d),
+            onRemove: (sku) => removeFromCart(sku),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 300,
+          child: CheckoutPanel(
+            customersStream: _customerStream,
+            initialCustomers: customers,
+            selectedCustomer: selectedCustomer,
+            walkIn: walkIn,
+            onCustomerSelected: (c) => _onCustomerSelected(c),
+            subtotal: subtotal,
+            discountValue: discountValue,
+            redeemValue: redeemValue,
+            grandTotal: grandTotal,
+            payableTotal: payableTotal,
+            getRedeemedPoints: () => redeemedPoints,
+            getAvailablePoints: () => _availablePoints,
+            redeemPointsController: _redeemPointsCtrl,
+            onRedeemMax: () {
+              setState(() {
+                _redeemPointsCtrl.text = _availablePoints.toStringAsFixed(0);
+              });
+            },
+            onRedeemChanged: () {
+              final raw = _redeemPointsCtrl.text.trim();
+              if (raw.isEmpty) return setState(() {});
+              final val = double.tryParse(raw);
+              if (val == null) {
+                _redeemPointsCtrl.text = '0';
+                _redeemPointsCtrl.selection = TextSelection.collapsed(offset: _redeemPointsCtrl.text.length);
+              }
+              setState(() {});
+            },
+            cart: cart,
+            lineTaxes: lineTaxes,
+            onCheckout: () => completeSale(),
+            onCheckoutCreditMix: (amt) => completeSale(creditPaidInput: amt),
+            selectedPaymentMode: selectedPaymentMode,
+            onPaymentModeChanged: (m) => setState(() => selectedPaymentMode = m),
+            onQuickPrint: _quickPrintFromPanel,
+            onPayCredit: (amt) => _payCustomerCredit(amt),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _narrowLayout(List<Product> filtered, List<Product> allProducts) {
     return ListView(
       children: [
@@ -1093,7 +1217,7 @@ class _PosPageState extends State<PosPage> {
         ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 240,
+          height: 200,
           child: PosProductList(
             products: filtered,
             favoriteSkus: favoriteSkus,
@@ -1339,9 +1463,49 @@ class _PosPageState extends State<PosPage> {
 
 // _ScannerToggle moved to pos_search_scan_fav.dart
 
-class _HeldOrdersDialog extends StatelessWidget {
+class _HeldOrdersDialog extends StatefulWidget {
   final List<HeldOrder> orders;
   const _HeldOrdersDialog({required this.orders});
+
+  @override
+  State<_HeldOrdersDialog> createState() => _HeldOrdersDialogState();
+}
+
+class _HeldOrdersDialogState extends State<_HeldOrdersDialog> {
+  Future<bool> _askDeleteConfirm(HeldOrder o) async {
+    final rootCtx = rootNavigatorKey.currentContext;
+    if (rootCtx == null) return false;
+    final confirmed = await showDialog<bool>(
+      context: rootCtx,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete held order?'),
+        content: Text('Delete ${o.id}? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => rootNavigatorKey.currentState?.pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _confirmAndDelete(HeldOrder o) async {
+    // Ensure popup menu is fully closed before opening a dialog to avoid layout glitches
+    await Future.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    final confirmed = await _askDeleteConfirm(o);
+    if (confirmed == true) {
+      if (!mounted) return;
+      setState(() {
+        widget.orders.removeWhere((e) => e.id == o.id);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1350,22 +1514,36 @@ class _HeldOrdersDialog extends StatelessWidget {
       content: SizedBox(
         width: 420,
         height: 360,
-        child: ListView.separated(
-          itemCount: orders.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (_, i) {
-            final o = orders[i];
-            final count = o.items.fold<int>(0, (s, it) => s + it.qty);
-            return ListTile(
-              title: Text('${o.id} • ${o.timestamp.hour.toString().padLeft(2, '0')}:${o.timestamp.minute.toString().padLeft(2, '0')}'),
-              subtitle: Text('Items: $count'),
-              trailing: const Icon(Icons.play_circle_outline),
-              onTap: () => Navigator.pop(context, o),
-            );
-          },
-        ),
+        child: widget.orders.isEmpty
+            ? const Center(child: Text('No held orders'))
+            : ListView.separated(
+                itemCount: widget.orders.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final o = widget.orders[i];
+                  final count = o.items.fold<int>(0, (s, it) => s + it.qty);
+                  final time = '${o.timestamp.hour.toString().padLeft(2, '0')}:${o.timestamp.minute.toString().padLeft(2, '0')}';
+                  return ListTile(
+                    title: Text('${o.id} • $time'),
+                    subtitle: Text('Items: $count'),
+                    onTap: () => rootNavigatorKey.currentState?.pop(o),
+                    trailing: PopupMenuButton<String>(
+                      tooltip: 'More',
+                      itemBuilder: (_) => [
+                        const PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
+                      ],
+                      onSelected: (v) {
+                        if (v == 'delete') {
+                          _confirmAndDelete(o);
+                        }
+                      },
+                      icon: const Icon(Icons.more_vert),
+                    ),
+                  );
+                },
+              ),
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+  actions: [TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(), child: const Text('Close'))],
     );
   }
 }

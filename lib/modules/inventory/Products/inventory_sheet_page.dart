@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/auth.dart';
+import '../../../core/app_keys.dart';
 import 'inventory_repository.dart';
 import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider; // reuse providers
 
@@ -112,13 +113,161 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
 
   // --- Change Planning & Progress -------------------------------------------------
 
+  Future<bool> _confirmUploadPlan({
+    required int creates,
+    required int updates,
+    required int adjusts,
+    required int deletes,
+    required int totalOps,
+  }) async {
+    final ctx = rootNavigatorKey.currentContext;
+    if (ctx == null) return false;
+    final result = await showDialog<bool>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Confirm Upload'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Creates: $creates'),
+            Text('Updates: $updates'),
+            Text('Stock Adjustments: $adjusts'),
+            Text('Deletes: $deletes'),
+            const SizedBox(height: 12),
+            Text('Total operations: $totalOps'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => rootNavigatorKey.currentState?.pop(true), child: const Text('Proceed')),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  Future<int> _showProgressAndRunOps({
+    required List<_CreateOp> creates,
+    required List<_UpdateOp> updates,
+    required List<_AdjustOp> adjusts,
+    required List<String> deletes,
+    required int totalOps,
+    required InventoryRepository repo,
+    required String tenantFallback,
+    required String? updatedByEmail,
+  }) async {
+    int processed = 0;
+    String phase = 'Starting';
+    String? error;
+    final ctx = rootNavigatorKey.currentContext;
+    if (ctx == null) return 0;
+    late void Function(VoidCallback fn) setDialogState;
+    await showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        Future.microtask(() async {
+          try {
+            void update(String p) { phase = p; setDialogState(() {}); }
+            for (final c in creates) {
+              update('Create ${c.sku}');
+              await repo.addProduct(
+                tenantId: tenantFallback,
+                sku: c.sku,
+                name: c.name,
+                unitPrice: c.price,
+                taxPct: null,
+                barcode: '',
+                description: null,
+                variants: const [],
+                mrpPrice: null,
+                costPrice: null,
+                isActive: true,
+                storeQty: c.qty,
+                warehouseQty: 0,
+              );
+              processed++; setDialogState(() {});
+            }
+            for (final u in updates) {
+              update('Update ${u.sku}');
+              await repo.updateProduct(
+                sku: u.sku,
+                name: u.name,
+                unitPrice: u.price,
+                taxPct: u.existing.taxPct,
+                barcode: u.existing.barcode,
+                description: u.existing.description,
+                variants: u.existing.variants,
+                mrpPrice: u.existing.mrpPrice,
+                costPrice: u.existing.costPrice,
+                isActive: u.existing.isActive,
+              );
+              processed++; setDialogState(() {});
+            }
+            for (final a in adjusts) {
+              update('Adjust ${a.sku} (${a.diff > 0 ? '+' : ''}${a.diff})');
+              await repo.applyStockMovement(
+                sku: a.sku,
+                location: 'Store',
+                deltaQty: a.diff,
+                type: a.diff > 0 ? 'Inbound' : 'Outbound',
+                note: 'Sheet upload adjust',
+                updatedBy: updatedByEmail,
+              );
+              processed++; setDialogState(() {});
+            }
+            for (final d in deletes) {
+              update('Delete $d');
+              await repo.deleteProduct(sku: d);
+              processed++; setDialogState(() {});
+            }
+          } catch (e) {
+            error = e.toString();
+          } finally {
+            await Future.delayed(const Duration(milliseconds: 200));
+            final nav = rootNavigatorKey.currentState;
+            if (nav != null && nav.canPop()) nav.pop();
+          }
+        });
+        return StatefulBuilder(builder: (context, setStateDialog) {
+          setDialogState = setStateDialog;
+          final value = totalOps == 0 ? null : processed / totalOps;
+          return AlertDialog(
+            title: const Text('Uploading...'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(value: processed == totalOps ? 1 : value),
+                  const SizedBox(height: 12),
+                  Text('Phase: $phase'),
+                  const SizedBox(height: 4),
+                  Text('Processed $processed of $totalOps'),
+                  if (error != null) ...[
+                    const SizedBox(height: 8),
+                    Text('Error: $error', style: const TextStyle(color: Colors.red)),
+                  ],
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+    return processed;
+  }
+
   Future<void> _uploadChanges() async {
     if (stateManager == null) return;
     final user = ref.read(authStateProvider);
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sign in required.')));
+      scaffoldMessengerKey.currentState?.showSnackBar(const SnackBar(content: Text('Sign in required.')));
       return;
     }
+    final rootMessenger = scaffoldMessengerKey.currentState;
     setState(() => _uploading = true);
     try {
       final productsSnapshot = await ref.read(productsStreamProvider.future);
@@ -135,8 +284,8 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
         final name = (row.cells['name']!.value ?? '').toString().trim();
         final qty = (row.cells['qty']!.value ?? 0) as num;
         final price = (row.cells['price']!.value ?? 0) as num;
-        if (sku.isEmpty || name.isEmpty) continue; // incomplete
-        if (!seenSku.add(sku)) continue; // dup
+        if (sku.isEmpty || name.isEmpty) continue;
+        if (!seenSku.add(sku)) continue;
         final existing = existingBySku[sku];
         if (existing == null) {
           creates.add(_CreateOp(sku: sku, name: name, qty: qty.toInt(), price: price.toDouble()));
@@ -145,9 +294,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
             updates.add(_UpdateOp(sku: sku, name: name, price: price.toDouble(), existing: existing));
           }
           final diff = qty.toInt() - existing.totalStock;
-            if (diff != 0) {
-              adjusts.add(_AdjustOp(sku: sku, diff: diff));
-            }
+          if (diff != 0) adjusts.add(_AdjustOp(sku: sku, diff: diff));
         }
       }
       final gridSkus = rows.map((r) => (r.cells['sku']!.value ?? '').toString().trim()).where((s) => s.isNotEmpty).toSet();
@@ -155,152 +302,39 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
 
       final totalOps = creates.length + updates.length + adjusts.length + deletes.length;
       if (totalOps == 0) {
-        if (mounted) {
-          final messenger = ScaffoldMessenger.of(context);
-          messenger.showSnackBar(const SnackBar(content: Text('No changes to upload.')));
-        }
+        rootMessenger?.showSnackBar(const SnackBar(content: Text('No changes to upload.')));
         return;
       }
 
-      // Confirm plan & show progress dialog
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (dialogCtx) => AlertDialog(
-          title: const Text('Confirm Upload'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Creates: ${creates.length}'),
-              Text('Updates: ${updates.length}'),
-              Text('Stock Adjustments: ${adjusts.length}'),
-              Text('Deletes: ${deletes.length}'),
-              const SizedBox(height: 12),
-              Text('Total operations: $totalOps'),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Proceed')),
-          ],
-        ),
+      final proceed = await _confirmUploadPlan(
+        creates: creates.length,
+        updates: updates.length,
+        adjusts: adjusts.length,
+        deletes: deletes.length,
+        totalOps: totalOps,
       );
-      if (proceed != true) return;
+      if (!proceed) return;
 
-      int processed = 0;
-      String phase = 'Starting';
-      String? error;
       final repo = ref.read(inventoryRepoProvider);
       final tenantFallback = existingBySku.values.isEmpty ? user.uid : existingBySku.values.first.tenantId;
-
-      final rootContext = context;
-      await showDialog(
-        context: rootContext,
-        barrierDismissible: false,
-        builder: (dialogCtx) {
-          // Kick off async processing after first frame
-          Future.microtask(() async {
-            try {
-              void update(String p) { phase = p; (dialogCtx as Element).markNeedsBuild(); }
-              for (final c in creates) {
-                update('Create ${c.sku}');
-                await repo.addProduct(
-                  tenantId: tenantFallback,
-                  sku: c.sku,
-                  name: c.name,
-                  unitPrice: c.price,
-                  taxPct: null,
-                  barcode: '',
-                  description: null,
-                  variants: const [],
-                  mrpPrice: null,
-                  costPrice: null,
-                  isActive: true,
-                  storeQty: c.qty,
-                  warehouseQty: 0,
-                );
-                processed++; (dialogCtx as Element).markNeedsBuild();
-              }
-              for (final u in updates) {
-                update('Update ${u.sku}');
-                await repo.updateProduct(
-                  sku: u.sku,
-                  name: u.name,
-                  unitPrice: u.price,
-                  taxPct: u.existing.taxPct,
-                  barcode: u.existing.barcode,
-                  description: u.existing.description,
-                  variants: u.existing.variants,
-                  mrpPrice: u.existing.mrpPrice,
-                  costPrice: u.existing.costPrice,
-                  isActive: u.existing.isActive,
-                );
-                processed++; (dialogCtx as Element).markNeedsBuild();
-              }
-              for (final a in adjusts) {
-                update('Adjust ${a.sku} (${a.diff > 0 ? '+' : ''}${a.diff})');
-                await repo.applyStockMovement(
-                  sku: a.sku,
-                  location: 'Store',
-                  deltaQty: a.diff,
-                  type: a.diff > 0 ? 'Inbound' : 'Outbound',
-                  note: 'Sheet upload adjust',
-                  updatedBy: user.email,
-                );
-                processed++; (dialogCtx as Element).markNeedsBuild();
-              }
-              for (final d in deletes) {
-                update('Delete $d');
-                await repo.deleteProduct(sku: d);
-                processed++; (dialogCtx as Element).markNeedsBuild();
-              }
-            } catch (e) {
-              error = e.toString();
-            } finally {
-              await Future.delayed(const Duration(milliseconds: 200));
-              final nav = Navigator.of(dialogCtx);
-              if (nav.canPop()) nav.pop();
-            }
-          });
-          return StatefulBuilder(builder: (context, setStateDialog) {
-            final value = totalOps == 0 ? null : processed / totalOps;
-            return AlertDialog(
-              title: const Text('Uploading...'),
-              content: SizedBox(
-                width: 360,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    LinearProgressIndicator(value: processed == totalOps ? 1 : value),
-                    const SizedBox(height: 12),
-                    Text('Phase: $phase'),
-                    const SizedBox(height: 4),
-                    Text('Processed $processed of $totalOps'),
-                    if (error != null) ...[
-                      const SizedBox(height: 8),
-                      Text('Error: $error', style: const TextStyle(color: Colors.red)),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          });
-        },
+      final processed = await _showProgressAndRunOps(
+        creates: creates,
+        updates: updates,
+        adjusts: adjusts,
+        deletes: deletes,
+        totalOps: totalOps,
+        repo: repo,
+        tenantFallback: tenantFallback,
+        updatedByEmail: user.email,
       );
 
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.of(rootContext);
       if (processed == totalOps) {
-        messenger.showSnackBar(const SnackBar(content: Text('Upload complete')));
+        rootMessenger?.showSnackBar(const SnackBar(content: Text('Upload complete')));
       } else {
-        messenger.showSnackBar(SnackBar(content: Text('Upload incomplete ($processed/$totalOps). See log.')));
+        rootMessenger?.showSnackBar(SnackBar(content: Text('Upload incomplete ($processed/$totalOps). See log.')));
       }
     } catch (e) {
-      if (mounted) {
-        final messenger = ScaffoldMessenger.of(context);
-        messenger.showSnackBar(SnackBar(content: Text('Upload failed: $e')));
-      }
+      rootMessenger?.showSnackBar(SnackBar(content: Text('Upload failed: $e')));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }

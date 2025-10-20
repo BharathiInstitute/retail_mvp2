@@ -1,10 +1,26 @@
-import 'package:flutter/material.dart';
+// material import already present above
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:retail_mvp2/core/logging.dart';
 // Removed unused firebase_auth import.
+import 'package:flutter/material.dart';
+
+class AdminUsersPage extends StatelessWidget {
+  const AdminUsersPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Admin · Users')),
+      body: const Padding(
+        padding: EdgeInsets.all(16),
+        child: UsersTab(),
+      ),
+    );
+  }
+}
 
 class UsersTab extends ConsumerWidget {
   const UsersTab({super.key});
@@ -367,16 +383,26 @@ class _UserActionsState extends State<_UserActions>{
               // context used synchronously – safe
               _openEditUser(context, widget.userId, widget.currentValues);
             } else if (v=='delete'){
-              // Capture messenger before any awaits. The showDialog uses the current context synchronously.
+              // Prevent deleting the currently signed-in user
+              final currentUid = FirebaseAuth.instance.currentUser?.uid;
+              if (currentUid != null && currentUid == widget.userId) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot delete the currently signed-in user')));
+                return;
+              }
+              // Capture messenger before any awaits.
               final messenger = ScaffoldMessenger.of(context);
+              // Ensure popup menu route fully closes before opening dialog to avoid overlay glitches.
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              if (!context.mounted) return;
               final ok = await showDialog<bool>(
                 context: context,
-                builder: (_)=> AlertDialog(
+                barrierDismissible: false,
+                builder: (dialogCtx)=> AlertDialog(
                   title: const Text('Delete User'),
                   content: Text('Delete ${widget.currentValues['email'] ?? widget.userId}? This cannot be undone.'),
                   actions: [
-                    TextButton(onPressed: ()=> Navigator.pop(context,false), child: const Text('Cancel')),
-                    FilledButton(onPressed: ()=> Navigator.pop(context,true), child: const Text('Delete')),
+                    TextButton(onPressed: ()=> Navigator.pop(dialogCtx,false), child: const Text('Cancel')),
+                    FilledButton(onPressed: ()=> Navigator.pop(dialogCtx,true), child: const Text('Delete')),
                   ],
                 ),
               );
@@ -403,7 +429,19 @@ class _UserActionsState extends State<_UserActions>{
             ];
             // If this user is current owner, we disable delete
             final isOwnerUser = role == 'owner';
-            items.add(PopupMenuItem(value:'delete', enabled: !_busy && !isOwnerUser, child: _busy? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : Text(isOwnerUser? 'Delete (disabled)': 'Delete')));
+            final currentUid = FirebaseAuth.instance.currentUser?.uid;
+            final isSelf = currentUid != null && currentUid == widget.userId;
+            final canDelete = !_busy && !isOwnerUser && !isSelf;
+            final label = isOwnerUser
+                ? 'Delete (owner)'
+                : (isSelf ? 'Delete (self)' : 'Delete');
+            items.add(PopupMenuItem(
+              value: 'delete',
+              enabled: canDelete,
+              child: _busy
+                  ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2))
+                  : Text(label),
+            ));
             return items;
           },
         );

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/app_keys.dart';
 
 // CRM: List customers from Firestore with search/filter, add, edit, and delete.
 
@@ -38,17 +39,11 @@ class _CrmListScreenState extends State<CrmListScreen> {
 		}).toList();
 	}
 
-	Future<void> _exportCsv() async {
-		final snap = await FirebaseFirestore.instance.collection('customers').get();
-		final list = snap.docs.map((d) => CrmCustomer.fromDoc(d)).toList()
-			..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-		final header = 'Name,Phone,Email,Loyalty,TotalSpend,LastVisit';
-		final rows = list.map((c) =>
-				'${_csv(c.name)},${_csv(c.phone)},${_csv(c.email)},${c.status.label},${c.totalSpend.toStringAsFixed(2)},${_fmtDate(c.lastVisit)}');
-		final csv = ([header, ...rows]).join('\n');
-		if (!mounted) return;
+	void _showCsvDialog(String csv) {
+		final dlgCtx = rootNavigatorKey.currentContext;
+		if (dlgCtx == null) return;
 		showDialog(
-			context: context,
+			context: dlgCtx,
 			builder: (_) => AlertDialog(
 				title: const Text('Export CSV'),
 				content: SizedBox(width: 600, child: SingleChildScrollView(child: Text(csv))),
@@ -57,41 +52,57 @@ class _CrmListScreenState extends State<CrmListScreen> {
 		);
 	}
 
+	Future<void> _exportCsv() async {
+		final snap = await FirebaseFirestore.instance.collection('customers').get();
+		final list = snap.docs.map((d) => CrmCustomer.fromDoc(d)).toList()
+			..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+		final header = 'Name,Phone,Email,Loyalty,TotalSpend,LastVisit';
+		final rows = list.map((c) =>
+				'${_csv(c.name)},${_csv(c.phone)},${_csv(c.email)},${c.status.label},${c.totalSpend.toStringAsFixed(2)},${_fmtDate(c.lastVisit)}');
+		final csv = ([header, ...rows]).join('\n');
+		// Show in a separate helper to avoid context-after-await lint
+		_showCsvDialog(csv);
+	}
+
 	Future<void> _quickAddCustomer() async {
-		final newCustomer = await showModalBottomSheet<CrmCustomer>(
-			context: context,
+				final messenger = scaffoldMessengerKey.currentState;
+				final bsCtx = rootNavigatorKey.currentContext; if (bsCtx == null) return;
+				final newCustomer = await showModalBottomSheet<CrmCustomer>(
+			context: bsCtx,
 			isScrollControlled: true,
-			builder: (_) => Padding(
-				padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+			builder: (dialogCtx) => Padding(
+				padding: EdgeInsets.only(bottom: MediaQuery.of(dialogCtx).viewInsets.bottom),
 				child: const _QuickAddCustomerForm(),
 			),
 		);
-		if (newCustomer != null && mounted) {
-			ScaffoldMessenger.of(context)
-					.showSnackBar(SnackBar(content: Text('Customer ${newCustomer.name} added')));
-		}
+			if (newCustomer != null) {
+				messenger?.showSnackBar(SnackBar(content: Text('Customer ${newCustomer.name} added')));
+			}
 	}
 
 	Future<void> _editCustomer(CrmCustomer c) async {
-		final edited = await showModalBottomSheet<CrmCustomer>(
-			context: context,
+				final messenger = scaffoldMessengerKey.currentState;
+				final bsCtx2 = rootNavigatorKey.currentContext; if (bsCtx2 == null) return;
+				final edited = await showModalBottomSheet<CrmCustomer>(
+			context: bsCtx2,
 			isScrollControlled: true,
-			builder: (_) => Padding(
-				padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+			builder: (dialogCtx) => Padding(
+				padding: EdgeInsets.only(bottom: MediaQuery.of(dialogCtx).viewInsets.bottom),
 				child: _EditCustomerForm(customer: c),
 			),
 		);
-		if (edited != null && mounted) {
-			ScaffoldMessenger.of(context)
-					.showSnackBar(SnackBar(content: Text('Customer ${edited.name} updated')));
-		}
+			if (edited != null) {
+				messenger?.showSnackBar(SnackBar(content: Text('Customer ${edited.name} updated')));
+			}
 	}
 
 	Future<void> _deleteCustomer(CrmCustomer c) async {
 		if (!mounted) return;
 		bool deleting = false;
-		final confirm = await showDialog<bool>(
-			context: context,
+			final rootMessenger = scaffoldMessengerKey.currentState;
+			final dlgRoot = rootNavigatorKey.currentContext; if (dlgRoot == null) return;
+			final confirm = await showDialog<bool>(
+			context: dlgRoot,
 			barrierDismissible: !deleting,
 			builder: (dialogCtx) => StatefulBuilder(
 				builder: (dialogCtx, setLocal) {
@@ -110,29 +121,24 @@ class _CrmListScreenState extends State<CrmListScreen> {
 							actions: [
 								TextButton(onPressed: deleting ? null : () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
 								FilledButton.tonal(
-									onPressed: deleting ? null : () async {
+																		onPressed: deleting ? null : () async {
 										setLocal(() => deleting = true);
 										try {
 											// Ensure we are authenticated (anonymous if necessary) so rules allow delete.
 											final auth = FirebaseAuth.instance;
 											if (auth.currentUser == null) { await auth.signInAnonymously(); }
 											if (c.id.isEmpty) { throw Exception('Missing document id'); }
-											final nav = Navigator.of(dialogCtx);
-											await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
-											if (nav.mounted) {
-												nav.pop(true);
-											}
+																					await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
+																					rootNavigatorKey.currentState?.pop(true);
 										} catch (e) {
-											if (dialogCtx.mounted) {
-												final messenger = ScaffoldMessenger.of(dialogCtx);
-												messenger.showSnackBar(
-													SnackBar(content: Text(e.toString().contains('permission-denied')
-														? 'Permission denied deleting customer.'
-														: 'Delete failed: $e')),
-												);
-											}
+																					// Use global messenger to avoid using dialog context after awaits
+																					scaffoldMessengerKey.currentState?.showSnackBar(
+																							SnackBar(content: Text(e.toString().contains('permission-denied')
+																									? 'Permission denied deleting customer.'
+																									: 'Delete failed: $e')),
+																					);
 										} finally {
-											if (dialogCtx.mounted) setLocal(() => deleting = false);
+																					if (dialogCtx.mounted) setLocal(() => deleting = false);
 										}
 									},
 									child: deleting ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : const Text('Delete'),
@@ -144,7 +150,7 @@ class _CrmListScreenState extends State<CrmListScreen> {
 			),
 		);
 		if (confirm == true && mounted) {
-			ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${c.name}')));
+			rootMessenger?.showSnackBar(SnackBar(content: Text('Deleted ${c.name}')));
 		}
 	}
 

@@ -120,8 +120,15 @@ class PermissionAware extends ConsumerWidget {
 // Utility for mapping routes to screen keys
 String? screenKeyForPath(String path) {
   if (path.startsWith('/dashboard')) return ScreenKeys.dashboard;
+  if (path.startsWith('/pos-cashier')) return ScreenKeys.posCashier;
   if (path.startsWith('/pos')) return ScreenKeys.posMain;
-  if (path.startsWith('/inventory')) return ScreenKeys.invProducts;
+  // Inventory detailed routes first
+  if (path.startsWith('/inventory/stock-movement')) return ScreenKeys.invStockMovements;
+  if (path.startsWith('/inventory/stock-transfer')) return ScreenKeys.invTransfers;
+  if (path.startsWith('/inventory/suppliers')) return ScreenKeys.invSuppliers;
+  if (path.startsWith('/inventory/alerts')) return ScreenKeys.invAlerts;
+  if (path.startsWith('/inventory/audit')) return ScreenKeys.invAudit;
+  if (path.startsWith('/inventory/products') || path == '/inventory') return ScreenKeys.invProducts;
   if (path.startsWith('/crm')) return ScreenKeys.crm;
   if (path.startsWith('/accounting')) return ScreenKeys.accounting;
   if (path.startsWith('/loyalty')) return ScreenKeys.loyalty;

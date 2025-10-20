@@ -4,6 +4,18 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Simple wrapper page used by router for Sales invoices
+class SalesInvoicesScreen extends StatelessWidget {
+  const SalesInvoicesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: InvoicesListScreen(),
+    );
+  }
+}
+
 class InvoicesListScreen extends StatefulWidget {
   final String? invoiceId;
   const InvoicesListScreen({super.key, this.invoiceId});
@@ -228,16 +240,18 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
           await col.doc(inv.invoiceNo).delete();
         }
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invoice deleted')));
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(dialogCtx);
+        messenger.showSnackBar(const SnackBar(content: Text('Invoice deleted')));
         // Close details dialog
         if (Navigator.of(dialogCtx, rootNavigator: true).canPop()) {
           Navigator.of(dialogCtx, rootNavigator: true).pop();
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(dialogCtx);
+        messenger.showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
     }
   }

@@ -5,18 +5,27 @@ import 'package:go_router/go_router.dart';
 import 'core/auth/auth.dart';
 // Permissions
 import 'core/permissions.dart';
+import 'core/app_keys.dart';
 
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
 import 'modules/pos/pos_cashier.dart';
 import 'modules/inventory/Products/inventory.dart';
+import 'modules/inventory/stock_movements_screen.dart';
+import 'modules/inventory/transfers_screen.dart';
+import 'modules/inventory/suppliers_screen.dart';
+import 'modules/inventory/alerts_screen.dart';
+import 'modules/inventory/audit_screen.dart';
 import 'modules/invoices/sales_invoices.dart';
-import 'modules/invoices/invoices_tabs.dart';
+import 'modules/invoices/purchse_invoice.dart';
+// Removed legacy invoices tabs; using standalone screens
 import 'modules/crm/crm.dart';
 import 'modules/accounting/accounting.dart';
 import 'modules/loyalty/loyalty.dart';
-import 'modules/admin/admin.dart';
+import 'modules/admin/permissions_overview_tab.dart';
+import 'modules/admin/users_tab.dart';
+import 'modules/admin/permissions_tab.dart';
 // Auth screens
 import 'core/auth/login_screen.dart';
 import 'core/auth/register_screen.dart';
@@ -25,18 +34,22 @@ import 'core/auth/forgot_password_screen.dart';
 // ===== Inlined app state (from previous app_state.dart) =====
 import 'dart:async';
 
-final _rootNavigatorKey = GlobalKey<NavigatorState>();
+// Use global keys from core/app_keys.dart
+
+// Collapsible side menu state: false = icons-only (collapsed), true = icon + label (expanded)
+final navRailExtendedProvider = StateProvider<bool>((ref) => false);
+// Collapsible groups state
+final posMenuExpandedProvider = StateProvider<bool>((ref) => true);
+final inventoryMenuExpandedProvider = StateProvider<bool>((ref) => true);
+final invoicesMenuExpandedProvider = StateProvider<bool>((ref) => true);
+final adminMenuExpandedProvider = StateProvider<bool>((ref) => true);
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authRepo = ref.watch(authRepositoryProvider);
-  final permsAsync = ref.watch(permissionsProvider);
-  final isOwnerAsync = ref.watch(ownerProvider);
 
-  return GoRouter(
-    navigatorKey: _rootNavigatorKey,
+  final router = GoRouter(
+  navigatorKey: rootNavigatorKey,
     debugLogDiagnostics: false,
     initialLocation: '/dashboard',
-    refreshListenable: GoRouterRefreshStream(authRepo.authStateChanges()),
     redirect: (context, state) {
       // Auth state
       final isLoggedIn = ref.read(authStateProvider) != null;
@@ -60,14 +73,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      // Owner bypass: if owner, allow all routes
-      if (isOwnerAsync.hasValue && (isOwnerAsync.value ?? false)) {
+      // Owner bypass: if owner, allow all routes (once value is available)
+      final ownerAsync = ref.read(ownerProvider);
+      if (ownerAsync.hasValue && (ownerAsync.value ?? false)) {
         if (loggingIn) return '/dashboard';
         return null;
       }
 
       // Wait for permissions to load before making decisions
-      if (!permsAsync.hasValue) return loggingIn ? null : null;
+      final permsAsync = ref.read(permissionsProvider);
+      if (!permsAsync.hasValue) return null; // do nothing until perms known
       final perms = permsAsync.value ?? UserPermissions.empty;
 
       // If currently on an auth route and logged in, navigate to the first allowed screen if any
@@ -91,7 +106,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // Otherwise redirect to a safe destination if available, else to /login (will hold there)
       return computeSafe(perms) ?? '/login';
     },
-    routes: [
+  routes: [
       // Public auth routes
       GoRoute(
         path: '/login',
@@ -129,6 +144,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
+              path: '/pos-cashier',
+              name: 'pos-cashier',
+              pageBuilder: (context, state) => const NoTransitionPage(child: PosCashierScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
               path: '/inventory',
               name: 'inventory',
               pageBuilder: (context, state) => const NoTransitionPage(child: InventoryScreen()),
@@ -136,16 +158,59 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
-              path: '/invoices',
-              name: 'invoices',
-              pageBuilder: (context, state) => const NoTransitionPage(child: InvoicesTabsScreen()),
-              routes: [
-                GoRoute(
-                  path: 'detail/:id',
-                  name: 'invoice-detail',
-                  builder: (context, state) => InvoicesListScreen(invoiceId: state.pathParameters['id']),
-                ),
-              ],
+              path: '/inventory/products',
+              name: 'inventory-products',
+              pageBuilder: (context, state) => const NoTransitionPage(child: ProductsStandaloneScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/inventory/stock-movement',
+              name: 'inventory-stock-movement',
+              pageBuilder: (context, state) => const NoTransitionPage(child: StockMovementsScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/inventory/stock-transfer',
+              name: 'inventory-stock-transfer',
+              pageBuilder: (context, state) => const NoTransitionPage(child: TransfersScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/inventory/suppliers',
+              name: 'inventory-suppliers',
+              pageBuilder: (context, state) => const NoTransitionPage(child: SuppliersScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/inventory/alerts',
+              name: 'inventory-alerts',
+              pageBuilder: (context, state) => const NoTransitionPage(child: AlertsScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/inventory/audit',
+              name: 'inventory-audit',
+              pageBuilder: (context, state) => const NoTransitionPage(child: AuditScreen()),
+            ),
+          ]),
+          // Legacy /invoices route removed in favor of direct /invoices/sales and /invoices/purchases
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/invoices/sales',
+              name: 'invoices-sales',
+              pageBuilder: (context, state) => const NoTransitionPage(child: SalesInvoicesScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/invoices/purchases',
+              name: 'invoices-purchases',
+              pageBuilder: (context, state) => NoTransitionPage(child: const PurchasesInvoicesScreen()),
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -173,26 +238,40 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/admin',
               name: 'admin',
-              pageBuilder: (context, state) => const NoTransitionPage(child: AdminDashboard()),
+              pageBuilder: (context, state) => const NoTransitionPage(child: PermissionsOverviewPage()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/admin/permissions-edit',
+              name: 'admin-permissions-edit',
+              pageBuilder: (context, state) => NoTransitionPage(child: const AdminPermissionsEditPage()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/admin/users',
+              name: 'admin-users',
+              pageBuilder: (context, state) => const NoTransitionPage(child: AdminUsersPage()),
             ),
           ]),
         ],
       ),
     ],
   );
+
+  // Refresh router when relevant providers change
+  ref.listen(authStateProvider, (_, __) => router.refresh());
+  ref.listen(permissionsProvider, (_, __) => router.refresh());
+  ref.listen(ownerProvider, (_, __) => router.refresh());
+
+  ref.onDispose(() {
+    router.dispose();
+  });
+
+  return router;
 });
 
-class GoRouterRefreshStream extends ChangeNotifier {
-  GoRouterRefreshStream(Stream<dynamic> stream) {
-    _subscription = stream.asBroadcastStream().listen((_) => notifyListeners());
-  }
-  late final StreamSubscription<dynamic> _subscription;
-  @override
-  void dispose() {
-    _subscription.cancel();
-    super.dispose();
-  }
-}
 
 // ===== Inlined common widgets (from previous common_widgets.dart) =====
 class LoadingView extends StatelessWidget {
@@ -244,6 +323,7 @@ class MyApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Retail ERP MVP',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: scaffoldMessengerKey,
       themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
@@ -264,186 +344,187 @@ class AppShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
   const AppShell({super.key, required this.navigationShell});
 
-  // Map branches to labels/icons and route paths to mirror the provided example.
-  static const List<_NavItem> _allItems = [
-    _NavItem('Dashboard', Icons.dashboard_outlined, '/dashboard', 0),
-    _NavItem('POS', Icons.point_of_sale_outlined, '/pos', 1),
-    _NavItem('Inventory', Icons.inventory_2_outlined, '/inventory', 2),
-    // Renamed from Billing -> Invoices and route updated to /invoices
-    _NavItem('Invoices', Icons.receipt_long_outlined, '/invoices', 3),
-    _NavItem('CRM', Icons.people_alt_outlined, '/crm', 4),
-    _NavItem('Accounting', Icons.account_balance_outlined, '/accounting', 5),
-    _NavItem('Loyalty', Icons.card_giftcard_outlined, '/loyalty', 6),
-    _NavItem('Admin', Icons.admin_panel_settings_outlined, '/admin', 7),
-  ];
-
-  void _goBranch(BuildContext context, int index) {
-    navigationShell.goBranch(
-      index,
-      initialLocation: index == navigationShell.currentIndex,
-    );
+  void _goTo(BuildContext context, String route) {
+    // Use root context to avoid nested navigator issues
+  final rootCtx = rootNavigatorKey.currentContext ?? context;
+    GoRouter.of(rootCtx).go(route);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = MediaQuery.of(context).size.width >= 900;
-    final user = ref.watch(authStateProvider);
-    final permsAsync = ref.watch(permissionsProvider);
-    final isOwner = ref.watch(ownerProvider).asData?.value ?? false;
-    final perms = permsAsync.asData?.value ?? UserPermissions.empty;
-    bool canViewRoute(String route) {
-      if (isOwner) return true; // owner bypass in nav gating
-      if (route.startsWith('/invoices')) {
-        return perms.can(ScreenKeys.invSales, 'view') || perms.can(ScreenKeys.invPurchases, 'view');
-      }
-      final key = screenKeyForPath(route);
-      return key == null ? true : perms.can(key, 'view');
-    }
-    final items = _allItems; // Keep all items visible; block navigation if not allowed
-
-    // Compute selected index relative to full list (not filtered)
-    int selectedIndex = items.indexWhere((e) => e.branchIndex == navigationShell.currentIndex);
-    if (selectedIndex < 0) selectedIndex = 0;
+    // Avoid rebuilding AppShell based on providers that don't affect layout
+    // Note: Permissions are enforced per screen; the side menu itself shows all entries for discoverability.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Retail ERP MVP'),
         actions: [
           IconButton(onPressed: () {}, icon: const Icon(Icons.brightness_6)),
-          // Cashier icon placed beside theme toggle as requested
-          Tooltip(
-            message: 'Cashier',
-            child: IconButton(
-              icon: const Icon(Icons.account_circle_outlined),
-              onPressed: () {
-                // Open cashier screen on top of current route stack
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PosCashierScreen()),
-                );
-              },
-            ),
-          ),
-          if (user != null)
-            PopupMenuButton<String>(
-              itemBuilder: (context) => [
-                PopupMenuItem<String>(
-                  value: 'email',
-                  enabled: false,
-                  child: Text(user.email ?? 'Signed in'),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem<String>(value: 'signout', child: Text('Sign out')),
-              ],
-              onSelected: (v) async {
-                if (v == 'signout') {
-                  // Sign out; router redirect will navigate to /login automatically
-                  try {
-                    // Ensure no SnackBars are shown/left over during logout
-                    final messenger = ScaffoldMessenger.maybeOf(context);
-                    messenger?.clearSnackBars();
-                    // Proactively navigate to login on the root navigator to avoid
-                    // any transient lookups on deactivated contexts.
-                    final rootCtx = _rootNavigatorKey.currentContext;
-                    if (rootCtx != null) {
-                      GoRouter.of(rootCtx).go('/login');
-                    }
-                    // Sign out without awaiting to prevent running code after this
-                    // widget is unmounted during redirect.
-                    // ignore: discarded_futures
-                    Future.microtask(() => ref.read(authRepositoryProvider).signOut());
-                  } catch (_) {
-                    // Ignore sign-out error to avoid context access after widget deactivation
-                  }
-                }
-              },
-              icon: const Icon(Icons.person_outline),
-            )
-          else
-            TextButton(
-              onPressed: () => context.go('/login'),
-              child: const Text('Sign in'),
-            ),
         ],
       ),
-      drawer: isWide
-          ? null
-          : Drawer(
-              child: SafeArea(
-                child: ListView(
-                  children: [
-                    const SizedBox(height: 8),
-                    for (final e in items)
-                      ListTile(
-                        leading: Icon(e.icon),
-                        title: Text(e.label),
-                        selected: navigationShell.currentIndex == e.branchIndex,
-                        enabled: canViewRoute(e.route),
-                        onTap: () async {
-                          if (!canViewRoute(e.route)) {
-                            final m = ScaffoldMessenger.maybeOf(context);
-                            m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
-                            return;
-                          }
-                          final tapCtx = context; // capture before async gap
-                          // Avoid popping the last page off the GoRouter stack.
-                          await Navigator.of(tapCtx).maybePop();
-                          if (!tapCtx.mounted) return;
-                          _goBranch(tapCtx, e.branchIndex);
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ),
+      drawer: isWide ? null : Drawer(child: SafeArea(child: _SideMenu(isWide: false, onGo: (r) async {
+        final tapCtx = context; await Navigator.of(tapCtx).maybePop(); if (!tapCtx.mounted) return; _goTo(tapCtx, r);
+      })) ),
       body: Row(
         children: [
-          if (isWide)
-            NavigationRail(
-              selectedIndex: selectedIndex,
-              labelType: NavigationRailLabelType.all,
-              destinations: [
-                for (final e in items)
-                  NavigationRailDestination(icon: Icon(e.icon), label: Text(e.label)),
-              ],
-              onDestinationSelected: (i) {
-                final target = items[i];
-                if (!canViewRoute(target.route)) {
-                  final m = ScaffoldMessenger.maybeOf(context);
-                  m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
-                  return;
-                }
-                _goBranch(context, target.branchIndex);
-              },
-            ),
+          if (isWide) SizedBox(width: 220, child: _SideMenu(isWide: true, onGo: (r) => _goTo(context, r))),
           Expanded(child: navigationShell),
         ],
       ),
-      bottomNavigationBar: isWide
-          ? null
-          : NavigationBar(
-              selectedIndex: selectedIndex,
-              destinations: [
-                for (final e in items)
-                  NavigationDestination(icon: Icon(e.icon), label: e.label),
-              ],
-              onDestinationSelected: (i) {
-                final target = items[i];
-                if (!canViewRoute(target.route)) {
-                  final m = ScaffoldMessenger.maybeOf(context);
-                  m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
-                  return;
-                }
-                _goBranch(context, target.branchIndex);
-              },
-            ),
+      bottomNavigationBar: null,
     );
   }
 }
 
-// Lightweight launcher page hosting the simple flow upload screen inside existing shell.
-class _NavItem {
-  final String label;
-  final IconData icon;
-  final String route;
-  final int branchIndex; // index in GoRouter stateful shell
-  const _NavItem(this.label, this.icon, this.route, this.branchIndex);
+class _SideMenu extends ConsumerWidget {
+  final bool isWide;
+  final void Function(String route) onGo;
+  const _SideMenu({required this.isWide, required this.onGo});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+  // Watch permission-related providers so the menu updates when they load
+  final user = ref.watch(authStateProvider);
+  final perms = ref.watch(permissionsProvider).asData?.value ?? UserPermissions.empty;
+  final isOwner = ref.watch(ownerProvider).asData?.value ?? false;
+    final currentPath = GoRouterState.of(context).matchedLocation;
+
+    Widget header() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        child: Row(
+          children: [
+            CircleAvatar(radius: 16, child: Text(((user?.email ?? 'U').isNotEmpty ? (user?.email ?? 'U')[0] : 'U').toUpperCase())),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text((user?.displayName?.isNotEmpty ?? false) ? user!.displayName! : (user?.email ?? 'User'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                if ((user?.email ?? '').isNotEmpty) Text(user!.email!, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis),
+              ]),
+            ),
+          ],
+        ),
+      );
+    }
+
+    bool canView(String? key) => key == null ? true : (isOwner || perms.can(key, 'view'));
+
+    Widget item(String label, IconData icon, String route, {String? screenKey, int indent = 0}) {
+      final enabled = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
+      final selected = currentPath == route || (route != '/' && currentPath.startsWith(route));
+      return ListTile(
+        dense: true,
+        visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+        contentPadding: EdgeInsets.only(left: 12.0 + indent * 14.0, right: 12),
+        leading: Icon(icon, size: 20),
+        title: Text(label, style: const TextStyle(fontSize: 13)),
+        selected: selected,
+        enabled: enabled,
+        onTap: enabled ? () => onGo(route) : () {
+          final m = ScaffoldMessenger.maybeOf(context); m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+        },
+      );
+    }
+
+    Widget groupHeader(String label, IconData icon, StateProvider<bool> expandState, {bool disabled = false}) {
+      final expanded = ref.watch(expandState);
+      return ListTile(
+        dense: true,
+        visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        leading: Icon(icon, size: 20),
+        title: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: disabled ? Colors.grey : null)),
+        trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18, color: disabled ? Colors.grey : null),
+        enabled: !disabled,
+        onTap: disabled ? null : () => ref.read(expandState.notifier).state = !expanded,
+      );
+    }
+
+    List<Widget> children = [
+      if (user != null) header(),
+      item('Dashboard', Icons.dashboard_outlined, '/dashboard', screenKey: ScreenKeys.dashboard),
+
+      // POS group
+      if (perms != UserPermissions.empty && (canView(ScreenKeys.posMain) || canView(ScreenKeys.posCashier))) ...[
+        groupHeader('POS', Icons.point_of_sale_outlined, posMenuExpandedProvider),
+        if (ref.watch(posMenuExpandedProvider)) ...[
+          item('POS Main', Icons.store_mall_directory_outlined, '/pos', screenKey: ScreenKeys.posMain, indent: 1),
+          item('POS Cashier', Icons.account_circle_outlined, '/pos-cashier', screenKey: ScreenKeys.posCashier, indent: 1),
+        ],
+      ],
+
+      // Inventory group
+      if (perms != UserPermissions.empty && (canView(ScreenKeys.invProducts) || canView(ScreenKeys.invStockMovements) || canView(ScreenKeys.invTransfers) || canView(ScreenKeys.invSuppliers) || canView(ScreenKeys.invAlerts) || canView(ScreenKeys.invAudit))) ...[
+        groupHeader('Inventory', Icons.inventory_2_outlined, inventoryMenuExpandedProvider),
+        if (ref.watch(inventoryMenuExpandedProvider)) ...[
+          item('Products', Icons.list_alt_outlined, '/inventory/products', screenKey: ScreenKeys.invProducts, indent: 1),
+          item('Stock Movement', Icons.swap_vert_outlined, '/inventory/stock-movement', screenKey: ScreenKeys.invStockMovements, indent: 1),
+          item('Stock Transfer', Icons.compare_arrows_outlined, '/inventory/stock-transfer', screenKey: ScreenKeys.invTransfers, indent: 1),
+          item('Suppliers', Icons.local_shipping_outlined, '/inventory/suppliers', screenKey: ScreenKeys.invSuppliers, indent: 1),
+          item('Alerts', Icons.notifications_active_outlined, '/inventory/alerts', screenKey: ScreenKeys.invAlerts, indent: 1),
+          item('Audit', Icons.rule_folder_outlined, '/inventory/audit', screenKey: ScreenKeys.invAudit, indent: 1),
+        ],
+      ],
+
+      // Invoices group
+      if (perms != UserPermissions.empty && (isOwner || allowInvoicesView(perms))) ...[
+        groupHeader('Invoices', Icons.receipt_long_outlined, invoicesMenuExpandedProvider),
+        if (ref.watch(invoicesMenuExpandedProvider)) ...[
+          item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
+          item('Purchases', Icons.shopping_cart_outlined, '/invoices/purchases', screenKey: ScreenKeys.invPurchases, indent: 1),
+        ],
+      ],
+
+      item('Accounting', Icons.account_balance_outlined, '/accounting', screenKey: ScreenKeys.accounting),
+      item('CRM', Icons.people_alt_outlined, '/crm', screenKey: ScreenKeys.crm),
+      item('Loyalty', Icons.card_giftcard_outlined, '/loyalty', screenKey: ScreenKeys.loyalty),
+
+      // Admin group
+      if (perms != UserPermissions.empty && canView(ScreenKeys.admin)) ...[
+        groupHeader('Admin', Icons.admin_panel_settings_outlined, adminMenuExpandedProvider),
+        if (ref.watch(adminMenuExpandedProvider)) ...[
+          item('Permissions', Icons.security_outlined, '/admin', screenKey: ScreenKeys.admin, indent: 1),
+          item('Users', Icons.group_outlined, '/admin/users', screenKey: ScreenKeys.admin, indent: 1),
+        ],
+      ],
+      const Divider(height: 8),
+      if (user != null)
+        ListTile(
+          dense: true,
+          visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+          leading: const Icon(Icons.logout, size: 20),
+          title: const Text('Logout', style: TextStyle(fontSize: 13)),
+          onTap: () async {
+            try {
+              final messenger = ScaffoldMessenger.maybeOf(context); messenger?.clearSnackBars();
+              final rootCtx = rootNavigatorKey.currentContext; if (rootCtx != null) { GoRouter.of(rootCtx).go('/login'); }
+              Future.microtask(() => ref.read(authRepositoryProvider).signOut());
+            } catch (_) {}
+          },
+        ),
+    ];
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            children: children,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8.0),
+          child: Tooltip(
+            message: ref.watch(navRailExtendedProvider) ? 'Collapse menu' : 'Expand menu',
+            child: IconButton(
+              icon: Icon(ref.watch(navRailExtendedProvider) ? Icons.chevron_left : Icons.chevron_right),
+              onPressed: () {
+                final current = ref.read(navRailExtendedProvider);
+                ref.read(navRailExtendedProvider.notifier).state = !current;
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

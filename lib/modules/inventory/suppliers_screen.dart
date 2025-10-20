@@ -190,6 +190,9 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   }
 
   Future<void> _deleteSupplier(BuildContext context, String id) async {
+    // Capture messenger before awaits; usage after await is safe.
+    // ignore: use_build_context_synchronously
+    final rootMessenger = ScaffoldMessenger.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
@@ -201,12 +204,11 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
         ],
       ),
     );
-    if (ok != true) return;
-    final repo = ref.read(supplierRepoProvider);
-    final messenger = ScaffoldMessenger.of(context);
-    await repo.deleteSupplier(id: id);
-    if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Supplier deleted')));
+  if (ok != true) return;
+  final repo = ref.read(supplierRepoProvider);
+  await repo.deleteSupplier(id: id);
+  if (!mounted) return;
+  rootMessenger.showSnackBar(const SnackBar(content: Text('Supplier deleted')));
   }
 }
 

@@ -33,7 +33,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 				email: _emailCtrl.text.trim(),
 				password: _passwordCtrl.text,
 			);
-			if (mounted) context.go('/dashboard');
+			// Do not navigate here; GoRouter's redirect will handle moving away from /login
+			// once auth state changes and permissions are available.
 		} catch (e) {
 			setState(() { _error = e.toString(); });
 		} finally {
