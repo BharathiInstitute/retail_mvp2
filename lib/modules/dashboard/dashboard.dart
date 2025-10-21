@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme/theme_utils.dart';
 import 'package:go_router/go_router.dart';
 import 'package:retail_mvp2/core/auth/auth.dart';
 import 'dashboard_providers.dart';
@@ -66,7 +67,7 @@ class DashboardScreen extends ConsumerWidget {
 				if (isWide) {
 					return ListView(
 						children: [
-							Text('Dashboard', style: Theme.of(context).textTheme.headlineMedium),
+							Text('Dashboard', style: context.texts.headlineMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
 							const SizedBox(height: 12),
 							summary,
 							const SizedBox(height: 12),
@@ -82,7 +83,7 @@ class DashboardScreen extends ConsumerWidget {
 				// Narrow
 				return ListView(
 					children: [
-						Text('Dashboard', style: Theme.of(context).textTheme.headlineMedium),
+						Text('Dashboard', style: context.texts.headlineMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
 						const SizedBox(height: 12),
 						summary,
 						const SizedBox(height: 12),
@@ -158,7 +159,7 @@ class _LinePainter extends CustomPainter {
 	void paint(Canvas canvas, Size size) {
 		if (values.isEmpty) return;
 		final p = Paint()
-			..color = color.withValues(alpha: .9)
+			..color = color.withValues(alpha: 0.9)
 			..strokeWidth = 2
 			..style = PaintingStyle.stroke;
 		final path = Path();
@@ -191,7 +192,11 @@ class _RevenueVsTargetChart extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Row(children: [Icon(Icons.query_stats, color: c.primary), const SizedBox(width: 8), Text('Daily Revenue vs Target', style: Theme.of(context).textTheme.titleMedium)]),
+					Row(children: [
+						Icon(Icons.query_stats, color: c.primary),
+						const SizedBox(width: 8),
+						Text('Daily Revenue vs Target', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: c.onSurface, fontWeight: FontWeight.w700)),
+					]),
 					const SizedBox(height: 12),
 					SizedBox(
 						height: 160,
@@ -220,17 +225,26 @@ class _Bar extends StatelessWidget {
 			Expanded(
 				child: Align(
 					alignment: Alignment.bottomCenter,
-					child: Container(
-						height: 120 * value,
-						decoration: BoxDecoration(color: color.withValues(alpha: .85), borderRadius: BorderRadius.circular(8)),
-						child: Center(child: Text(valueLabel, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w600))),
-					),
+						child: Container(
+							height: 120 * value,
+							decoration: BoxDecoration(color: color.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(8)),
+							child: Center(
+								child: Builder(builder: (ctx) {
+									final cs = Theme.of(ctx).colorScheme;
+									final on = color.computeLuminance() < 0.5 ? cs.onPrimary : cs.onSurface;
+									return Text(
+										valueLabel,
+										style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: on, fontWeight: FontWeight.w600),
+									);
+								}),
+							),
+						),
 				),
 			),
 			const SizedBox(height: 8),
 			Container(height: 4, decoration: BoxDecoration(color: base, borderRadius: BorderRadius.circular(2))),
 			const SizedBox(height: 8),
-			Text(label, style: Theme.of(context).textTheme.bodySmall),
+			Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 		]);
 	}
 }
@@ -247,7 +261,11 @@ class _PaymentSplitDonut extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Row(children: [Icon(Icons.pie_chart, color: c.primary), const SizedBox(width: 8), Text('Payment Split', style: Theme.of(context).textTheme.titleMedium)]),
+					Row(children: [
+						Icon(Icons.pie_chart, color: c.primary),
+						const SizedBox(width: 8),
+						Text('Payment Split', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: c.onSurface, fontWeight: FontWeight.w700)),
+					]),
 					const SizedBox(height: 12),
 					Row(children: [
 						SizedBox(width: 160, height: 160, child: CustomPaint(painter: _PiePainter(colors: [c.tertiary, c.primary, c.secondary], slices: slices))),
@@ -299,7 +317,7 @@ class _Legend extends StatelessWidget {
 		return Row(mainAxisSize: MainAxisSize.min, children: [
 			Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
 			const SizedBox(width: 6),
-			Text(label),
+			Text(label, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant)),
 		]);
 	}
 }
@@ -309,27 +327,37 @@ class _TopProductsTable extends StatelessWidget {
 	const _TopProductsTable({required this.rows});
 	@override
 	Widget build(BuildContext context) {
-		final title = Row(children: [Icon(Icons.leaderboard, color: Theme.of(context).colorScheme.primary), const SizedBox(width: 8), const Text('Top-selling Products')]);
+		final title = Row(children: [
+			Icon(Icons.leaderboard, color: Theme.of(context).colorScheme.primary),
+			const SizedBox(width: 8),
+			Text('Top-selling Products', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+		]);
 		return Card(
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					title,
 					const SizedBox(height: 8),
-					SingleChildScrollView(
-						scrollDirection: Axis.horizontal,
-						child: DataTable(columns: const [
-							DataColumn(label: Text('Product Name')),
-							DataColumn(label: Text('Units Sold')),
-							DataColumn(label: Text('Revenue (₹)')),
-						], rows: [
-							for (final p in rows)
-								DataRow(cells: [
-									DataCell(Text(p.name)),
-									DataCell(Text(p.units.toString())),
-									DataCell(Text(p.revenue.toStringAsFixed(2))),
-								]),
-						]),
+					DataTableTheme(
+						data: DataTableThemeData(
+							headingTextStyle: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+							dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+						),
+						child: SingleChildScrollView(
+							scrollDirection: Axis.horizontal,
+							child: DataTable(columns: const [
+								DataColumn(label: Text('Product Name')),
+								DataColumn(label: Text('Units Sold')),
+								DataColumn(label: Text('Revenue (₹)')),
+							], rows: [
+								for (final p in rows)
+									DataRow(cells: [
+										DataCell(Text(p.name)),
+										DataCell(Text(p.units.toString())),
+										DataCell(Text(p.revenue.toStringAsFixed(2))),
+									]),
+							]),
+						),
 					),
 				]),
 			),
@@ -343,31 +371,41 @@ class _AlertsTable extends StatelessWidget {
 	@override
 	Widget build(BuildContext context) {
 		final c = Theme.of(context).colorScheme;
-		final title = Row(children: [Icon(Icons.warning_amber_rounded, color: c.error), const SizedBox(width: 8), const Text('Low-stock & Expiry Alerts')]);
+		final title = Row(children: [
+			Icon(Icons.warning_amber_rounded, color: c.error),
+			const SizedBox(width: 8),
+			Text('Low-stock & Expiry Alerts', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+		]);
 		return Card(
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					title,
 					const SizedBox(height: 8),
-					SingleChildScrollView(
-						scrollDirection: Axis.horizontal,
-						child: DataTable(columns: const [
-							DataColumn(label: Text('Product')),
-							DataColumn(label: Text('SKU')),
-							DataColumn(label: Text('Stock')),
-							DataColumn(label: Text('Expiry Date')),
-							DataColumn(label: Text('Status')),
-						], rows: [
-							for (final a in rows)
-								DataRow(cells: [
-									DataCell(Text(a.product)),
-									DataCell(Text(a.sku)),
-									DataCell(Text(a.stock.toString())),
-									DataCell(Text(a.expiry)),
-									DataCell(Text(a.status)),
-								]),
-						]),
+					DataTableTheme(
+						data: DataTableThemeData(
+							headingTextStyle: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+							dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+						),
+						child: SingleChildScrollView(
+							scrollDirection: Axis.horizontal,
+							child: DataTable(columns: const [
+								DataColumn(label: Text('Product')),
+								DataColumn(label: Text('SKU')),
+								DataColumn(label: Text('Stock')),
+								DataColumn(label: Text('Expiry Date')),
+								DataColumn(label: Text('Status')),
+							], rows: [
+								for (final a in rows)
+									DataRow(cells: [
+										DataCell(Text(a.product)),
+										DataCell(Text(a.sku)),
+										DataCell(Text(a.stock.toString())),
+										DataCell(Text(a.expiry)),
+										DataCell(Text(a.status)),
+									]),
+							]),
+						),
 					),
 				]),
 			),
@@ -384,7 +422,7 @@ class _QuickLinks extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Quick Links', style: Theme.of(context).textTheme.titleMedium),
+					Text('Quick Links', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
 					const SizedBox(height: 8),
 					Wrap(spacing: 12, runSpacing: 12, children: [
 						_LinkChip(icon: Icons.point_of_sale, label: 'POS', onTap: () => onGo('/pos')),
@@ -409,7 +447,11 @@ class _LinkChip extends StatelessWidget {
 			child: Ink(
 				padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
 				decoration: BoxDecoration(color: tone.surfaceContainerHighest, borderRadius: BorderRadius.circular(10), border: Border.all(color: tone.outlineVariant)),
-				child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: tone.primary), const SizedBox(width: 8), Text(label, style: const TextStyle(fontWeight: FontWeight.w600))]),
+				child: Row(mainAxisSize: MainAxisSize.min, children: [
+					Icon(icon, color: tone.primary),
+					const SizedBox(width: 8),
+					Text(label, style: context.texts.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+				]),
 			),
 		);
 	}

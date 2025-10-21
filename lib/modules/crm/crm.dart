@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/theme/theme_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../core/app_keys.dart';
@@ -45,8 +46,11 @@ class _CrmListScreenState extends State<CrmListScreen> {
 		showDialog(
 			context: dlgCtx,
 			builder: (_) => AlertDialog(
-				title: const Text('Export CSV'),
-				content: SizedBox(width: 600, child: SingleChildScrollView(child: Text(csv))),
+				title: Text('Export CSV', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+				content: DefaultTextStyle(
+					style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+					child: SizedBox(width: 600, child: SingleChildScrollView(child: Text(csv))),
+				),
 				actions: const [CloseButton()],
 			),
 		);
@@ -110,18 +114,22 @@ class _CrmListScreenState extends State<CrmListScreen> {
 							canPop: !deleting,
 													onPopInvokedWithResult: (didPop, result) {},
 							child: AlertDialog(
-							title: const Text('Delete Customer'),
-							content: Column(
+							title: Text('Delete Customer', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+							content: DefaultTextStyle(
+								style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+								child: Column(
 								mainAxisSize: MainAxisSize.min,
 								children: [
 									Text('Are you sure you want to delete "${c.name}"?'),
 									if (deleting) const Padding(padding: EdgeInsets.only(top:12), child: LinearProgressIndicator(minHeight: 3)),
 								],
 							),
+							),
 							actions: [
 								TextButton(onPressed: deleting ? null : () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
-								FilledButton.tonal(
-																		onPressed: deleting ? null : () async {
+								FilledButton(
+									style: FilledButton.styleFrom(backgroundColor: context.colors.error, foregroundColor: context.colors.onError),
+									onPressed: deleting ? null : () async {
 										setLocal(() => deleting = true);
 										try {
 											// Ensure we are authenticated (anonymous if necessary) so rules allow delete.
@@ -169,15 +177,21 @@ class _CrmListScreenState extends State<CrmListScreen> {
 								SizedBox(
 									width: 280,
 									child: TextField(
-										decoration: const InputDecoration(
-											prefixIcon: Icon(Icons.search),
+										style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+										decoration: InputDecoration(
+											prefixIcon: Icon(Icons.search, color: context.colors.onSurfaceVariant),
 											labelText: 'Search (name, phone, email)',
+											labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+											hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
 										),
 										onChanged: (v) => setState(() => query = v),
 									),
 								),
 								DropdownButton<LoyaltyFilter>(
 									value: loyaltyFilter,
+									style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+									dropdownColor: context.colors.surface,
+									iconEnabledColor: context.colors.onSurfaceVariant,
 									items: const [
 										DropdownMenuItem(value: LoyaltyFilter.all, child: Text('All')),
 										DropdownMenuItem(value: LoyaltyFilter.bronze, child: Text('Bronze')),
@@ -231,17 +245,20 @@ class _CrmListScreenState extends State<CrmListScreen> {
 												leading: CircleAvatar(child: Text(c.initials)),
 												title: Row(
 													children: [
-														Expanded(child: Text(c.name)),
+														Expanded(child: Text(c.name, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface))),
 														_loyaltyChip(c.status),
 													],
 												),
-												subtitle: Text('${c.email} • ${c.phone}'),
+												subtitle: Text(
+												  '${c.email} • ${c.phone}',
+												  style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+												),
 												trailing: Column(
 													mainAxisAlignment: MainAxisAlignment.center,
 													crossAxisAlignment: CrossAxisAlignment.end,
 													children: [
-														Text('₹${c.totalSpend.toStringAsFixed(2)}'),
-														Text('Last: ${_fmtDate(c.lastVisit)}', style: const TextStyle(fontSize: 12)),
+														Text('₹${c.totalSpend.toStringAsFixed(2)}', style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
+														Text('Last: ${_fmtDate(c.lastVisit)}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
 													],
 												),
 											);
@@ -343,25 +360,47 @@ class _QuickAddCustomerFormState extends State<_QuickAddCustomerForm> {
 				child: Column(
 					mainAxisSize: MainAxisSize.min,
 					children: [
-						Text('Add Customer', style: Theme.of(context).textTheme.titleMedium),
+												Text(
+													'Add Customer',
+													style: (context.texts.titleMedium ?? const TextStyle()).copyWith(
+														color: context.colors.onSurface,
+														fontWeight: FontWeight.w600,
+													),
+												),
 						const SizedBox(height: 8),
-						TextFormField(
-							controller: nameCtrl,
-							decoration: const InputDecoration(labelText: 'Name'),
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null,
-						),
-						TextFormField(
-							controller: phoneCtrl,
-							decoration: const InputDecoration(labelText: 'Phone'),
-							keyboardType: TextInputType.phone,
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null,
-						),
-						TextFormField(
-							controller: emailCtrl,
-							decoration: const InputDecoration(labelText: 'Email'),
-							keyboardType: TextInputType.emailAddress,
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
-						),
+												TextFormField(
+													controller: nameCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Name',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null,
+												),
+												TextFormField
+												(
+													controller: phoneCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Phone',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													keyboardType: TextInputType.phone,
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null,
+												),
+												TextFormField(
+													controller: emailCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Email',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													keyboardType: TextInputType.emailAddress,
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
+												),
 						const SizedBox(height: 12),
 						Row(
 							mainAxisAlignment: MainAxisAlignment.end,
@@ -464,30 +503,54 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 				child: Column(
 					mainAxisSize: MainAxisSize.min,
 					children: [
-						Text('Edit Customer', style: Theme.of(context).textTheme.titleMedium),
+												Text(
+													'Edit Customer',
+													style: (context.texts.titleMedium ?? const TextStyle()).copyWith(
+														color: context.colors.onSurface,
+														fontWeight: FontWeight.w600,
+													),
+												),
 						const SizedBox(height: 8),
-						TextFormField(
-							controller: nameCtrl,
-							decoration: const InputDecoration(labelText: 'Name'),
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null,
-						),
-						TextFormField(
-							controller: phoneCtrl,
-							decoration: const InputDecoration(labelText: 'Phone'),
-							keyboardType: TextInputType.phone,
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null,
-						),
-						TextFormField(
-							controller: emailCtrl,
-							decoration: const InputDecoration(labelText: 'Email'),
-							keyboardType: TextInputType.emailAddress,
-							validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
-						),
+												TextFormField(
+													controller: nameCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Name',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter name' : null,
+												),
+												TextFormField(
+													controller: phoneCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Phone',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													keyboardType: TextInputType.phone,
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter phone' : null,
+												),
+												TextFormField(
+													controller: emailCtrl,
+													style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+													decoration: InputDecoration(
+														labelText: 'Email',
+														labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+														hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+													),
+													keyboardType: TextInputType.emailAddress,
+													validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter email' : null,
+												),
 						const SizedBox(height: 8),
 						// Loyalty status display (read-only)
 						Align(
 							alignment: Alignment.centerLeft,
-							child: Text('Loyalty: ${widget.customer.status.label}', style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic)),
+							child: Text(
+								'Loyalty: ${widget.customer.status.label}',
+								style: Theme.of(context).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),
+							),
 						),
 						const SizedBox(height: 12),
 						Row(
@@ -658,19 +721,29 @@ class CrmCustomer {
 }
 
 Widget _loyaltyChip(LoyaltyStatus status) {
-	Color color;
-	switch (status) {
-		case LoyaltyStatus.bronze:
-			color = Colors.brown;
-			break;
-		case LoyaltyStatus.silver:
-			color = Colors.blueGrey;
-			break;
-		case LoyaltyStatus.gold:
-			color = Colors.amber;
-			break;
-	}
-		return Chip(label: Text(status.label), backgroundColor: color.withValues(alpha: 0.15));
+	// Use theme-based colors to better support light/dark.
+	return Builder(builder: (context) {
+		final scheme = Theme.of(context).colorScheme;
+		Color color;
+		switch (status) {
+			case LoyaltyStatus.bronze:
+				color = scheme.tertiary;
+				break;
+			case LoyaltyStatus.silver:
+				color = scheme.secondary;
+				break;
+			case LoyaltyStatus.gold:
+				color = scheme.primary;
+				break;
+		}
+		return Chip(
+			label: Text(
+				status.label,
+				style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface),
+			),
+			backgroundColor: color.withValues(alpha: 0.15),
+		);
+	});
 }
 
 String _csv(String s) => '"${s.replaceAll('"', '""')}"';

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:retail_mvp2/core/logging.dart';
 // Removed unused firebase_auth import.
 import 'package:flutter/material.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 class AdminUsersPage extends StatelessWidget {
   const AdminUsersPage({super.key});
@@ -84,8 +85,8 @@ class UsersTab extends ConsumerWidget {
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(child: Text(display.isNotEmpty? display.substring(0,1).toUpperCase(): '?')),
-                        title: Text(display),
-                        subtitle: Text('$email • $role${disabled? ' • disabled':''}'),
+                        title: Text(display, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
+                        subtitle: Text('$email • $role${disabled? ' • disabled':''}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
                         trailing: _UserActions(userId: d.id, currentValues: data),
                       ),
                     );
@@ -109,14 +110,14 @@ class _OwnerBanner extends StatelessWidget {
   Widget build(BuildContext context){
     Widget child;
     if(error!=null){
-      child = Text('Owner error: $error', style: const TextStyle(color: Colors.red));
+      child = Text('Owner error: $error', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: context.colors.error));
     } else if(loading){
       child = const Text('Checking owner...');
     } else if(!hasOwner){
       child = Row(children:[
-        const Icon(Icons.warning_amber,color: Colors.orange),
+        Icon(Icons.warning_amber, color: context.appColors.warning),
         const SizedBox(width:8),
-        const Expanded(child: Text('No owner configured. You can promote an existing user to Owner.', style: TextStyle(fontWeight: FontWeight.w500))),
+  Expanded(child: Text('No owner configured. You can promote an existing user to Owner.', style: context.texts.bodyMedium?.copyWith(fontWeight: FontWeight.w500, color: context.colors.onSurface))),
         FilledButton(onPressed: () async {
           final messenger = ScaffoldMessenger.of(context);
           final selected = await showDialog<String>(context: context, builder: (_)=> const _SelectUserForOwnerDialog());
@@ -142,9 +143,9 @@ class _OwnerBanner extends StatelessWidget {
       final currentUid = FirebaseAuth.instance.currentUser?.uid;
       final isOwner = currentUid != null && currentUid == ownerId;
       child = Row(children:[
-        const Icon(Icons.verified_user, color: Colors.green),
+        Icon(Icons.verified_user, color: context.appColors.success),
         const SizedBox(width:8),
-        Expanded(child: Text('Owner: ${ownerName ?? ownerId}', style: const TextStyle(fontWeight: FontWeight.w600))),
+  Expanded(child: Text('Owner: ${ownerName ?? ownerId}', style: context.texts.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.colors.onSurface))),
         if(isOwner) FilledButton.tonal(onPressed: () async {
           final messenger = ScaffoldMessenger.of(context);
           final target = await showDialog<String>(context: context, builder: (_)=> const _SelectUserForOwnerDialog());
@@ -168,7 +169,7 @@ class _OwnerBanner extends StatelessWidget {
         }, child: const Text('Transfer'))
       ]);
     }
-  return Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)), child: child);
+    return Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: context.colors.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)), child: child);
   }
 }
 
@@ -179,8 +180,10 @@ class _SelectUserForOwnerDialog extends StatelessWidget {
     final usersCol = FirebaseFirestore.instance.collection('users');
     AppLog.info('admin.owner.select.dialog', 'Open select user dialog');
     return AlertDialog(
-      title: const Text('Select User'),
-      content: SizedBox(width: 380, height: 360, child: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+      title: Text('Select User', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(width: 380, height: 360, child: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
         stream: usersCol.orderBy('createdAt', descending: true).snapshots().handleError((e,st){ AppLog.error('admin.owner.select.stream', e, st); }),
         builder: (context, snap){
           if(snap.hasError){ AppLog.error('admin.owner.select.error', snap.error!, StackTrace.current); return Text('Error: ${snap.error}'); }
@@ -200,6 +203,7 @@ class _SelectUserForOwnerDialog extends StatelessWidget {
             });
         },
       )),
+      ),
       actions: [TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel'))],
     );
   }
@@ -304,8 +308,10 @@ class _AddUserDialogState extends State<_AddUserDialog> {
       builder: (context, ownerSnap){
         final allowOwner = ownerSnap.hasData && ownerSnap.data!.docs.isEmpty; // only if no owner
         return AlertDialog(
-      title: const Text('Add User'),
-      content: SizedBox(
+      title: Text('Add User', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(
         width: 420,
         child: Form(
           key: _form,
@@ -313,33 +319,60 @@ class _AddUserDialogState extends State<_AddUserDialog> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextFormField(
                 controller: _emailCtrl,
-                decoration: const InputDecoration(labelText: 'Email'),
+                style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                  hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                ),
                 keyboardType: TextInputType.emailAddress,
                 validator: (v){ if(v==null||v.trim().isEmpty) return 'Required'; if(!v.contains('@')) return 'Invalid'; return null; },
               ),
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Display Name (optional)'),
+                style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                decoration: InputDecoration(
+                  labelText: 'Display Name (optional)',
+                  labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                  hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                ),
               ),
               Row(children:[
                 Expanded(child: TextFormField(
                   controller: _passwordCtrl,
                   obscureText: !_showPassword,
-                  decoration: InputDecoration(labelText: 'Password', suffixIcon: IconButton(icon: Icon(_showPassword? Icons.visibility_off: Icons.visibility), onPressed: ()=> setState(()=> _showPassword=!_showPassword))),
+                  style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                    hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                    suffixIcon: IconButton(icon: Icon(_showPassword? Icons.visibility_off: Icons.visibility, color: context.colors.onSurfaceVariant), onPressed: ()=> setState(()=> _showPassword=!_showPassword)),
+                  ),
                   validator: (v){ if(v==null||v.length<6) return 'Min 6 chars'; return null; },
                 )),
                 const SizedBox(width:12),
                 Expanded(child: TextFormField(
                   controller: _password2Ctrl,
                   obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Confirm'),
+                  style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                  decoration: InputDecoration(
+                    labelText: 'Confirm',
+                    labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                    hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                  ),
                   validator: (v){ if(v!=_passwordCtrl.text) return 'Mismatch'; return null; },
                 )),
               ]),
               const SizedBox(height:8),
               DropdownButtonFormField<String>(
                 initialValue: _role,
-                decoration: InputDecoration(labelText: allowOwner? 'Role (Owner allowed once)' : 'Role'),
+                style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                dropdownColor: context.colors.surface,
+                iconEnabledColor: context.colors.onSurfaceVariant,
+                decoration: InputDecoration(
+                  labelText: allowOwner? 'Role (Owner allowed once)' : 'Role',
+                  labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                ),
                 items: [
                   if(allowOwner) const DropdownMenuItem(value:'owner', child: Text('Owner')),
                   const DropdownMenuItem(value:'manager', child: Text('Manager')),
@@ -351,12 +384,28 @@ class _AddUserDialogState extends State<_AddUserDialog> {
               ),
               TextFormField(
                 controller: _storesCtrl,
-                decoration: const InputDecoration(labelText: 'Store IDs (comma separated)'),
+                style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                decoration: InputDecoration(
+                  labelText: 'Store IDs (comma separated)',
+                  labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                  hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+                ),
               ),
-              if(_error!=null) Padding(padding: const EdgeInsets.only(top:8), child: Align(alignment: Alignment.centerLeft, child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize:12)))),
+              if(_error!=null)
+                Padding(
+                  padding: const EdgeInsets.only(top:8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _error!,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                ),
             ]),
           ),
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: _saving? null: ()=> Navigator.pop(context), child: const Text('Cancel')),
@@ -398,11 +447,18 @@ class _UserActionsState extends State<_UserActions>{
                 context: context,
                 barrierDismissible: false,
                 builder: (dialogCtx)=> AlertDialog(
-                  title: const Text('Delete User'),
-                  content: Text('Delete ${widget.currentValues['email'] ?? widget.userId}? This cannot be undone.'),
+                  title: Text('Delete User', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+                  content: DefaultTextStyle(
+                    style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                    child: Text('Delete ${widget.currentValues['email'] ?? widget.userId}? This cannot be undone.'),
+                  ),
                   actions: [
                     TextButton(onPressed: ()=> Navigator.pop(dialogCtx,false), child: const Text('Cancel')),
-                    FilledButton(onPressed: ()=> Navigator.pop(dialogCtx,true), child: const Text('Delete')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: context.colors.error, foregroundColor: context.colors.onError),
+                      onPressed: ()=> Navigator.pop(dialogCtx,true),
+                      child: const Text('Delete'),
+                    ),
                   ],
                 ),
               );
@@ -477,6 +533,30 @@ class _EditUserDialogState extends State<_EditUserDialog>{
     _role = (widget.current['role'] ?? 'cashier') as String;
   }
   @override void dispose(){ _nameCtrl.dispose(); _storesCtrl.dispose(); super.dispose(); }
+
+  // If the current role is something like 'previous_owner', keep it as a selectable item
+  // so DropdownButtonFormField does not assert. We still allow changing it to a supported role.
+  static const List<String> _allowedRoles = ['manager','cashier','clerk','accountant'];
+  String _normalizeRoleValue(String role){
+    // If role is null/empty, fallback
+    final r = role.isEmpty ? 'cashier' : role;
+    // We return r as-is; items builder will include it if not allowed.
+    return r;
+  }
+  List<DropdownMenuItem<String>> _buildRoleItems(String current){
+    final items = <DropdownMenuItem<String>>[];
+    if(!_allowedRoles.contains(current)){
+      final label = current.replaceAll('_', ' ').split(' ').map((w)=> w.isEmpty? w : (w[0].toUpperCase()+w.substring(1))).join(' ');
+      items.add(DropdownMenuItem(value: current, child: Text(label)));
+    }
+    items.addAll(const [
+      DropdownMenuItem(value:'manager', child: Text('Manager')),
+      DropdownMenuItem(value:'cashier', child: Text('Cashier')),
+      DropdownMenuItem(value:'clerk', child: Text('Clerk')),
+      DropdownMenuItem(value:'accountant', child: Text('Accountant')),
+    ]);
+    return items;
+  }
   Future<void> _submit() async {
     if(!_form.currentState!.validate()) return;
   setState(()=> _saving=true); _error=null; _success=null;
@@ -493,23 +573,62 @@ class _EditUserDialogState extends State<_EditUserDialog>{
   }
   @override Widget build(BuildContext context){
     return AlertDialog(
-      title: const Text('Edit User'),
-      content: SizedBox(width: 420, child: Form(
+      title: Text('Edit User', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(width: 420, child: Form(
         key: _form,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextFormField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Display Name')),
+          TextFormField(
+            controller: _nameCtrl,
+            style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+            decoration: InputDecoration(
+              labelText: 'Display Name',
+              labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+              hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+            ),
+          ),
           const SizedBox(height:8),
-          DropdownButtonFormField<String>(initialValue: _role, decoration: const InputDecoration(labelText: 'Role'), items: const [
-            DropdownMenuItem(value:'manager', child: Text('Manager')),
-            DropdownMenuItem(value:'cashier', child: Text('Cashier')),
-            DropdownMenuItem(value:'clerk', child: Text('Clerk')),
-            DropdownMenuItem(value:'accountant', child: Text('Accountant')),
-          ], onChanged: _saving? null: (v){ if(v!=null) setState(()=> _role=v); }),
-          TextFormField(controller: _storesCtrl, decoration: const InputDecoration(labelText: 'Store IDs (comma separated)')),
-          if(_error!=null) Padding(padding: const EdgeInsets.only(top:8), child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize:12))),
-          if(_success!=null) Padding(padding: const EdgeInsets.only(top:8), child: Text(_success!, style: const TextStyle(color: Colors.green, fontSize:12))),
+          DropdownButtonFormField<String>(
+            initialValue: _normalizeRoleValue(_role),
+            style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+            dropdownColor: context.colors.surface,
+            iconEnabledColor: context.colors.onSurfaceVariant,
+            decoration: InputDecoration(
+              labelText: 'Role',
+              labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+            ),
+            items: _buildRoleItems(_role),
+            onChanged: _saving ? null : (v){ if(v!=null) setState(()=> _role=v); },
+          ),
+          TextFormField(
+            controller: _storesCtrl,
+            style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+            decoration: InputDecoration(
+              labelText: 'Store IDs (comma separated)',
+              labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+              hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+            ),
+          ),
+          if(_error!=null)
+            Padding(
+              padding: const EdgeInsets.only(top:8),
+              child: Text(
+                _error!,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if(_success!=null)
+            Padding(
+              padding: const EdgeInsets.only(top:8),
+              child: Text(
+                _success!,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+              ),
+            ),
         ]),
       )),
+      ),
       actions: [
         TextButton(onPressed: _saving? null: ()=> Navigator.pop(context), child: const Text('Close')),
         FilledButton(onPressed: _saving? null: _submit, child: _saving? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : const Text('Save')),

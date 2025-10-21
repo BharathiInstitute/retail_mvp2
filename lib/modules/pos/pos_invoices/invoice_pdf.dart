@@ -1,7 +1,7 @@
 import 'dart:typed_data';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'invoice_models.dart';
+import 'pdf_theme.dart';
 
 Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
   final doc = pw.Document();
@@ -18,7 +18,7 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
       header: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('TAX INVOICE', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+          pw.Text('TAX INVOICE', style: PdfTheme.h1Bold),
           pw.SizedBox(height: 4),
           pw.Text('Invoice #: ${data.invoiceNumber}'),
           pw.Text('Date: $dateStr  Time: $timeStr'),
@@ -33,8 +33,8 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
       build: (context) => [
         pw.Table(
           border: pw.TableBorder(
-            bottom: pw.BorderSide(color: PdfColors.grey),
-            horizontalInside: pw.BorderSide(color: PdfColors.grey300, width: 0.4),
+            bottom: pw.BorderSide(color: PdfTheme.border),
+            horizontalInside: pw.BorderSide(color: PdfTheme.border, width: 0.4),
           ),
           columnWidths: {
             0: const pw.FlexColumnWidth(5),
@@ -45,7 +45,7 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
           },
           children: [
             pw.TableRow(
-              decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE0E0E0)),
+              decoration: const pw.BoxDecoration(color: PdfTheme.headerBg),
               children: [
                 _h('Item'),
                 _h('Qty'),
@@ -66,10 +66,10 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
         pw.SizedBox(height: 12),
         pw.Row(children: [pw.Expanded(child: pw.Container()), _totalsBlock(data)]),
         pw.SizedBox(height: 16),
-  pw.Text('GST Breakdown', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+    pw.Text('GST Breakdown', style: PdfTheme.headerCell),
         pw.SizedBox(height: 6),
         pw.Table(
-          border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.4),
+          border: pw.TableBorder.all(color: PdfTheme.border, width: 0.4),
           columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(3)},
           children: [
             pw.TableRow(children: [
@@ -83,11 +83,11 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
           ],
         ),
         pw.SizedBox(height: 24),
-  pw.Text('Thank you for your purchase!', style: pw.TextStyle(color: PdfColors.blueGrey, fontSize: 12)),
+    pw.Text('Thank you for your purchase!', style: PdfTheme.accentSmall),
       ],
       footer: (ctx) => pw.Align(
         alignment: pw.Alignment.centerRight,
-  child: pw.Text('Generated on $dateStr $timeStr', style: pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
+    child: pw.Text('Generated on $dateStr $timeStr', style: PdfTheme.note),
       ),
     ),
   );
@@ -97,12 +97,12 @@ Future<Uint8List> buildInvoicePdf(InvoiceData data) async {
 
 pw.Widget _h(String text) => pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-      child: pw.Text(text, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+      child: pw.Text(text, style: PdfTheme.headerCell),
     );
 
 pw.Widget _c(String text, {pw.TextAlign align = pw.TextAlign.center}) => pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
-      child: pw.Text(text, textAlign: align, style: pw.TextStyle(fontSize: 9)),
+      child: pw.Text(text, textAlign: align, style: PdfTheme.cell),
     );
 
 pw.Widget _totalsBlock(InvoiceData d) {
@@ -118,11 +118,11 @@ pw.Widget _totalsBlock(InvoiceData d) {
         pw.Divider(),
         _kv('Grand Total', d.grandTotal, bold: true),
         pw.SizedBox(height: 4),
-  pw.Text('Paid via: ${d.paymentMode}', style: pw.TextStyle(fontSize: 9)),
+    pw.Text('Paid via: ${d.paymentMode}', style: PdfTheme.cell),
         if (d.customerDiscountPercent > 0)
-          pw.Text('Customer Discount: ${d.customerDiscountPercent.toStringAsFixed(0)}%', style: pw.TextStyle(fontSize: 9)),
+          pw.Text('Customer Discount: ${d.customerDiscountPercent.toStringAsFixed(0)}%', style: PdfTheme.cell),
         if (d.redeemedPoints > 0)
-          pw.Text('Points Used: ${d.redeemedPoints.toStringAsFixed(0)}', style: pw.TextStyle(fontSize: 9)),
+          pw.Text('Points Used: ${d.redeemedPoints.toStringAsFixed(0)}', style: PdfTheme.cell),
       ],
     ),
   );
@@ -131,7 +131,7 @@ pw.Widget _totalsBlock(InvoiceData d) {
 pw.Widget _kv(String label, double value, {bool bold = false}) => pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
-        pw.Text(label, style: pw.TextStyle(fontSize: 10, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-        pw.Text('₹${value.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 10, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+        pw.Text(label, style: bold ? PdfTheme.headerCell : PdfTheme.cell),
+        pw.Text('₹${value.toStringAsFixed(2)}', style: bold ? PdfTheme.headerCell : PdfTheme.cell),
       ],
     );

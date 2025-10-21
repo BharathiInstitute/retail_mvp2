@@ -59,8 +59,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
 										validator: (v) => (v == null || v.isEmpty || !v.contains('@')) ? 'Enter a valid email' : null,
 									),
 									const SizedBox(height: 12),
-									if (_message != null) Text(_message!, style: const TextStyle(color: Colors.green)),
-									if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+									if (_message != null)
+										Text(
+											_message!,
+											style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+										),
+									if (_error != null)
+										Text(
+											_error!,
+											style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+										),
 									const SizedBox(height: 12),
 									FilledButton(
 										onPressed: _loading ? null : _submit,

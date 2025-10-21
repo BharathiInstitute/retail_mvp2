@@ -532,7 +532,7 @@ class _PosPageState extends State<PosPage> {
 
     if (!mounted) return;
 
-    final summary = _buildInvoiceSummaryFromInvoice(invoice);
+  final summary = _buildInvoiceSummaryFromInvoice(context, invoice);
 
     setState(() {
       cart.clear();
@@ -552,9 +552,18 @@ class _PosPageState extends State<PosPage> {
     showDialog(
       context: dlgRoot,
       barrierDismissible: true,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Invoice Preview (GST)'),
-        content: SizedBox(width: 480, child: summary),
+      builder: (dialogCtx) {
+        final cs = Theme.of(dialogCtx).colorScheme;
+        final texts = Theme.of(dialogCtx).textTheme;
+        return AlertDialog(
+        title: Text(
+          'Invoice Preview (GST)',
+          style: Theme.of(dialogCtx).textTheme.titleLarge?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w700),
+        ),
+        content: DefaultTextStyle(
+          style: texts.bodyMedium?.copyWith(color: cs.onSurface) ?? const TextStyle(),
+          child: SizedBox(width: 480, child: summary),
+        ),
         actions: [
           TextButton.icon(
             onPressed: () => _emailInvoice(),
@@ -628,7 +637,16 @@ class _PosPageState extends State<PosPage> {
                 if (mounted) setState(() => _isPrinting = false);
               }
             },
-            icon: _isPrinting ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,color: Colors.white)) : const Icon(Icons.print),
+            icon: _isPrinting
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(context).colorScheme.onPrimary,
+                    ),
+                  )
+                : const Icon(Icons.print),
             label: const Text('Print'),
           ),
           TextButton(
@@ -640,7 +658,8 @@ class _PosPageState extends State<PosPage> {
             child: const Text('Close'),
           ),
         ],
-      ),
+      );
+      },
     );
   }
 
@@ -896,35 +915,39 @@ class _PosPageState extends State<PosPage> {
   }
 
 
-  Widget _buildInvoiceSummaryFromInvoice(InvoiceData invoice) {
+  Widget _buildInvoiceSummaryFromInvoice(BuildContext context, InvoiceData invoice) {
+    final cs = Theme.of(context).colorScheme;
     final dateStr = '${invoice.timestamp.year.toString().padLeft(4, '0')}-${invoice.timestamp.month.toString().padLeft(2, '0')}-${invoice.timestamp.day.toString().padLeft(2, '0')}';
     final timeStr = '${invoice.timestamp.hour.toString().padLeft(2, '0')}:${invoice.timestamp.minute.toString().padLeft(2, '0')}:${invoice.timestamp.second.toString().padLeft(2, '0')}';
     return SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Invoice #: ${invoice.invoiceNumber}'),
-        Text('Date: $dateStr  Time: $timeStr'),
-        Text('Customer: ${invoice.customerName}'),
-        Text('Paid via: ${invoice.paymentMode}'),
-        if ((invoice.customerEmail ?? '').isNotEmpty)
-          Text('Email: ${invoice.customerEmail}'),
-        if ((invoice.customerPhone ?? '').isNotEmpty)
-          Text('Phone: ${invoice.customerPhone}'),
-        const SizedBox(height: 8),
-        const Divider(),
-        ...invoice.lines.map((it) => ListTile(
-              dense: true,
-              title: Text('${it.name} x ${it.qty}'),
-              subtitle: Text('Price: ₹${it.unitPrice.toStringAsFixed(2)}  |  Disc: ₹${it.discount.toStringAsFixed(2)}  |  Tax ${it.taxPercent}%: ₹${it.tax.toStringAsFixed(2)}'),
-              trailing: Text('₹${it.lineTotal.toStringAsFixed(2)}'),
-            )),
-        const Divider(),
-        _kv('Subtotal', invoice.subtotal),
-        _kv('Discount', -invoice.discountTotal),
-        _kv('Tax Total', invoice.taxTotal),
-        const Divider(),
-        _kv('Grand Total', invoice.grandTotal, bold: true),
-        const SizedBox(height: 8),
-      ]),
+      child: DefaultTextStyle.merge(
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface) ?? TextStyle(color: cs.onSurface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Invoice #: ${invoice.invoiceNumber}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          Text('Date: $dateStr  Time: $timeStr', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          Text('Customer: ${invoice.customerName}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          Text('Paid via: ${invoice.paymentMode}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          if ((invoice.customerEmail ?? '').isNotEmpty)
+            Text('Email: ${invoice.customerEmail}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          if ((invoice.customerPhone ?? '').isNotEmpty)
+            Text('Phone: ${invoice.customerPhone}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
+          const SizedBox(height: 8),
+          const Divider(),
+          ...invoice.lines.map((it) => ListTile(
+                dense: true,
+                title: Text('${it.name} x ${it.qty}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w600)),
+                subtitle: Text('Price: ₹${it.unitPrice.toStringAsFixed(2)}  |  Disc: ₹${it.discount.toStringAsFixed(2)}  |  Tax ${it.taxPercent}%: ₹${it.tax.toStringAsFixed(2)}', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                trailing: Text('₹${it.lineTotal.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w700)),
+              )),
+          const Divider(),
+          _kv(context, 'Subtotal', invoice.subtotal),
+          _kv(context, 'Discount', -invoice.discountTotal),
+          _kv(context, 'Tax Total', invoice.taxTotal),
+          const Divider(),
+          _kv(context, 'Grand Total', invoice.grandTotal, bold: true),
+          const SizedBox(height: 8),
+        ]),
+      ),
     );
   }
 
@@ -1422,8 +1445,11 @@ class _PosPageState extends State<PosPage> {
 
   // _paymentAndSummary & related helpers moved to CheckoutPanel
 
-  Widget _kv(String label, double value, {bool bold = false}) {
-    final style = TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+  Widget _kv(BuildContext context, String label, double value, {bool bold = false}) {
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+        ) ?? TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: bold ? FontWeight.bold : FontWeight.normal);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: Row(
@@ -1478,18 +1504,28 @@ class _HeldOrdersDialogState extends State<_HeldOrdersDialog> {
     final confirmed = await showDialog<bool>(
       context: rootCtx,
       barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Delete held order?'),
-        content: Text('Delete ${o.id}? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => rootNavigatorKey.currentState?.pop(true),
-            child: const Text('Delete'),
+      builder: (dialogCtx) {
+        final scheme = Theme.of(dialogCtx).colorScheme;
+        final texts = Theme.of(dialogCtx).textTheme;
+        return AlertDialog(
+          title: Text(
+            'Delete held order?',
+            style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
           ),
-        ],
-      ),
+          content: DefaultTextStyle(
+            style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+            child: Text('Delete ${o.id}? This cannot be undone.'),
+          ),
+          actions: [
+            TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: scheme.error, foregroundColor: scheme.onError),
+              onPressed: () => rootNavigatorKey.currentState?.pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
     );
     return confirmed == true;
   }
@@ -1509,9 +1545,16 @@ class _HeldOrdersDialogState extends State<_HeldOrdersDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final texts = Theme.of(context).textTheme;
     return AlertDialog(
-      title: const Text('Held Orders'),
-      content: SizedBox(
+      title: Text(
+        'Held Orders',
+        style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+      ),
+      content: DefaultTextStyle(
+        style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+        child: SizedBox(
         width: 420,
         height: 360,
         child: widget.orders.isEmpty
@@ -1542,6 +1585,7 @@ class _HeldOrdersDialogState extends State<_HeldOrdersDialog> {
                   );
                 },
               ),
+        ),
       ),
   actions: [TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(), child: const Text('Close'))],
     );

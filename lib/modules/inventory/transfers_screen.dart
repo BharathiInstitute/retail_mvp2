@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse providers
 import '../../core/auth/auth.dart';
 import 'Products/inventory_repository.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 /// Transfers screen with Firestore-backed history (inventory_transfers collection)
 class TransfersScreen extends ConsumerStatefulWidget {
@@ -67,7 +68,12 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                       scrollDirection: Axis.horizontal,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(minWidth: minWidth),
-                        child: DataTable(
+                        child: DataTableTheme(
+                          data: DataTableThemeData(
+                            dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                            headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                          ),
+                          child: DataTable(
                           columns: const [
                             DataColumn(label: Text('Date')),
                             DataColumn(label: Text('SKU')),
@@ -107,6 +113,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                 ],
                               ),
                           ],
+                          ),
                         ),
                       ),
                     );
@@ -143,8 +150,10 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Edit Transfer'),
-        content: Form(
+        title: Text('Edit Transfer', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+          child: Form(
           key: formKey,
           child: SizedBox(
             width: 520,
@@ -152,7 +161,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('SKU: ${t.sku} • ${t.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text('SKU: ${t.sku} • ${t.name}', style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
@@ -162,7 +171,13 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
                       onChanged: (v) => from = v ?? from,
-                      decoration: const InputDecoration(labelText: 'From'),
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'From',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -173,14 +188,26 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
                       onChanged: (v) => to = v ?? to,
-                      decoration: const InputDecoration(labelText: 'To'),
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'To',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
                     ),
                   ),
                 ]),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: qtyCtrl,
-                  decoration: const InputDecoration(labelText: 'Quantity'),
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: InputDecoration(
+                    labelText: 'Quantity',
+                    labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    isDense: true,
+                  ),
                   keyboardType: TextInputType.number,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Required';
@@ -193,11 +220,19 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional'),
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: InputDecoration(
+                    labelText: 'Note',
+                    hintText: 'Optional',
+                    labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    isDense: true,
+                  ),
                   maxLines: 2,
                 ),
               ],
             ),
+          ),
           ),
         ),
         actions: [
@@ -243,11 +278,18 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Delete Transfer'),
-        content: Text('Delete this transfer for ${t.sku} • ${t.name}?'),
+        title: Text('Delete Transfer', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+          child: Text('Delete this transfer for ${t.sku} • ${t.name}?'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.colors.error, foregroundColor: context.colors.onError),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -354,8 +396,10 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
   Widget build(BuildContext context) {
     final productsAsync = ref.watch(productsStreamProvider);
     return AlertDialog(
-      title: const Text('Record Transfer'),
-      content: Form(
+      title: Text('Record Transfer', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: Form(
         key: _formKey,
         child: SizedBox(
           width: 520,
@@ -384,12 +428,16 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     TextFormField(
                       controller: _searchCtrl,
                       autofocus: true,
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
                       decoration: InputDecoration(
                         labelText: 'Search / Scan SKU, Barcode or Name',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
                         suffixIcon: _searchCtrl.text.isEmpty
-                            ? const Icon(Icons.qr_code_scanner)
+                            ? Icon(Icons.qr_code_scanner, color: context.colors.onSurfaceVariant)
                             : IconButton(
-                                icon: const Icon(Icons.clear),
+                                icon: Icon(Icons.clear, color: context.colors.onSurfaceVariant),
                                 onPressed: () => setState(() {
                                   _searchCtrl.clear();
                                   _search = '';
@@ -411,9 +459,9 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                         margin: const EdgeInsets.only(top: 6, bottom: 8),
                         constraints: const BoxConstraints(maxHeight: 220),
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
+                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                           borderRadius: BorderRadius.circular(4),
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                         ),
                         child: ListView.builder(
                           itemCount: matches.length,
@@ -421,8 +469,15 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                             final p = matches[i];
                             return ListTile(
                               dense: true,
-                              title: Text('${p.sku} • ${p.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: p.barcode.isNotEmpty ? Text(p.barcode) : null,
+                              title: Text(
+                                '${p.sku} • ${p.name}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                              ),
+                              subtitle: p.barcode.isNotEmpty
+                                  ? Text(p.barcode, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant))
+                                  : null,
                               onTap: () => setState(() => _selected = p),
                             );
                           },
@@ -441,7 +496,13 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (v) => setState(() => _from = v ?? 'Store'),
-                          decoration: const InputDecoration(labelText: 'From'),
+                          style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                          decoration: InputDecoration(
+                            labelText: 'From',
+                            labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                            hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -452,14 +513,26 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (v) => setState(() => _to = v ?? 'Warehouse'),
-                          decoration: const InputDecoration(labelText: 'To'),
+                          style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                          decoration: InputDecoration(
+                            labelText: 'To',
+                            labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                            hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                            isDense: true,
+                          ),
                         ),
                       ),
                     ]),
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _qtyCtrl,
-                      decoration: const InputDecoration(labelText: 'Quantity'),
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'Quantity',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
                       keyboardType: TextInputType.number,
                       validator: (v) {
                         if (v == null || v.trim().isEmpty) return 'Required';
@@ -475,7 +548,14 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _noteCtrl,
-                      decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional'),
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'Note',
+                        hintText: 'Optional',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
                       maxLines: 2,
                     ),
                     if (_selected != null && qty > 0)
@@ -489,6 +569,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
             },
           ),
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: _submitting ? null : () => Navigator.pop(context), child: const Text('Cancel')),
@@ -554,13 +635,16 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
     return Material(
       elevation: 1,
       borderRadius: BorderRadius.circular(6),
-      color: Colors.blueGrey.shade50,
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${_selected!.name} (SKU: ${_selected!.sku})', style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(
+              '${_selected!.name} (SKU: ${_selected!.sku})',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 4),
             Wrap(spacing: 8, children: [
               _qtyBadge('Store', storeQty, Icons.store),
@@ -574,17 +658,24 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
   }
 
   Widget _afterPreview(int storeBefore, int whBefore, int storeAfter, int whAfter) {
-    Color color(int before, int after) => after > before
-        ? Colors.green.shade600
-        : after < before
-            ? Colors.red.shade600
-            : Colors.grey.shade600;
+    Color color(int before, int after) {
+      final scheme = Theme.of(context).colorScheme;
+      return after > before
+          ? context.appColors.success
+          : after < before
+              ? scheme.error
+              : scheme.outline;
+    }
     Widget chip(String label, int before, int after) {
       final diff = after - before;
       final diffStr = diff == 0 ? '0' : (diff > 0 ? '+$diff' : diff.toString());
+      final bg = color(before, after).withValues(alpha: 0.15);
       return Chip(
-        label: Text('$label: $before → $after ($diffStr)', style: const TextStyle(color: Colors.white)),
-        backgroundColor: color(before, after),
+        label: Text(
+          '$label: $before → $after ($diffStr)',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+        ),
+        backgroundColor: bg,
       );
     }
     return Column(
@@ -597,7 +688,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
           chip('Warehouse', whBefore, whAfter),
         ]),
         const SizedBox(height: 4),
-        Text('Total After: ${storeAfter + whAfter}', style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text('Total After: ${storeAfter + whAfter}', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
       ],
     );
   }
@@ -606,14 +697,14 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 14, color: Colors.blueGrey.shade600),
+        Icon(icon, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
         const SizedBox(width: 4),
-        Text('$label: $value', style: const TextStyle(fontSize: 12)),
+        Text('$label: $value', style: Theme.of(context).textTheme.labelSmall),
       ]),
     );
   }

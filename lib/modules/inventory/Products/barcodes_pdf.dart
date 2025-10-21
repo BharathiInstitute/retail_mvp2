@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:retail_mvp2/modules/pos/pos_invoices/pdf_theme.dart' as app_pdf;
 import 'package:barcode/barcode.dart';
 
 /// Builds a PDF containing barcodes for the provided products.
@@ -19,7 +20,7 @@ Future<Uint8List> buildBarcodesPdf(List<BarcodeProduct> products) async {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Product Barcodes', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Product Barcodes', style: app_pdf.PdfTheme.h1Bold),
               pw.SizedBox(height: 12),
               ...slice.map((p) {
                 final data = p.realBarcode.isNotEmpty ? p.realBarcode : p.sku;
@@ -33,9 +34,9 @@ Future<Uint8List> buildBarcodesPdf(List<BarcodeProduct> products) async {
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
-                            pw.Text('SKU: ${p.sku}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                            pw.Text('Stored Barcode: ${p.realBarcode.isEmpty ? '(none)' : p.realBarcode}', style: const pw.TextStyle(fontSize: 10)),
-                            pw.Text('Encoded: $data', style: const pw.TextStyle(fontSize: 10)),
+                            pw.Text('SKU: ${p.sku}', style: app_pdf.PdfTheme.headerCell),
+                            pw.Text('Stored Barcode: ${p.realBarcode.isEmpty ? '(none)' : p.realBarcode}', style: app_pdf.PdfTheme.cell),
+                            pw.Text('Encoded: $data', style: app_pdf.PdfTheme.cell),
                             pw.SizedBox(height: 4),
                             pw.SvgImage(svg: svg),
                           ],
@@ -46,7 +47,7 @@ Future<Uint8List> buildBarcodesPdf(List<BarcodeProduct> products) async {
                 );
               }),
               if (i + perPage < products.length)
-                pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Continued ->', style: const pw.TextStyle(fontSize: 10)))
+                pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Continued ->', style: app_pdf.PdfTheme.accentSmall))
             ],
           );
         },

@@ -25,83 +25,94 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
     barrierDismissible: !showPrintButton, // force explicit choice when printing
     builder: (ctx) {
       return StatefulBuilder(builder: (ctx, setLocal) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final texts = Theme.of(ctx).textTheme;
         int previewWidth = tempScale && tempSize == PaperSize.receipt
             ? _deriveCharWidth(tempPaperMm)
             : tempWidth;
         return AlertDialog(
-          title: Text(showPrintButton ? 'Print Settings & Preview' : 'Print Settings'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children:[
-                    const Text('Paper:'), const SizedBox(width:8),
-                    DropdownButton<PaperSize>(
-                      value: tempSize,
-                      items: const [
-                        DropdownMenuItem(value: PaperSize.receipt, child: Text('Receipt (Thermal)')),
-                        DropdownMenuItem(value: PaperSize.a4, child: Text('A4')),
-                      ],
-                      onChanged: (v){ if(v!=null) setLocal(()=> tempSize = v);},
-                    ),
-                  ]),
-                  const SizedBox(height: 8),
-                  Row(children:[
-                    const Text('Orientation:'), const SizedBox(width:8),
-                    DropdownButton<PageOrientation>(
-                      value: tempOrientation,
-                      items: const [
-                        DropdownMenuItem(value: PageOrientation.portrait, child: Text('Portrait')),
-                        DropdownMenuItem(value: PageOrientation.landscape, child: Text('Landscape')),
-                      ],
-                      onChanged: tempSize == PaperSize.receipt ? null : (v){ if(v!=null) setLocal(()=> tempOrientation = v);},
-                    ),
-                  ]),
-                  if (tempSize == PaperSize.receipt) const SizedBox(height: 8),
-                  if (tempSize == PaperSize.receipt) Row(children:[
-                    const Text('Width (mm):'), const SizedBox(width:8),
-                    DropdownButton<int>(
-                      value: tempPaperMm,
-                      items: const [
-                        DropdownMenuItem(value: 48, child: Text('48 mm')),
-                        DropdownMenuItem(value: 58, child: Text('58 mm')),
-                        DropdownMenuItem(value: 80, child: Text('80 mm')),
-                      ],
-                      onChanged: (v){ if(v!=null) setLocal(()=> tempPaperMm = v); },
-                    ),
-                  ]),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Auto scale to paper width'),
-                    value: tempScale,
-                    onChanged: (v)=> setLocal(()=> tempScale = v),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(children:[
-                    const Text('Font size:'), const SizedBox(width:8),
-                    Expanded(
-                      child: Slider(
-                        min: 6,
-                        max: 24,
-                        divisions: 18,
-                        value: tempFontSize.toDouble(),
-                        label: '${tempFontSize}pt',
-                        onChanged: (v)=> setLocal(()=> tempFontSize = v.round()),
+          title: Text(
+            showPrintButton ? 'Print Settings & Preview' : 'Print Settings',
+            style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+          ),
+          content: DefaultTextStyle(
+            style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+            child: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Text('Paper:'), const SizedBox(width: 8),
+                      DropdownButton<PaperSize>(
+                        value: tempSize,
+                        items: const [
+                          DropdownMenuItem(value: PaperSize.receipt, child: Text('Receipt (Thermal)')),
+                          DropdownMenuItem(value: PaperSize.a4, child: Text('A4')),
+                        ],
+                        onChanged: (v) { if (v != null) setLocal(() => tempSize = v); },
                       ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Text('Orientation:'), const SizedBox(width: 8),
+                      DropdownButton<PageOrientation>(
+                        value: tempOrientation,
+                        items: const [
+                          DropdownMenuItem(value: PageOrientation.portrait, child: Text('Portrait')),
+                          DropdownMenuItem(value: PageOrientation.landscape, child: Text('Landscape')),
+                        ],
+                        onChanged: tempSize == PaperSize.receipt ? null : (v) { if (v != null) setLocal(() => tempOrientation = v); },
+                      ),
+                    ]),
+                    if (tempSize == PaperSize.receipt) ...[
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        const Text('Width (mm):'), const SizedBox(width: 8),
+                        DropdownButton<int>(
+                          value: tempPaperMm,
+                          items: const [
+                            DropdownMenuItem(value: 48, child: Text('48 mm')),
+                            DropdownMenuItem(value: 58, child: Text('58 mm')),
+                            DropdownMenuItem(value: 80, child: Text('80 mm')),
+                          ],
+                          onChanged: (v) { if (v != null) setLocal(() => tempPaperMm = v); },
+                        ),
+                      ]),
+                    ],
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Auto scale to paper width'),
+                      value: tempScale,
+                      onChanged: (v) => setLocal(() => tempScale = v),
                     ),
-                    SizedBox(
-                      width: 40,
-                      child: Text('${tempFontSize}pt', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)),
-                    )
-                  ]),
-                  const SizedBox(height: 8),
-                  if (tempSize == PaperSize.receipt && !tempScale) Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children:[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Text('Font size:'), const SizedBox(width: 8),
+                      Expanded(
+                        child: Slider(
+                          min: 6,
+                          max: 24,
+                          divisions: 18,
+                          value: tempFontSize.toDouble(),
+                          label: '${tempFontSize}pt',
+                          onChanged: (v) => setLocal(() => tempFontSize = v.round()),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 40,
+                        child: Text(
+                          '${tempFontSize}pt',
+                          textAlign: TextAlign.right,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                    ]),
+                    if (tempSize == PaperSize.receipt) ...[
+                      const SizedBox(height: 8),
                       const Text('Receipt Character Width'),
                       Slider(
                         min: 20,
@@ -109,23 +120,25 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         divisions: 60,
                         value: tempWidth.toDouble(),
                         label: '$tempWidth',
-                        onChanged: (v)=> setLocal(()=> tempWidth = v.round()),
+                        onChanged: (v) => setLocal(() => tempWidth = v.round()),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})',
-                    style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
-                  if (showPrintButton) ...[
-                    const Divider(height: 24),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text("Don't show before printing again"),
-                      value: dontShowAgain,
-                      onChanged: (v)=> setLocal(()=> dontShowAgain = v ?? false),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),
                     ),
+                    if (showPrintButton) ...[
+                      const Divider(height: 24),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text("Don't show before printing again"),
+                        value: dontShowAgain,
+                        onChanged: (v) => setLocal(() => dontShowAgain = v ?? false),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),

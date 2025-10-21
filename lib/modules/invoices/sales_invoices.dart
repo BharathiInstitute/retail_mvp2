@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 // Simple wrapper page used by router for Sales invoices
 class SalesInvoicesScreen extends StatelessWidget {
@@ -215,11 +216,17 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
   }
 
   Widget _statusChip(String status) {
-    Color c = Colors.grey;
-    if (status == 'Paid') c = Colors.green;
-    if (status == 'Pending') c = Colors.orange;
-    if (status == 'Credit') c = Colors.purple;
-    return Chip(label: Text(status), backgroundColor: c.withValues(alpha: 0.15));
+    final colors = context.colors;
+    final app = context.appColors;
+    Color c = colors.outline;
+    if (status == 'Paid') c = app.success;
+    if (status == 'Pending') c = app.warning;
+    if (status == 'Credit') c = app.info;
+    return Chip(
+      label: Text(status, style: context.texts.labelMedium),
+      backgroundColor: c.withValues(alpha: 0.15),
+      side: BorderSide(color: c.withValues(alpha: 0.4)),
+    );
   }
 
   Future<void> _deleteInvoice(Invoice inv, BuildContext dialogCtx) async {
@@ -332,7 +339,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
               Expanded(
                 child: Text(
                   'Invoice #${inv.invoiceNo} • ${_fmtDate(inv.date)} • ${inv.customer.name}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600),
                 ),
               ),
               if (!editing)
@@ -358,12 +365,18 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                   final confirm = await showDialog<bool>(
                     context: widget.dialogCtx,
                     builder: (ctx) => AlertDialog(
-                      title: const Text('Delete invoice?'),
-                      content: const Text('This will permanently delete this sales invoice. This action cannot be undone.'),
+                      title: Text(
+                        'Delete invoice?',
+                        style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                      ),
+                      content: DefaultTextStyle(
+                        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                        child: const Text('This will permanently delete this sales invoice. This action cannot be undone.'),
+                      ),
                       actions: [
                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                         FilledButton(
-                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                          style: FilledButton.styleFrom(backgroundColor: context.colors.error, foregroundColor: context.colors.onError),
                           onPressed: () => Navigator.pop(ctx, true),
                           child: const Text('Delete'),
                         ),
@@ -372,8 +385,8 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                   );
                   if (confirm == true) await widget.onDelete(inv);
                 },
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                label: const Text('Delete', style: TextStyle(color: Colors.red)),
+                icon: Icon(Icons.delete_outline, color: context.colors.error),
+                label: Text('Delete', style: TextStyle(color: context.colors.error)),
               ),
               const SizedBox(width: 8),
               _statusChip(inv.status),
@@ -399,7 +412,12 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                   if (!editing)
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: DataTableTheme(
+                        data: DataTableThemeData(
+                          dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                          headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                        ),
+                        child: DataTable(
                         columns: const [
                           DataColumn(label: Text('SKU')),
                           DataColumn(label: Text('Item')),
@@ -419,12 +437,16 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                               DataCell(Text('₹${it.lineTotal(taxInclusive: widget.taxInclusive).toStringAsFixed(2)}')),
                             ]),
                         ],
+                          ),
                       ),
                     )
                   else ...[
                     Row(
                       children: [
-                        const Text('Items', style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text(
+                              'Items',
+                              style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                            ),
                         const Spacer(),
                         IconButton(
                           tooltip: 'Add Item',
@@ -452,7 +474,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('GST Breakup', style: TextStyle(fontWeight: FontWeight.w600)),
+                          Text('GST Breakup', style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 6),
                           _kv('CGST', gst.cgst),
                           _kv('SGST', gst.sgst),
@@ -462,7 +484,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Totals', style: TextStyle(fontWeight: FontWeight.w600)),
+                          Text('Totals', style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 6),
                           _kv('Tax Total', gst.totalTax),
                           const Divider(),
@@ -503,6 +525,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
             width: 120,
             child: TextFormField(
               initialValue: r.sku,
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               decoration: const InputDecoration(labelText: 'SKU'),
               onChanged: (v) => r.sku = v.trim(),
             ),
@@ -511,6 +534,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
           Expanded(
             child: TextFormField(
               controller: r.name,
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               decoration: const InputDecoration(labelText: 'Item'),
             ),
           ),
@@ -520,6 +544,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
             child: TextFormField(
               controller: r.qty,
               keyboardType: const TextInputType.numberWithOptions(decimal: false),
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               decoration: const InputDecoration(labelText: 'Qty'),
             ),
           ),
@@ -529,6 +554,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
             child: TextFormField(
               controller: r.price,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               decoration: const InputDecoration(labelText: 'Unit Price ₹'),
             ),
           ),
@@ -537,11 +563,14 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
             width: 110,
             child: DropdownButtonFormField<int>(
               initialValue: r.taxPercent,
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               items: const [0, 5, 12, 18, 28]
                   .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
                   .toList(),
               onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
               decoration: const InputDecoration(labelText: 'Tax Rate'),
+              iconEnabledColor: context.colors.onSurfaceVariant,
+              iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
             ),
           ),
           const SizedBox(width: 8),
@@ -554,6 +583,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                       rem.dispose();
                     }),
             icon: const Icon(Icons.close),
+            color: context.colors.onSurfaceVariant,
           ),
         ],
       ),
@@ -561,7 +591,8 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
   }
 
   Widget _kv(String label, double value, {bool bold = false}) {
-    final style = TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+    final style = (context.texts.bodyMedium ?? const TextStyle())
+        .copyWith(color: context.colors.onSurface, fontWeight: bold ? FontWeight.w700 : FontWeight.w400);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: Row(
@@ -575,11 +606,17 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
   }
 
   Widget _statusChip(String status) {
-    Color c = Colors.grey;
-    if (status == 'Paid') c = Colors.green;
-    if (status == 'Pending') c = Colors.orange;
-    if (status == 'Credit') c = Colors.purple;
-    return Chip(label: Text(status), backgroundColor: c.withValues(alpha: 0.15));
+    final colors = context.colors;
+    final app = context.appColors;
+    Color c = colors.outline;
+    if (status == 'Paid') c = app.success;
+    if (status == 'Pending') c = app.warning;
+    if (status == 'Credit') c = app.info;
+    return Chip(
+      label: Text(status, style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
+      backgroundColor: c.withValues(alpha: 0.15),
+      side: BorderSide(color: c.withValues(alpha: 0.4)),
+    );
   }
 
   Future<void> _save() async {

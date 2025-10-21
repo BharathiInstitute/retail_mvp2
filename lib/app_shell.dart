@@ -6,6 +6,9 @@ import 'core/auth/auth.dart';
 // Permissions
 import 'core/permissions.dart';
 import 'core/app_keys.dart';
+import 'core/theme/app_theme.dart';
+import 'core/theme/theme_utils.dart';
+import 'core/theme/font_controller.dart';
 
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
@@ -320,21 +323,14 @@ class MyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
+    final fontKey = ref.watch(fontProvider);
     return MaterialApp.router(
       title: 'Retail ERP MVP',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: scaffoldMessengerKey,
-      themeMode: ThemeMode.system,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-      ),
+      themeMode: ref.watch(themeModeProvider),
+      theme: AppTheme.light(context, fontKey: fontKey),
+      darkTheme: AppTheme.dark(context, fontKey: fontKey),
       routerConfig: router,
     );
   }
@@ -357,9 +353,19 @@ class AppShell extends ConsumerWidget {
     // Note: Permissions are enforced per screen; the side menu itself shows all entries for discoverability.
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Retail ERP MVP'),
+        title: Text(
+          'Retail ERP MVP',
+          style: context.texts.titleLarge?.copyWith(
+            color: context.colors.onSurface,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.brightness_6)),
+          IconButton(
+            onPressed: () => ref.read(themeModeProvider.notifier).cycle(),
+            icon: const Icon(Icons.brightness_6),
+            tooltip: 'Toggle theme',
+          ),
         ],
       ),
       drawer: isWide ? null : Drawer(child: SafeArea(child: _SideMenu(isWide: false, onGo: (r) async {
@@ -398,8 +404,25 @@ class _SideMenu extends ConsumerWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text((user?.displayName?.isNotEmpty ?? false) ? user!.displayName! : (user?.email ?? 'User'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
-                if ((user?.email ?? '').isNotEmpty) Text(user!.email!, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis),
+                Builder(builder: (context) {
+                  final displayName = (user?.displayName?.trim().isNotEmpty ?? false)
+                      ? user!.displayName!.trim()
+                      : ((user?.email ?? 'User').split('@').first);
+                  return Text(
+                    displayName,
+                    style: context.texts.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: context.colors.onSurface,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  );
+                }),
+                if ((user?.email ?? '').isNotEmpty)
+                  Text(
+                    user!.email!,
+                    style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
               ]),
             ),
           ],
@@ -410,18 +433,38 @@ class _SideMenu extends ConsumerWidget {
     bool canView(String? key) => key == null ? true : (isOwner || perms.can(key, 'view'));
 
     Widget item(String label, IconData icon, String route, {String? screenKey, int indent = 0}) {
-      final enabled = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
+      final canAccess = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
       final selected = currentPath == route || (route != '/' && currentPath.startsWith(route));
       return ListTile(
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
         contentPadding: EdgeInsets.only(left: 12.0 + indent * 14.0, right: 12),
-        leading: Icon(icon, size: 20),
-        title: Text(label, style: const TextStyle(fontSize: 13)),
+        leading: Icon(
+          icon,
+          size: 20,
+          color: selected
+              ? context.colors.primary
+              : (canAccess ? context.colors.onSurfaceVariant : context.colors.onSurfaceVariant),
+        ),
+        title: Text(
+          label,
+          style: context.texts.bodySmall?.copyWith(
+            color: context.colors.onSurface,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        trailing: canAccess
+            ? null
+            : Icon(Icons.lock_outline, size: 16, color: context.colors.onSurfaceVariant),
         selected: selected,
-        enabled: enabled,
-        onTap: enabled ? () => onGo(route) : () {
-          final m = ScaffoldMessenger.maybeOf(context); m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+        // Keep tile enabled for readability in dark mode; gate access in handler.
+        onTap: () {
+          if (canAccess) {
+            onGo(route);
+          } else {
+            final m = ScaffoldMessenger.maybeOf(context);
+            m?.showSnackBar(const SnackBar(content: Text('No access to this screen')));
+          }
         },
       );
     }
@@ -432,10 +475,24 @@ class _SideMenu extends ConsumerWidget {
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        leading: Icon(icon, size: 20),
-        title: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: disabled ? Colors.grey : null)),
-        trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18, color: disabled ? Colors.grey : null),
-        enabled: !disabled,
+        leading: Icon(
+          icon,
+          size: 20,
+          color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
+        ),
+        title: Text(
+          label,
+          style: context.texts.bodySmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
+          ),
+        ),
+        trailing: Icon(
+          expanded ? Icons.expand_less : Icons.expand_more,
+          size: 18,
+          color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
+        ),
+        // Keep header readable; if disabled, ignore tap but don't dim text.
         onTap: disabled ? null : () => ref.read(expandState.notifier).state = !expanded,
       );
     }
@@ -492,8 +549,11 @@ class _SideMenu extends ConsumerWidget {
         ListTile(
           dense: true,
           visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-          leading: const Icon(Icons.logout, size: 20),
-          title: const Text('Logout', style: TextStyle(fontSize: 13)),
+          leading: Icon(Icons.logout, size: 20, color: context.colors.onSurface),
+          title: Text(
+            'Logout',
+            style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+          ),
           onTap: () async {
             try {
               final messenger = ScaffoldMessenger.maybeOf(context); messenger?.clearSnackBars();

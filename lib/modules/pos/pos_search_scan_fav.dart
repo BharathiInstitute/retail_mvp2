@@ -60,7 +60,13 @@ class PosSearchAndScanCard extends StatelessWidget {
 					if (scannerActive)
 						Padding(
 							padding: const EdgeInsets.only(top: 6.0),
-							child: Text('Physical scanner active – scan a code', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 12)),
+												child: Text(
+													'Physical scanner active – scan a code',
+													style: Theme.of(context)
+															.textTheme
+															.labelSmall
+															?.copyWith(color: Theme.of(context).colorScheme.primary),
+												),
 						),
 				]),
 			),
@@ -96,7 +102,10 @@ class PosProductList extends StatelessWidget {
 							subtitle: Text('SKU: ${p.sku}  •  Stock: ${p.stock}  •  GST ${p.taxPercent}%'),
 							trailing: IconButton(
 								tooltip: isFav ? 'Unfavorite' : 'Mark favorite',
-								icon: Icon(isFav ? Icons.star : Icons.star_border, color: isFav ? Colors.amber : null),
+														icon: Icon(
+															isFav ? Icons.star : Icons.star_border,
+															color: isFav ? Theme.of(context).colorScheme.tertiary : null,
+														),
 								onPressed: () => onToggleFavorite(p),
 							),
 							onTap: () => onAdd(p),
@@ -126,7 +135,13 @@ class PosPopularItemsGrid extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(8.0),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					const Text('Popular Items', style: TextStyle(fontWeight: FontWeight.bold)),
+										Text(
+											'Popular Items',
+											style: Theme.of(context)
+													.textTheme
+													.titleSmall
+													?.copyWith(fontWeight: FontWeight.bold),
+										),
 					const SizedBox(height: 8),
 					if (popular.isEmpty) ...[
 						const Padding(
@@ -161,8 +176,9 @@ class _ScannerToggle extends StatelessWidget {
 	const _ScannerToggle({required this.active, required this.connected, required this.onChanged});
 
 	Color _statusColor(BuildContext context) {
-		if (!active) return Theme.of(context).colorScheme.outline;
-		return connected ? Colors.green : Colors.red;
+		final scheme = Theme.of(context).colorScheme;
+		if (!active) return scheme.outline;
+		return connected ? scheme.primary : scheme.error;
 	}
 
 	@override
@@ -223,7 +239,13 @@ class CartSection extends StatelessWidget {
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					Row(
 						children: [
-							const Text('Cart', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+													Text(
+														'Cart',
+														style: Theme.of(context)
+																.textTheme
+																.titleMedium
+																?.copyWith(fontWeight: FontWeight.bold),
+													),
 							const Spacer(),
 							ElevatedButton.icon(onPressed: onHold, icon: const Icon(Icons.pause_circle), label: const Text('Hold')),
 							const SizedBox(width: 8),

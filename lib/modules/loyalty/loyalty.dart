@@ -8,6 +8,7 @@
 // ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/theme/theme_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../crm/crm.dart' show CrmCustomer, LoyaltyStatus, LoyaltyFilter, LoyaltyFilterX; // reuse existing models
 import 'loyalty_settings.dart';
@@ -196,11 +197,11 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
           border: Border.all(color: c.withValues(alpha: .35)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-          Row(children:[Icon(Icons.workspace_premium_outlined, color:c), const SizedBox(width:6), Text(t.name, style: TextStyle(color:c,fontWeight:FontWeight.w600))]),
+          Row(children:[Icon(Icons.workspace_premium_outlined, color:c), const SizedBox(width:6), Text(t.name, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: c, fontWeight: FontWeight.w600))]),
           const SizedBox(height:8),
           Wrap(spacing:8, runSpacing: 8, children:[
-            Chip(label: Text('${t.pointsPer100.toStringAsFixed(2)} pts / ₹100')),
-            Chip(label: Text('${t.discount.toStringAsFixed(0)}% discount')),
+            Chip(label: Text('${t.pointsPer100.toStringAsFixed(2)} pts / ₹100', style: Theme.of(context).textTheme.bodySmall)),
+            Chip(label: Text('${t.discount.toStringAsFixed(0)}% discount', style: Theme.of(context).textTheme.bodySmall)),
           ])
         ]),
       ),
@@ -209,13 +210,13 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-          Text('Current Tiers (read-only)', style: Theme.of(context).textTheme.titleMedium),
+          Text('Current Tiers (read-only)', style: context.texts.titleMedium),
           const SizedBox(height:8),
           if(tiers.isEmpty) const Text('No tier configuration found (open settings to configure).') else Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
-              for (int i = 0; i < tiers.length; i++) tile(tiers[i], _tierColor(i)),
+              for (int i = 0; i < tiers.length; i++) tile(tiers[i], _tierColor(context, i)),
             ],
           )
         ]),
@@ -233,12 +234,13 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
     }
   }
 
-  Color _tierColor(int i){
+  Color _tierColor(BuildContext context, int i){
+    final scheme = Theme.of(context).colorScheme;
     switch(i){
-      case 0: return Colors.brown;
-      case 1: return Colors.blueGrey;
-      case 2: return Colors.amber;
-      default: return Colors.purple;
+      case 0: return scheme.tertiary; // bronze-like
+      case 1: return scheme.secondary; // silver-like
+      case 2: return scheme.primary; // gold-like
+      default: return scheme.primaryContainer;
     }
   }
 }

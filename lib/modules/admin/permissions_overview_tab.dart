@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:retail_mvp2/core/permissions.dart';
 import 'permissions_tab.dart' show permissionsEditTargetUserIdProvider;
+import 'package:retail_mvp2/core/theme/app_theme.dart';
+import 'package:retail_mvp2/core/theme/font_controller.dart';
+import '../../core/theme/theme_utils.dart';
 
 class PermissionsOverviewTab extends ConsumerStatefulWidget {
   const PermissionsOverviewTab({super.key});
@@ -19,11 +22,108 @@ class PermissionsOverviewPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin')),
+      appBar: AppBar(title: const Text('Admin'), actions: [
+        IconButton(
+          tooltip: 'Theme & Font Settings',
+          icon: const Icon(Icons.settings),
+          onPressed: () async {
+            await showDialog(context: context, builder: (_) => const _ThemeFontSettingsDialog());
+          },
+        ),
+      ]),
       body: const Padding(
         padding: EdgeInsets.all(16),
         child: PermissionsOverviewTab(),
       ),
+    );
+  }
+}
+
+class _ThemeFontSettingsDialog extends ConsumerStatefulWidget {
+  const _ThemeFontSettingsDialog();
+  @override
+  ConsumerState<_ThemeFontSettingsDialog> createState() => _ThemeFontSettingsDialogState();
+}
+
+class _ThemeFontSettingsDialogState extends ConsumerState<_ThemeFontSettingsDialog> {
+  late String _font;
+  late ThemeMode _mode;
+
+  @override
+  void initState() {
+    super.initState();
+    _font = ref.read(fontProvider);
+    _mode = ref.read(themeModeProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Appearance Settings', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Theme', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, children: [
+              ChoiceChip(
+                label: const Text('System'),
+                selected: _mode == ThemeMode.system,
+                onSelected: (_) => setState(() => _mode = ThemeMode.system),
+              ),
+              ChoiceChip(
+                label: const Text('Light'),
+                selected: _mode == ThemeMode.light,
+                onSelected: (_) => setState(() => _mode = ThemeMode.light),
+              ),
+              ChoiceChip(
+                label: const Text('Dark'),
+                selected: _mode == ThemeMode.dark,
+                onSelected: (_) => setState(() => _mode = ThemeMode.dark),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            Text('Font', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _font,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+              dropdownColor: Theme.of(context).colorScheme.surface,
+              iconEnabledColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              onChanged: (v) => setState(() => _font = v ?? _font),
+              items: const [
+                DropdownMenuItem(value: 'inter', child: Text('Inter')), 
+                DropdownMenuItem(value: 'roboto', child: Text('Roboto')),
+                DropdownMenuItem(value: 'poppins', child: Text('Poppins')),
+                DropdownMenuItem(value: 'montserrat', child: Text('Montserrat')),
+              ],
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                isDense: true,
+                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        FilledButton(
+          onPressed: () async {
+            await ref.read(themeModeProvider.notifier).set(_mode);
+            await ref.read(fontProvider.notifier).set(_font);
+            if (context.mounted) Navigator.pop(context);
+          },
+          child: const Text('Apply'),
+        ),
+      ],
     );
   }
 }
@@ -65,7 +165,7 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: Text('Permissions Overview', style: Theme.of(context).textTheme.titleMedium),
+          child: Text('Permissions Overview', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -130,7 +230,7 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
-                                    SizedBox(width: actionColWidth, child: Text('Action', style: Theme.of(context).textTheme.labelLarge)),
+                                    SizedBox(width: actionColWidth, child: Text('Action', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
                                     for (final u in userHeaders)
                                       SizedBox(
                                         width: userColWidth,
@@ -140,11 +240,11 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                             Row(
                                               children: [
                                                 Expanded(
-                                                  child: Text(u.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelLarge),
+                                                  child: Text(u.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
                                                 ),
                                                 IconButton(
                                                   tooltip: 'Edit permissions',
-                                                  icon: const Icon(Icons.edit_outlined, size: 18),
+                                                  icon: Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                                                   onPressed: () {
                                                     // Set target user ID and switch to Edit tab (index 1)
                                                     ref.read(permissionsEditTargetUserIdProvider.notifier).state = u.id;
@@ -155,9 +255,9 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                               ],
                                             ),
                                             if (u.role.isNotEmpty)
-                                              Text(u.role, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+                                              Text(u.role, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                             if (u.email.isNotEmpty)
-                                              Text(u.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+                                              Text(u.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                           ],
                                         ),
                                       ),
@@ -171,13 +271,13 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                   child: Card(
                                     elevation: 0,
                                     clipBehavior: Clip.antiAlias,
-                                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(row.label, style: Theme.of(context).textTheme.titleSmall),
+                                          Text(row.label, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
                                           const SizedBox(height: 6),
                                           _ModuleMatrix(
                                             row: row,
@@ -240,10 +340,11 @@ class _ModuleMatrix extends StatelessWidget {
           for (final u in userHeaders)
             SizedBox(
               width: userColWidth,
-              child: AbsorbPointer(
+              child: IgnorePointer(
+                // Keep the checkbox visually 'enabled' for high-contrast colors, but ignore taps.
                 child: Checkbox(
                   value: pick(_resolve(u)),
-                  onChanged: null, // view-only
+                  onChanged: (_) {},
                 ),
               ),
             ),

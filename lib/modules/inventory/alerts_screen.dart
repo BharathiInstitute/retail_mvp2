@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 import 'Products/inventory_repository.dart';
 
 // Threshold constants
@@ -96,18 +97,19 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     }).toList();
   }
 
-  Color _flagColor(String flag) {
+  Color _flagColor(BuildContext context, String flag) {
+    final scheme = Theme.of(context).colorScheme;
     switch (flag) {
       case 'Expired':
-        return Colors.red.shade600;
+        return scheme.error;
       case 'Expiring Soon':
-        return Colors.deepOrange.shade500;
+        return context.appColors.warning;
       case 'Expiry Warning':
-        return Colors.amber.shade700;
+        return scheme.tertiary;
       case 'Low Stock':
-        return Colors.purple.shade600;
+        return context.appColors.info;
       default:
-        return Colors.grey;
+        return scheme.outline;
     }
   }
 
@@ -128,7 +130,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Text('Alerts', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text('Alerts', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(width: 16),
           const Tooltip(
             message: 'Low Stock: totalQty <= 5\nExpiring Soon: expiry <= 7 days\nExpiry Warning: expiry <= 30 days\nExpired: expiry < today',
@@ -138,36 +140,36 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
           // Filter chips
           Wrap(spacing: 6, runSpacing: 4, children: [
             FilterChip(
-              label: const Text('Low Stock'),
+              label: Text('Low Stock', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showLowStock,
               onSelected: (v) => setState(() => _showLowStock = v),
-              selectedColor: _flagColor('Low Stock').withValues(alpha: 0.15),
-              checkmarkColor: _flagColor('Low Stock'),
-              avatar: Icon(Icons.inventory_2, size: 16, color: _flagColor('Low Stock')),
+              selectedColor: _flagColor(context, 'Low Stock').withValues(alpha: 0.15),
+              checkmarkColor: _flagColor(context, 'Low Stock'),
+              avatar: Icon(Icons.inventory_2, size: 16, color: _flagColor(context, 'Low Stock')),
             ),
             FilterChip(
-              label: const Text('Expired'),
+              label: Text('Expired', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showExpired,
               onSelected: (v) => setState(() => _showExpired = v),
-              selectedColor: _flagColor('Expired').withValues(alpha: 0.15),
-              checkmarkColor: _flagColor('Expired'),
-              avatar: Icon(Icons.warning_amber_rounded, size: 16, color: _flagColor('Expired')),
+              selectedColor: _flagColor(context, 'Expired').withValues(alpha: 0.15),
+              checkmarkColor: _flagColor(context, 'Expired'),
+              avatar: Icon(Icons.warning_amber_rounded, size: 16, color: _flagColor(context, 'Expired')),
             ),
             FilterChip(
-              label: const Text('Expiring Soon'),
+              label: Text('Expiring Soon', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showSoon,
               onSelected: (v) => setState(() => _showSoon = v),
-              selectedColor: _flagColor('Expiring Soon').withValues(alpha: 0.15),
-              checkmarkColor: _flagColor('Expiring Soon'),
-              avatar: Icon(Icons.schedule, size: 16, color: _flagColor('Expiring Soon')),
+              selectedColor: _flagColor(context, 'Expiring Soon').withValues(alpha: 0.15),
+              checkmarkColor: _flagColor(context, 'Expiring Soon'),
+              avatar: Icon(Icons.schedule, size: 16, color: _flagColor(context, 'Expiring Soon')),
             ),
             FilterChip(
-              label: const Text('Expiry Warning'),
+              label: Text('Expiry Warning', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showWarn,
               onSelected: (v) => setState(() => _showWarn = v),
-              selectedColor: _flagColor('Expiry Warning').withValues(alpha: 0.15),
-              checkmarkColor: _flagColor('Expiry Warning'),
-              avatar: Icon(Icons.timelapse, size: 16, color: _flagColor('Expiry Warning')),
+              selectedColor: _flagColor(context, 'Expiry Warning').withValues(alpha: 0.15),
+              checkmarkColor: _flagColor(context, 'Expiry Warning'),
+              avatar: Icon(Icons.timelapse, size: 16, color: _flagColor(context, 'Expiry Warning')),
             ),
           ])
         ]),
@@ -202,17 +204,23 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                     rows: [
                       for (final a in filtered)
                         DataRow(cells: [
-                          DataCell(_SeverityDot(severity: _primarySeverity(a.flags), color: _flagColor(_primarySeverity(a.flags)))),
+                          DataCell(_SeverityDot(severity: _primarySeverity(a.flags), color: _flagColor(context, _primarySeverity(a.flags)))),
                           DataCell(Text(a.product.sku)),
                           DataCell(Text(a.product.name)),
                           DataCell(Wrap(spacing: 4, runSpacing: -8, children: [
                             for (final f in a.flags)
                               Chip(
-                                label: Text(f, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+                                label: Text(
+                                  f,
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(context).colorScheme.onSurface,
+                                      ),
+                                ),
                                 visualDensity: VisualDensity.compact,
-                                backgroundColor: _flagColor(f).withValues(alpha: 0.12),
+                                backgroundColor: _flagColor(context, f).withValues(alpha: 0.12),
                                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                                side: BorderSide(color: _flagColor(f).withValues(alpha: 0.5), width: .6),
+                                side: BorderSide(color: _flagColor(context, f).withValues(alpha: 0.5), width: .6),
                                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                           ])),
@@ -230,7 +238,13 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                       scrollDirection: Axis.horizontal,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                        child: table,
+                        child: DataTableTheme(
+                          data: DataTableThemeData(
+                            dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                            headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                          ),
+                          child: table,
+                        ),
                       ),
                     ),
                   );
@@ -255,7 +269,7 @@ class _SeverityDot extends StatelessWidget {
     return Row(children: [
       Icon(Icons.circle, size: 14, color: color),
       const SizedBox(width: 4),
-      Flexible(child: Text(severity, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: color)))
+      Flexible(child: Text(severity, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color)))
     ]);
   }
 }

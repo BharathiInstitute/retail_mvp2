@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/theme/theme_utils.dart';
 // Removed import 'gstr3b_service.dart'; file deleted. Replacing GST summary logic with placeholders.
 
 // Consolidated Accounting module in a single file.
@@ -216,10 +217,13 @@ class _TotalSummaryCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(16),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-						Text('Total Summary', style: Theme.of(context).textTheme.titleMedium),
-						const Chip(avatar: Icon(Icons.sync, size: 16, color: Colors.green), label: Text('Live')),
-					]),
+										Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+												Text('Total Summary', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+												Chip(
+													avatar: Icon(Icons.sync, size: 16, color: Theme.of(context).colorScheme.tertiary),
+													label: Text('Live', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+												),
+										]),
 					const SizedBox(height: 12),
 					StreamBuilder<List<_LedgerEntry>>(
 						stream: ledgerStream,
@@ -277,11 +281,11 @@ class _DynamicGstReportsCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(16),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Row(children:[ const Icon(Icons.assignment_outlined), const SizedBox(width:8), Text('GST Reports', style: Theme.of(context).textTheme.titleMedium) ]),
+					Row(children:[ Icon(Icons.assignment_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width:8), Text('GST Reports', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)) ]),
 					const SizedBox(height: 12),
-					const Text('Detailed GST computations removed (service file deleted).'),
+					Text('Detailed GST computations removed (service file deleted).', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
 					const SizedBox(height: 8),
-					const Text('Restore by re-adding gstr3b_service.dart or integrating backend API.'),
+					Text('Restore by re-adding gstr3b_service.dart or integrating backend API.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
 				]),
 			),
 		);
@@ -298,7 +302,7 @@ class _PnLCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(16),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Profit & Loss', style: Theme.of(context).textTheme.titleMedium),
+					Text('Profit & Loss', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 					const SizedBox(height: 12),
 					Wrap(spacing: 12, runSpacing: 12, children: [
 						_MetricTile(title: 'Revenue', value: '₹${revenue.toStringAsFixed(0)}', icon: Icons.trending_up),
@@ -309,13 +313,13 @@ class _PnLCard extends StatelessWidget {
 					LayoutBuilder(builder: (context, constraints) {
 						final maxW = constraints.maxWidth;
 						return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-							_Bar(label: 'Revenue', color: Colors.indigo, width: maxW * (revenue / total), value: revenue),
+							_Bar(label: 'Revenue', color: Theme.of(context).colorScheme.primary, width: maxW * (revenue / total), value: revenue),
 							const SizedBox(height: 8),
-							_Bar(label: 'Expenses', color: Colors.orange, width: maxW * (expenses / total), value: expenses),
+							_Bar(label: 'Expenses', color: Theme.of(context).colorScheme.error, width: maxW * (expenses / total), value: expenses),
 						]);
 					}),
 					const SizedBox(height: 8),
-					Text('Demo chart — replace with charts later.\nTODO: Pull real P&L from backend.', style: Theme.of(context).textTheme.bodySmall),
+					Text('Demo chart — replace with charts later.\nTODO: Pull real P&L from backend.', style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant)),
 				]),
 			),
 		);
@@ -332,7 +336,7 @@ class _TaxSummaryCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(16),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Tax & Liability Summary', style: Theme.of(context).textTheme.titleMedium),
+					Text('Tax & Liability Summary', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 					const SizedBox(height: 8),
 					Wrap(spacing: 12, runSpacing: 12, children: [
 						_MetricTile(title: 'GST Payable', value: '₹${summary.gstPayable.toStringAsFixed(0)}', icon: Icons.account_balance_outlined),
@@ -353,11 +357,15 @@ class _ExportCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(16),
 				child: Row(children: [
-					const Icon(Icons.file_download_outlined), const SizedBox(width: 8),
-					Text('Export', style: Theme.of(context).textTheme.titleMedium), const Spacer(),
-					OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.grid_on_outlined), label: const Text('CSV')),
+					Icon(Icons.file_download_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width: 8),
+					Text('Export', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)), const Spacer(),
+					OutlinedButton.icon(
+					  style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurface),
+					  onPressed: () {}, icon: const Icon(Icons.grid_on_outlined), label: const Text('CSV')),
 					const SizedBox(width: 8),
-					OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.table_chart_outlined), label: const Text('Excel')),
+					OutlinedButton.icon(
+					  style: OutlinedButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.onSurface),
+					  onPressed: () {}, icon: const Icon(Icons.table_chart_outlined), label: const Text('Excel')),
 				]),
 			),
 		);
@@ -374,7 +382,7 @@ class _CashBookCard extends StatelessWidget {
 			child: Padding(
 				padding: const EdgeInsets.all(12),
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text('Balance Sheet', style: Theme.of(context).textTheme.titleMedium),
+					Text('Balance Sheet', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 					const SizedBox(height: 8),
 					StreamBuilder<List<_LedgerEntry>>(
 						stream: stream,
@@ -383,29 +391,35 @@ class _CashBookCard extends StatelessWidget {
 							if (!snap.hasData) return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
 							final entries = snap.data!;
 							double running = 0;
-							return SingleChildScrollView(
+														return SingleChildScrollView(
 								scrollDirection: Axis.horizontal,
-								child: DataTable(columns: const [
-									DataColumn(label: Text('Date')),
-									DataColumn(label: Text('Description')),
-									DataColumn(label: Text('Payment Method')),
-									DataColumn(label: Text('In')),
-									DataColumn(label: Text('Out')),
-									DataColumn(label: Text('Balance')),
-								], rows: [
-									for (final e in entries)
-										() {
-											running += e.inAmt - e.outAmt;
-											return DataRow(cells: [
-												DataCell(Text(e.date.toLocal().toString().split(' ').first)),
-												DataCell(Text(e.desc)),
-												DataCell(Text(e.paymentMethod ?? '-')),
-												DataCell(Text(e.inAmt == 0 ? '-' : '₹${e.inAmt.toStringAsFixed(0)}')),
-												DataCell(Text(e.outAmt == 0 ? '-' : '₹${e.outAmt.toStringAsFixed(0)}')),
-												DataCell(Text('₹${running.toStringAsFixed(0)}')),
-											]);
-									}(),
-								]),
+																child: DataTableTheme(
+																	data: DataTableThemeData(
+																		headingTextStyle: Theme.of(context).textTheme.labelMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+																		dataTextStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+																	),
+																	child: DataTable(columns: const [
+																		DataColumn(label: Text('Date')),
+																		DataColumn(label: Text('Description')),
+																		DataColumn(label: Text('Payment Method')),
+																		DataColumn(label: Text('In')),
+																		DataColumn(label: Text('Out')),
+																		DataColumn(label: Text('Balance')),
+																	], rows: [
+																		for (final e in entries)
+																			() {
+																				running += e.inAmt - e.outAmt;
+																				return DataRow(cells: [
+																					DataCell(Text(e.date.toLocal().toString().split(' ').first)),
+																					DataCell(Text(e.desc)),
+																					DataCell(Text(e.paymentMethod ?? '-')),
+																					DataCell(Text(e.inAmt == 0 ? '-' : '₹${e.inAmt.toStringAsFixed(0)}')),
+																					DataCell(Text(e.outAmt == 0 ? '-' : '₹${e.outAmt.toStringAsFixed(0)}')),
+																					DataCell(Text('₹${running.toStringAsFixed(0)}')),
+																				]);
+																			}(),
+																	]),
+																),
 							);
 						},
 					),
@@ -424,13 +438,13 @@ class _MetricTile extends StatelessWidget {
 			padding: const EdgeInsets.all(12),
 			decoration: BoxDecoration(
 				borderRadius: BorderRadius.circular(8),
-				color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
+				color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
 			),
 			child: Row(mainAxisSize: MainAxisSize.min, children: [
-				Icon(icon, size: 18), const SizedBox(width: 8),
+				Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width: 8),
 				Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-					Text(title, style: Theme.of(context).textTheme.labelMedium),
-					Text(value, style: Theme.of(context).textTheme.titleMedium),
+					Text(title, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+					Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 				]),
 			]),
 		);
@@ -443,7 +457,7 @@ class _Bar extends StatelessWidget {
 	@override
 	Widget build(BuildContext context) {
 		return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-			Text('$label (₹${value.toStringAsFixed(0)})'), const SizedBox(height: 4),
+			Text('$label (₹${value.toStringAsFixed(0)})', style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant)), const SizedBox(height: 4),
 			ConstrainedBox(constraints: const BoxConstraints(minWidth: 20, maxHeight: 14), child: Container(
 				height: 14, width: width, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
 			)),

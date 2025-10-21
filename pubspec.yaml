@@ -58,7 +58,10 @@ dependencies:
   csv: ^6.0.0
   excel: ^2.1.0
   pluto_grid: ^8.0.0
+  # shared_preferences: ^2.2.2
   shared_preferences: ^2.2.2
+  # Global fonts
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/theme/theme_utils.dart';
 
 // --- Inlined Supplier model & repository (moved from supplier_repository.dart) ---
 class SupplierDoc {
@@ -148,7 +149,13 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                         scrollDirection: Axis.horizontal,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                          child: table,
+                          child: DataTableTheme(
+                            data: DataTableThemeData(
+                              dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                              headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                            ),
+                            child: table,
+                          ),
                         ),
                       );
                     },
@@ -196,11 +203,18 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Delete Supplier'),
-        content: const Text('Are you sure?'),
+        title: Text('Delete Supplier', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+          child: const Text('Are you sure?'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.colors.error, foregroundColor: context.colors.onError),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -257,36 +271,66 @@ class _SupplierEditDialogState extends State<_SupplierEditDialog> {
   Widget build(BuildContext context) {
     final editing = widget.existing != null;
     return AlertDialog(
-      title: Text(editing ? 'Edit Supplier' : 'Add Supplier'),
-      content: Form(
-        key: _formKey,
-        child: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _name,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) => (v==null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: _address,
-                  decoration: const InputDecoration(labelText: 'Address'),
-                  maxLines: 2,
-                ),
-                TextFormField(
-                  controller: _phone,
-                  decoration: const InputDecoration(labelText: 'Phone'),
-                  keyboardType: TextInputType.phone,
-                ),
-                TextFormField(
-                  controller: _email,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
-                ),
-              ],
+      title: Text(
+        editing ? 'Edit Supplier' : 'Add Supplier',
+        style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+      ),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: Form(
+          key: _formKey,
+          child: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: _name,
+                    style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                    decoration: InputDecoration(
+                      labelText: 'Name',
+                      labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      isDense: true,
+                    ),
+                    validator: (v) => (v==null || v.trim().isEmpty) ? 'Name required' : null,
+                  ),
+                  TextFormField(
+                    controller: _address,
+                    style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                    decoration: InputDecoration(
+                      labelText: 'Address',
+                      labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      isDense: true,
+                    ),
+                    maxLines: 2,
+                  ),
+                  TextFormField(
+                    controller: _phone,
+                    style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                    decoration: InputDecoration(
+                      labelText: 'Phone',
+                      labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  TextFormField(
+                    controller: _email,
+                    style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                ],
+              ),
             ),
           ),
         ),

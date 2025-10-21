@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 import '../../../core/auth/auth.dart';
 import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider, tenantIdProvider; // reuse providers
@@ -111,8 +112,13 @@ class _InvoiceAnalysisPageState extends ConsumerState<InvoiceAnalysisPage> {
           Navigator.pop(context);
         }
         return AlertDialog(
-          title: const Text('Add Items Manually'),
-          content: SizedBox(
+          title: Text(
+            'Add Items Manually',
+            style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+          ),
+          content: DefaultTextStyle(
+            style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+            child: SizedBox(
             width: 640,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               SizedBox(
@@ -144,6 +150,7 @@ class _InvoiceAnalysisPageState extends ConsumerState<InvoiceAnalysisPage> {
               ),
             ]),
           ),
+        ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             FilledButton(onPressed: save, child: const Text('Use Items')),
@@ -188,9 +195,14 @@ class _InvoiceAnalysisPageState extends ConsumerState<InvoiceAnalysisPage> {
           if (_loading) const LinearProgressIndicator(),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+            Text(
+              'Error: $_error',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
             const SizedBox(height: 8),
-            const Text('Tips:', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('Tips:', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
             const Text('• Ensure Cloud Vision API and Vertex AI are enabled for your GCP project.'),
             const Text('• Deploy functions and set the correct region (us-central1 by default).'),
             const Text('• Verify Functions service account has permission to call Vision and Vertex AI.'),
@@ -256,7 +268,7 @@ class _NoItemsView extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('No line items detected', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text('No line items detected', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           const Text('Try these:'),
           const Text('• Ensure the invoice has clear item lines with quantity and price.'),
@@ -625,8 +637,8 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
     final gstCtrl = TextEditingController(text: (item.gst ?? '').toString());
     int qty = item.quantity; String loc = widget.location; final inbound = widget.movement.startsWith('Purchase');
     final confirmed = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Create Product'),
-      content: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, children:[
+      title: Text('Create Product', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface), child: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, children:[
         TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
         TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: TextInputType.number),
         TextField(controller: gstCtrl, decoration: const InputDecoration(labelText: 'Tax %'), keyboardType: TextInputType.number),
@@ -637,7 +649,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
           const SizedBox(width:16),
           DropdownButton<String>(value: loc, onChanged: (v){ if(v!=null){ loc=v; } }, items: const [DropdownMenuItem(value:'Store',child:Text('Store')), DropdownMenuItem(value:'Warehouse',child:Text('Warehouse'))]),
         ])
-      ])),
+      ]))),
       actions: [
         TextButton(onPressed: ()=> Navigator.pop(context,false), child: const Text('Cancel')),
         FilledButton(onPressed: ()=> Navigator.pop(context,true), child: const Text('Create')),
@@ -709,34 +721,42 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
   }
 
   Widget _confidenceChip(double score) {
-    Color c;
+    final scheme = Theme.of(context).colorScheme;
+    late final Color c;
     if (score >= 0.85) {
-      c = Colors.green;
+      c = scheme.primary;
     } else if (score >= 0.7) {
-      c = Colors.lightGreen;
+      c = scheme.tertiary;
     } else if (score >= 0.55) {
-      c = Colors.orange;
+      c = scheme.secondary;
     } else {
-      c = Colors.grey;
+      c = Theme.of(context).colorScheme.onSurfaceVariant;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal:6, vertical:2),
-      decoration: BoxDecoration(color: c.withValues(alpha: 0.15), border: Border.all(color: c), borderRadius: BorderRadius.circular(12)),
-      child: Text('${(score*100).toStringAsFixed(0)}%', style: TextStyle(fontSize: 11, color: c, fontWeight: FontWeight.w600)),
+      decoration: BoxDecoration(
+  color: c.withValues(alpha: 0.12),
+  border: Border.all(color: c.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '${(score*100).toStringAsFixed(0)}%',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: c, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
   Widget _autoMatchStatsChip({bool expanded = false}) {
     final s = _lastAutoMatchStats;
     if (s == null) return const SizedBox.shrink();
-  final bg = Theme.of(context).colorScheme.surfaceContainerHighest; // migrate from deprecated surfaceVariant
-    final textStyle = const TextStyle(fontSize: 11, fontWeight: FontWeight.w500);
+    final bg = Theme.of(context).colorScheme.surfaceContainerHighest; // themed chip bg
+    final textStyle = Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w500);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal:8, vertical:4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black12),
+  border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.6)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children:[
         const Icon(Icons.analytics, size:14),
@@ -744,15 +764,15 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
         if (!expanded) Text('${s.matched}/${s.total}', style: textStyle) else ...[
           Text('Matched ${s.matched}/${s.total}', style: textStyle),
           const SizedBox(width:6),
-          Text('H:${s.high}', style: textStyle.copyWith(color: Colors.green[700])),
+          Text('H:${s.high}', style: textStyle?.copyWith(color: Theme.of(context).colorScheme.primary)),
           const SizedBox(width:4),
-            Text('M:${s.medium}', style: textStyle.copyWith(color: Colors.lightGreen[700])),
+          Text('M:${s.medium}', style: textStyle?.copyWith(color: Theme.of(context).colorScheme.tertiary)),
           const SizedBox(width:4),
-          Text('L:${s.low}', style: textStyle.copyWith(color: Colors.orange[800])),
+          Text('L:${s.low}', style: textStyle?.copyWith(color: Theme.of(context).colorScheme.secondary)),
           const SizedBox(width:4),
-          Text('U:${s.unmatched}', style: textStyle.copyWith(color: Colors.red[700])),
+          Text('U:${s.unmatched}', style: textStyle?.copyWith(color: Theme.of(context).colorScheme.error)),
           const SizedBox(width:6),
-          Text('${s.millis}ms', style: textStyle.copyWith(color: Colors.blueGrey[600])),
+          Text('${s.millis}ms', style: textStyle?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       ]),
     );
@@ -852,8 +872,8 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
               onTap: () async {
                 final controller = TextEditingController(text: (st.overrideQty ?? it.quantity).toString());
                 final v = await showDialog<int>(context: context, builder: (_) => AlertDialog(
-                  title: const Text('Override Qty'),
-                  content: TextField(controller: controller, keyboardType: TextInputType.number, autofocus: true, decoration: const InputDecoration(labelText: 'Quantity')),
+                  title: Text('Override Qty', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+                  content: DefaultTextStyle(style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface), child: TextField(controller: controller, keyboardType: TextInputType.number, autofocus: true, decoration: const InputDecoration(labelText: 'Quantity'))),
                   actions: [
                     TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel')),
                     FilledButton(onPressed: () { final parsed = int.tryParse(controller.text); Navigator.pop(context, parsed); }, child: const Text('Save')),
@@ -922,7 +942,12 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
           padding: const EdgeInsets.all(8.0),
           child: Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-              Text('${product.sku} · ${product.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              Builder(
+                builder: (context) => Text(
+                  '${product.sku} · ${product.name}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
               const SizedBox(height:4),
               Text('Current: $current  Delta: ${delta>0?'+':''}$delta  New: $newStock'),
             ])),
@@ -974,14 +999,17 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
           child: InkWell(
             onTap: () {
               showDialog(context: context, builder: (_) => AlertDialog(
-                title: const Text('Auto Match Log'),
+                title: Text('Auto Match Log', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
                 content: SizedBox(
                   width: 520,
                   height: 400,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
                     if (_lastAutoMatchStats != null) Padding(
                       padding: const EdgeInsets.only(bottom:8.0),
-                      child: Text('Matched ${_lastAutoMatchStats!.matched}/${_lastAutoMatchStats!.total} (High ${_lastAutoMatchStats!.high}, Med ${_lastAutoMatchStats!.medium}, Low ${_lastAutoMatchStats!.low}, Unmatched ${_lastAutoMatchStats!.unmatched}) in ${_lastAutoMatchStats!.millis}ms', style: const TextStyle(fontSize:12, fontWeight: FontWeight.w500)),
+                      child: Text(
+                        'Matched ${_lastAutoMatchStats!.matched}/${_lastAutoMatchStats!.total} (High ${_lastAutoMatchStats!.high}, Med ${_lastAutoMatchStats!.medium}, Low ${_lastAutoMatchStats!.low}, Unmatched ${_lastAutoMatchStats!.unmatched}) in ${_lastAutoMatchStats!.millis}ms',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w500),
+                      ),
                     ),
                     const Divider(height:1),
                     const SizedBox(height:8),
@@ -990,7 +1018,12 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
                       itemBuilder: (c,i) {
                         final line = _matchLog[i];
                         final unmatched = line.endsWith('(unmatched)');
-                        return Text(line, style: TextStyle(color: unmatched ? Colors.red : null, fontSize: 12));
+                        return Text(
+                          line,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: unmatched ? Theme.of(context).colorScheme.error : null,
+                          ),
+                        );
                       },
                     )),
                   ]),
@@ -1015,7 +1048,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
       // JSON editor removed
       if (aggregate.isNotEmpty) ...[
         const SizedBox(height: 12),
-        const Text('Adjustment Panel', style: TextStyle(fontWeight: FontWeight.bold)),
+        Text('Adjustment Panel', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         SizedBox(
           height: 140,
@@ -1032,7 +1065,12 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
       Expanded(
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: DataTable(dataRowMinHeight: 44, dataRowMaxHeight: 56, columns: const [
+          child: DataTableTheme(
+            data: DataTableThemeData(
+              dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+              headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+            ),
+            child: DataTable(dataRowMinHeight: 44, dataRowMaxHeight: 56, columns: const [
             DataColumn(label: Text('Apply')),
             DataColumn(label: Text('Parsed Item')),
             DataColumn(label: Text('Qty')),
@@ -1041,6 +1079,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
             DataColumn(label: Text('Delta')),
             DataColumn(label: Text('New')),
           ], rows: rows),
+          ),
         ),
       ),
     ]);

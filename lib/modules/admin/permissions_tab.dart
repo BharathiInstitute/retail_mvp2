@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/permissions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme/theme_utils.dart';
 
 class PermissionsTab extends ConsumerStatefulWidget {
   const PermissionsTab({super.key});
@@ -173,7 +174,7 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(children: [
-                const Icon(Icons.verified_user, color: Colors.green),
+                Icon(Icons.verified_user, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -186,7 +187,12 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: DataTable(
+              child: DataTableTheme(
+                data: DataTableThemeData(
+                  dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                  headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                ),
+                child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Screen')),
                   DataColumn(label: Text('View')),
@@ -237,6 +243,7 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
                     ])
                 ],
               ),
+              ),
             ),
           ),
         ]
@@ -259,7 +266,12 @@ class _UserPicker extends StatelessWidget {
           .snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
-          return Text('Error loading users: ${snap.error}', style: const TextStyle(color: Colors.red));
+          return Text(
+            'Error loading users: ${snap.error}',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          );
         }
         if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
         final items = snap.data!.docs;

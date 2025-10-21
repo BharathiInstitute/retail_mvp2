@@ -242,14 +242,36 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
   }
 
   void _resetDefaults() async {
-    final ok = await showDialog<bool>(context: context, builder: (_)=> AlertDialog(
-      title: const Text('Reset to Defaults'),
-      content: const Text('Revert all loyalty settings to default values? This does not affect existing customer documents.'),
-      actions: [
-        TextButton(onPressed: ()=>Navigator.pop(context,false), child: const Text('Cancel')),
-        FilledButton(onPressed: ()=>Navigator.pop(context,true), child: const Text('Reset')),
-      ],
-    ));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        final scheme = Theme.of(context).colorScheme;
+        final texts = Theme.of(context).textTheme;
+        return AlertDialog(
+          title: Text(
+            'Reset to Defaults',
+            style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+          ),
+          content: DefaultTextStyle(
+            style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+            child: const Text(
+              'Revert all loyalty settings to default values? This does not affect existing customer documents.',
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: ()=>Navigator.pop(context,false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              onPressed: ()=>Navigator.pop(context,true),
+              child: const Text('Reset'),
+            ),
+          ],
+        );
+      },
+    );
     if(ok!=true) return;
     final def = LoyaltySettings.defaults();
     setState((){ _current = def; _bindControllers(def); _validateAll(); });
@@ -305,7 +327,7 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
     }
     if(_error!=null) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children:[
-        const Icon(Icons.error_outline, size: 40, color: Colors.redAccent),
+  Icon(Icons.error_outline, size: 40, color: Theme.of(context).colorScheme.error),
         const SizedBox(height: 12),
         Text('Failed loading loyalty settings', style: Theme.of(context).textTheme.titleMedium),
         Padding(padding: const EdgeInsets.all(8), child: Text(_error!, textAlign: TextAlign.center)),
@@ -318,7 +340,7 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       final wide = constraints.maxWidth > 980;
       return Scaffold(
         appBar: AppBar(title: const Text('Loyalty Settings'), actions:[
-          TextButton.icon(onPressed: _resetDefaults, icon: const Icon(Icons.restore_outlined), label: const Text('Defaults')),
+          TextButton.icon(onPressed: _resetDefaults, icon: const Icon(Icons.restore_outlined, color: null), label: const Text('Defaults')),
           const SizedBox(width:8),
         ]),
         body: SingleChildScrollView(
@@ -349,32 +371,57 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-          Row(children:[const Icon(Icons.tune), const SizedBox(width:8), Text('Points Rules', style: Theme.of(context).textTheme.titleMedium)]),
+          Row(children:[Icon(Icons.tune, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width:8), Text('Points Rules', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface))]),
           const SizedBox(height: 16),
           TextField(
             controller: _pointsCtrl,
-            decoration: InputDecoration(labelText: 'Points per ₹1', errorText: _pointsErr),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+            decoration: InputDecoration(
+              labelText: 'Points per ₹1',
+              errorText: _pointsErr,
+              labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (_){ _updateCurrentFromControllers(); _validateAll(); setState((){}); },
           ),
           const SizedBox(height: 12),
             TextField(
               controller: _minRedeemCtrl,
-              decoration: InputDecoration(labelText: 'Minimum redeem points', errorText: _redeemErr),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+              decoration: InputDecoration(
+                labelText: 'Minimum redeem points',
+                errorText: _redeemErr,
+                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
               keyboardType: TextInputType.number,
               onChanged: (_){ _updateCurrentFromControllers(); _validateAll(); setState((){}); },
             ),
           const SizedBox(height: 12),
           TextField(
             controller: _expiryCtrl,
-            decoration: InputDecoration(labelText: 'Points expiry (months, blank = none)', errorText: _expiryErr),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+            decoration: InputDecoration(
+              labelText: 'Points expiry (months, blank = none)',
+              errorText: _expiryErr,
+              labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
             keyboardType: TextInputType.number,
             onChanged: (_){ _updateCurrentFromControllers(); _validateAll(); setState((){}); },
           ),
-          if(_tiersErr!=null) Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(_tiersErr!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-          )
+          if(_tiersErr!=null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                _tiersErr!,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.error),
+              ),
+            )
         ]),
       ),
     );
@@ -385,7 +432,7 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-          Row(children:[const Icon(Icons.workspace_premium_outlined), const SizedBox(width:8), Text('Tiers', style: Theme.of(context).textTheme.titleMedium)]),
+          Row(children:[Icon(Icons.workspace_premium_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width:8), Text('Tiers', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface))]),
           const SizedBox(height: 12),
           ReorderableListView.builder(
             shrinkWrap: true,
@@ -396,12 +443,18 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
               final t = tiers[i];
               return ListTile(
                 key: ValueKey('tier-$i-${t.name}'),
-                leading: const Icon(Icons.drag_handle),
-                title: Text('${t.name} • Min ₹${t.minSpend.toStringAsFixed(0)}'),
-                subtitle: Text('Discount ${t.discount.toStringAsFixed(1)}%'),
+                leading: Icon(Icons.drag_handle, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                title: Text(
+                  '${t.name} • Min ₹${t.minSpend.toStringAsFixed(0)}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                ),
+                subtitle: Text(
+                  'Discount ${t.discount.toStringAsFixed(1)}%',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
                 trailing: Wrap(spacing: 4, children:[
-                  IconButton(tooltip:'Edit', icon: const Icon(Icons.edit_outlined), onPressed: ()=>_editTier(i)),
-                  IconButton(tooltip:'Delete', icon: const Icon(Icons.delete_outline), onPressed: ()=>_deleteTier(i)),
+                  IconButton(tooltip:'Edit', icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant), onPressed: ()=>_editTier(i)),
+                  IconButton(tooltip:'Delete', icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.onSurfaceVariant), onPressed: ()=>_deleteTier(i)),
                 ]),
               );
             },
@@ -423,18 +476,26 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-          Row(children:[const Icon(Icons.visibility_outlined), const SizedBox(width:8), Text('Preview', style: Theme.of(context).textTheme.titleMedium)]),
+          Row(children:[Icon(Icons.visibility_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width:8), Text('Preview', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface))]),
           const SizedBox(height: 12),
           Row(children:[
             SizedBox(width:180, child: TextField(
               controller: _simSpendCtrl,
-              decoration: const InputDecoration(labelText: 'Simulate spend (₹)'),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+              decoration: InputDecoration(
+                labelText: 'Simulate spend (₹)',
+                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
               onChanged: (_){ setState((){}); },
             )),
             const SizedBox(width: 16),
-            Text('Earned points: ${((_current?.pointsPerCurrency ?? 0)* (double.tryParse(_simSpendCtrl.text) ?? 0)).toStringAsFixed(1)}'),
+            Text(
+              'Earned points: ${((_current?.pointsPerCurrency ?? 0)* (double.tryParse(_simSpendCtrl.text) ?? 0)).toStringAsFixed(1)}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+            ),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 12, runSpacing: 12, children: [
@@ -451,15 +512,21 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
-  color: Colors.grey.withValues(alpha: .05),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.05),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children:[
-        Text(t.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(
+          t.name,
+          style: Theme.of(context)
+              .textTheme
+              .titleSmall
+              ?.copyWith(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+        ),
         const SizedBox(height:4),
-        Text('Min Spend ₹${t.minSpend.toStringAsFixed(0)}'),
-        Text('Discount ${t.discount.toStringAsFixed(1)}%'),
-        Text('Example discount on spend: ₹${(spend * (t.discount/100)).toStringAsFixed(2)}'),
+        Text('Min Spend ₹${t.minSpend.toStringAsFixed(0)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        Text('Discount ${t.discount.toStringAsFixed(1)}%', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        Text('Example discount on spend: ₹${(spend * (t.discount/100)).toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]),
     );
   }
@@ -468,7 +535,16 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
     final disabled = _saving || !_dirty || [_pointsErr,_redeemErr,_expiryErr,_tiersErr].any((e)=>e!=null);
     return FloatingActionButton.extended(
       onPressed: disabled ? null : _save,
-      icon: _saving ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2,color: Colors.white)) : const Icon(Icons.save_outlined),
+      icon: _saving
+          ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Theme.of(context).colorScheme.onPrimary,
+              ),
+            )
+          : const Icon(Icons.save_outlined),
       label: Text(_saving ? 'Saving...' : 'Save Changes'),
     );
   }
@@ -511,14 +587,35 @@ class _TierDialogState extends State<_TierDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final texts = Theme.of(context).textTheme;
     return AlertDialog(
-      title: Text(widget.existing==null? 'Add Tier' : 'Edit Tier'),
-      content: SizedBox(width: 400, child: Column(mainAxisSize: MainAxisSize.min, children:[
-        TextField(controller: _name, decoration: const InputDecoration(labelText: 'Tier Name')),
-        TextField(controller: _minSpend, decoration: const InputDecoration(labelText: 'Min Spend (₹)'), keyboardType: const TextInputType.numberWithOptions(decimal:true)),
-        TextField(controller: _discount, decoration: const InputDecoration(labelText: 'Discount %'), keyboardType: const TextInputType.numberWithOptions(decimal:true)),
-        if(_err!=null) Padding(padding: const EdgeInsets.only(top:8), child: Text(_err!, style: const TextStyle(color: Colors.redAccent, fontSize: 12))),
-      ])),
+      title: Text(
+        widget.existing==null? 'Add Tier' : 'Edit Tier',
+        style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+      ),
+      content: DefaultTextStyle(
+        style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+        child: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children:[
+              TextField(controller: _name, decoration: const InputDecoration(labelText: 'Tier Name')),
+              TextField(controller: _minSpend, decoration: const InputDecoration(labelText: 'Min Spend (₹)'), keyboardType: const TextInputType.numberWithOptions(decimal:true)),
+              TextField(controller: _discount, decoration: const InputDecoration(labelText: 'Discount %'), keyboardType: const TextInputType.numberWithOptions(decimal:true)),
+              if(_err!=null)
+                Padding(
+                  padding: const EdgeInsets.only(top:8),
+                  child: Text(
+                    _err!,
+                    style: texts.labelSmall?.copyWith(color: scheme.error),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
       actions: [
         TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Save')),

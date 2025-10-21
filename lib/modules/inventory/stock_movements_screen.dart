@@ -58,7 +58,12 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                 }
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  child: DataTable(
+                  child: DataTableTheme(
+                    data: DataTableThemeData(
+                      dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                      headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                    ),
+                    child: DataTable(
                     columns: const [
                       DataColumn(label: Text('Date')),
                       DataColumn(label: Text('Type')),
@@ -98,6 +103,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                           ],
                         ),
                     ],
+                  ),
                   ),
                 );
               },
@@ -142,8 +148,10 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Edit Movement'),
-        content: Form(
+        title: Text('Edit Movement', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
+          child: Form(
           key: formKey,
           child: SizedBox(
             width: 520,
@@ -151,7 +159,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('SKU: ${m.sku} • ${m.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text('SKU: ${m.sku} • ${m.name}', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
@@ -162,6 +170,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                           .toList(),
                       onChanged: (v) => type = v ?? type,
                       decoration: const InputDecoration(labelText: 'Type'),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -173,6 +182,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                           .toList(),
                       onChanged: (v) => location = v ?? location,
                       decoration: const InputDecoration(labelText: 'Location'),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                     ),
                   ),
                 ]),
@@ -184,6 +194,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                     helperText: type == 'Outbound' ? 'Will subtract this quantity' : (type == 'Inbound' ? 'Will add this quantity' : 'Positive or negative'),
                   ),
                   keyboardType: TextInputType.number,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Required';
                     final n = int.tryParse(v.trim());
@@ -197,10 +208,12 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                 TextFormField(
                   controller: noteCtrl,
                   decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional remarks'),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                   maxLines: 2,
                 ),
               ],
             ),
+          ),
           ),
         ),
         actions: [
@@ -246,8 +259,8 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Delete Movement'),
-        content: Text('Delete this movement for ${m.sku} • ${m.name}?'),
+        title: Text('Delete Movement', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface), child: Text('Delete this movement for ${m.sku} • ${m.name}?')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
           FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
@@ -359,8 +372,10 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
   Widget build(BuildContext context) {
   final productsAsync = ref.watch(productsStreamProvider);
     return AlertDialog(
-      title: const Text('Record Stock Movement'),
-      content: Form(
+      title: Text('Record Stock Movement', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
+        child: Form(
         key: _formKey,
         child: SizedBox(
           width: 520,
@@ -400,6 +415,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                                 },
                               ),
                       ),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                       onChanged: (v) => setState(() {
                         _search = v.trim();
                         _selected = null; // reset selection if user types more
@@ -417,9 +433,9 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                         margin: const EdgeInsets.only(top: 6, bottom: 8),
                         constraints: const BoxConstraints(maxHeight: 220),
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
+                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                           borderRadius: BorderRadius.circular(4),
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                         ),
                         child: ListView.builder(
                           itemCount: matches.length,
@@ -448,6 +464,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                               .toList(),
                           onChanged: (v) => setState(() => _type = v ?? 'Inbound'),
                           decoration: const InputDecoration(labelText: 'Type'),
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -459,6 +476,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                               .toList(),
                           onChanged: (v) => setState(() => _location = v ?? 'Store'),
                           decoration: const InputDecoration(labelText: 'Location'),
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                         ),
                       ),
                     ]),
@@ -470,6 +488,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                         helperText: _type == 'Outbound' ? 'Will subtract this quantity' : (_type == 'Inbound' ? 'Will add this quantity' : 'Positive or negative'),
                       ),
                       keyboardType: TextInputType.number,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                       validator: (v) {
                         if (v == null || v.trim().isEmpty) return 'Required';
                         final n = int.tryParse(v.trim());
@@ -484,6 +503,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                     TextFormField(
                       controller: _noteCtrl,
                       decoration: const InputDecoration(labelText: 'Note', hintText: 'Optional remarks'),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                       maxLines: 2,
                     ),
                     const SizedBox(height: 12),
@@ -495,6 +515,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
             loading: () => const SizedBox(width: 380, height: 160, child: Center(child: CircularProgressIndicator())),
           ),
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: _submitting ? null : () => Navigator.pop(context), child: const Text('Cancel')),
@@ -581,7 +602,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
     return Material(
       elevation: 1,
       borderRadius: BorderRadius.circular(6),
-      color: Colors.blueGrey.shade50,
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
         child: Column(
@@ -591,7 +612,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               Expanded(
                 child: Text(
                   _selected == null ? '' : '${_selected!.name}  (SKU: ${_selected!.sku})',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -602,9 +623,9 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               _qtyBadge('Warehouse', whQty, Icons.warehouse),
               _qtyBadge('Total', total, Icons.summarize),
               if (_selected?.updatedAt != null)
-                Text('Updated: ${_fmtDateTime(_selected!.updatedAt!)}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text('Updated: ${_fmtDateTime(_selected!.updatedAt!)}', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
               if ((_selected?.updatedBy ?? '').isNotEmpty)
-                Text('By: ${_selected!.updatedBy}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text('By: ${_selected!.updatedBy}', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ]),
           ],
         ),
@@ -616,14 +637,14 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 14, color: Colors.blueGrey.shade600),
+        Icon(icon, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
         const SizedBox(width: 4),
-        Text('$label: $value', style: const TextStyle(fontSize: 12)),
+        Text('$label: $value', style: Theme.of(context).textTheme.labelSmall),
       ]),
     );
   }

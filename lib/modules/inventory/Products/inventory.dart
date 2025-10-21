@@ -233,7 +233,15 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                               DataCell(Text(p.stockAt('Store').toString())),
                               DataCell(Text(p.stockAt('Warehouse').toString())),
                               DataCell(Text(p.totalStock.toString())),
-                              DataCell(Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: p.isActive ? Colors.green : Colors.red)),
+                              DataCell(
+                                Builder(
+                                  builder: (context) {
+                                    final scheme = Theme.of(context).colorScheme;
+                                    final color = p.isActive ? scheme.primary : scheme.error;
+                                    return Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: color);
+                                  },
+                                ),
+                              ),
                               ],
                             ),
                         ],
@@ -243,7 +251,13 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                           scrollDirection: Axis.horizontal,
                           child: ConstrainedBox(
                             constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                            child: table,
+                            child: DataTableTheme(
+                              data: DataTableThemeData(
+                                dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                                headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                              ),
+                              child: table,
+                            ),
                           ),
                         ),
                       );
@@ -337,11 +351,28 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       context: context,
       useRootNavigator: false,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Delete Product'),
-        content: Text('Are you sure you want to delete ${p.name} (${p.sku})?'),
+        title: Text(
+          'Delete Product',
+          style: Theme.of(dialogCtx).textTheme.titleMedium?.copyWith(
+                color: Theme.of(dialogCtx).colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        content: DefaultTextStyle(
+          style: (Theme.of(dialogCtx).textTheme.bodyMedium ?? const TextStyle())
+              .copyWith(color: Theme.of(dialogCtx).colorScheme.onSurface),
+          child: Text('Are you sure you want to delete ${p.name} (${p.sku})?'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Delete')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogCtx).colorScheme.error,
+              foregroundColor: Theme.of(dialogCtx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -413,8 +444,18 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       showDialog(
         context: ctx,
         builder: (_) => AlertDialog(
-          title: const Text('Export CSV'),
-          content: SizedBox(width: 700, child: SelectableText(csv)),
+          title: Text(
+            'Export CSV',
+            style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          content: DefaultTextStyle(
+            style: (Theme.of(ctx).textTheme.bodyMedium ?? const TextStyle())
+                .copyWith(color: Theme.of(ctx).colorScheme.onSurface),
+            child: SizedBox(width: 700, child: SelectableText(csv)),
+          ),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
         ),
       );
@@ -441,8 +482,18 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Barcodes PDF generated'),
-          content: const Text('Automatic download failed. Try again or check browser settings.'),
+          title: Text(
+            'Barcodes PDF generated',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          content: DefaultTextStyle(
+            style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+                .copyWith(color: Theme.of(context).colorScheme.onSurface),
+            child: const Text('Automatic download failed. Try again or check browser settings.'),
+          ),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
         ),
       );
@@ -532,8 +583,17 @@ class _AddProductDialogState extends State<_AddProductDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add Product'),
-      content: Form(
+      title: Text(
+        'Add Product',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+      content: DefaultTextStyle(
+        style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+            .copyWith(color: Theme.of(context).colorScheme.onSurface),
+        child: Form(
         key: _formKey,
         child: SizedBox(
           width: 600,
@@ -541,31 +601,32 @@ class _AddProductDialogState extends State<_AddProductDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(controller: _sku, decoration: const InputDecoration(labelText: 'SKU'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
-                TextFormField(controller: _name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
-                TextFormField(controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _sku, decoration: const InputDecoration(labelText: 'SKU'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                 ]),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                 ]),
-                TextFormField(controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
-                TextFormField(controller: _description, decoration: const InputDecoration(labelText: 'Description')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
                 const SizedBox(height: 8),
                 CheckboxListTile(value: _isActive, onChanged: (v) => setState(() => _isActive = v ?? true), title: const Text('Active')),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _storeQty, decoration: const InputDecoration(labelText: 'Initial Store Qty'), keyboardType: TextInputType.number)),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _storeQty, decoration: const InputDecoration(labelText: 'Initial Store Qty'), keyboardType: TextInputType.number)),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _warehouseQty, decoration: const InputDecoration(labelText: 'Initial Warehouse Qty'), keyboardType: TextInputType.number)),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _warehouseQty, decoration: const InputDecoration(labelText: 'Initial Warehouse Qty'), keyboardType: TextInputType.number)),
                 ]),
               ],
             ),
           ),
+        ),
         ),
       ),
       actions: [
@@ -669,8 +730,17 @@ class _EditProductDialogState extends State<_EditProductDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Edit ${widget.product.sku}'),
-      content: Form(
+      title: Text(
+        'Edit ${widget.product.sku}',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+      content: DefaultTextStyle(
+        style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+            .copyWith(color: Theme.of(context).colorScheme.onSurface),
+        child: Form(
         key: _formKey,
         child: SizedBox(
           width: 600,
@@ -678,25 +748,26 @@ class _EditProductDialogState extends State<_EditProductDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
-                TextFormField(controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                 ]),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                 ]),
-                TextFormField(controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
-                TextFormField(controller: _description, decoration: const InputDecoration(labelText: 'Description')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
                 const SizedBox(height: 8),
                 CheckboxListTile(value: _isActive, onChanged: (v) => setState(() => _isActive = v ?? true), title: const Text('Active')),
               ],
             ),
           ),
+        ),
         ),
       ),
       actions: [

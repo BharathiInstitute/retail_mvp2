@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+ import 'package:flutter/material.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/auth.dart';
@@ -125,18 +125,21 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
     final result = await showDialog<bool>(
       context: ctx,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Confirm Upload'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Creates: $creates'),
-            Text('Updates: $updates'),
-            Text('Stock Adjustments: $adjusts'),
-            Text('Deletes: $deletes'),
-            const SizedBox(height: 12),
-            Text('Total operations: $totalOps'),
-          ],
+        title: Text('Confirm Upload', style: Theme.of(dialogCtx).textTheme.titleMedium?.copyWith(color: Theme.of(dialogCtx).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (Theme.of(dialogCtx).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(dialogCtx).colorScheme.onSurface),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Creates: $creates'),
+              Text('Updates: $updates'),
+              Text('Stock Adjustments: $adjusts'),
+              Text('Deletes: $deletes'),
+              const SizedBox(height: 12),
+              Text('Total operations: $totalOps'),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => rootNavigatorKey.currentState?.pop(false), child: const Text('Cancel')),
@@ -234,23 +237,29 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
           setDialogState = setStateDialog;
           final value = totalOps == 0 ? null : processed / totalOps;
           return AlertDialog(
-            title: const Text('Uploading...'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LinearProgressIndicator(value: processed == totalOps ? 1 : value),
-                  const SizedBox(height: 12),
-                  Text('Phase: $phase'),
-                  const SizedBox(height: 4),
-                  Text('Processed $processed of $totalOps'),
-                  if (error != null) ...[
-                    const SizedBox(height: 8),
-                    Text('Error: $error', style: const TextStyle(color: Colors.red)),
+            title: Text('Uploading...', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+            content: DefaultTextStyle(
+              style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
+              child: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LinearProgressIndicator(value: processed == totalOps ? 1 : value),
+                    const SizedBox(height: 12),
+                    Text('Phase: $phase'),
+                    const SizedBox(height: 4),
+                    Text('Processed $processed of $totalOps'),
+                    if (error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Error: $error',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           );
@@ -389,7 +398,14 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
 
     final gridWidget = productsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => Center(
+        child: Text(
+          'Error: $e',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.error,
+          ),
+        ),
+      ),
       data: (products) {
         final initialRows = _rowsFromProducts(products);
         return PlutoGrid(
@@ -409,6 +425,13 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
               rowHeight: 36,
               gridBorderColor: Theme.of(context).dividerColor,
               gridBackgroundColor: Theme.of(context).colorScheme.surface,
+              iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              columnTextStyle: (Theme.of(context).textTheme.labelSmall ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
+              cellTextStyle: (Theme.of(context).textTheme.bodySmall ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
+              activatedColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+              activatedBorderColor: Theme.of(context).colorScheme.primary,
+              evenRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.04),
+              oddRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.08),
             ),
             columnFilter: PlutoGridColumnFilterConfig(),
           ),

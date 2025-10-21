@@ -107,8 +107,8 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
         _kv('Subtotal', widget.subtotal),
         _kv('Discount', -widget.discountValue),
         if (widget.redeemValue > 0) _kv('Redeemed (Pts)', -widget.redeemValue),
-        const SizedBox(height: 6),
-        const Text('GST Breakdown'),
+  const SizedBox(height: 6),
+  Builder(builder: (context) => Text('GST Breakdown', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700))),
         ...taxesByRate.entries.map((e) => _kv('GST ${e.key}%', e.value)),
         const Divider(),
         _kv('Grand Total', widget.grandTotal),
@@ -222,7 +222,10 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
     );
   }
   Widget _kv(String label, double value, {bool bold = false}) {
-    final style = TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+        ) ?? TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: bold ? FontWeight.bold : FontWeight.normal);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -242,10 +245,17 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final texts = Theme.of(ctx).textTheme;
         int previewWidth = tempScale && tempSize == PaperSize.receipt ? _deriveCharWidth(tempPaperMm) : tempWidth;
         return AlertDialog(
-          title: const Text('Print Settings'),
-          content: SizedBox(
+          title: Text(
+            'Print Settings',
+            style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+          ),
+          content: DefaultTextStyle(
+            style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+            child: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Row(children: [
@@ -304,7 +314,13 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
                     onChanged: (v) => setLocal(() => tempFontSize = v.round()),
                   ),
                 ),
-                SizedBox(width: 40, child: Text('${tempFontSize}pt', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))
+                SizedBox(
+                    width: 40,
+                    child: Text(
+                      '${tempFontSize}pt',
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ))
               ]),
               const SizedBox(height: 8),
               if (tempSize == PaperSize.receipt && !tempScale) Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -321,9 +337,13 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})', style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+                child: Text(
+                  'Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),
+                ),
               )
             ]),
+          ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -399,12 +419,24 @@ class _CustomerInfo extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        if (c.email != null && c.email!.isNotEmpty) Text(c.email!, style: const TextStyle(fontSize: 12)),
+        Builder(
+          builder: (context) => Text(
+            c.name,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+          ),
+        ),
+        if (c.email != null && c.email!.isNotEmpty)
+          Text(
+            c.email!,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
         const SizedBox(height: 4),
         Wrap(spacing: 12, runSpacing: 4, children: [
           _miniInfoChip(context, Icons.workspace_premium, 'Plan: $planLabel'),
@@ -420,12 +452,17 @@ class _CustomerInfo extends StatelessWidget {
   Widget _miniInfoChip(BuildContext context, IconData icon, String text) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+  border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary), const SizedBox(width: 4), Text(text, style: const TextStyle(fontSize: 11)),
+      Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary),
+      const SizedBox(width: 4),
+      Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+      ),
     ]),
   );
 }
@@ -450,7 +487,21 @@ class _RedeemSection extends StatelessWidget {
             prefixIcon: const Icon(Icons.card_giftcard),
             helperText: helper,
             errorText: errorText,
-            suffixIcon: (availablePoints > 0) ? Tooltip(message: 'Available: ${availablePoints.toStringAsFixed(0)}', child: Padding(padding: const EdgeInsets.only(right: 8.0), child: Center(widthFactor: 1, child: Text(availablePoints.toStringAsFixed(0), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))))) : null,
+            suffixIcon: (availablePoints > 0)
+                ? Tooltip(
+                    message: 'Available: ${availablePoints.toStringAsFixed(0)}',
+                    child: Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: Center(
+                            widthFactor: 1,
+                            child: Text(
+                              availablePoints.toStringAsFixed(0),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ))))
+                : null,
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           onChanged: (_) => onChange(),
@@ -485,7 +536,18 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
         child: InputDecorator(
           decoration: const InputDecoration(labelText: 'Customer', border: OutlineInputBorder(), isDense: true),
           child: Row(children: [
-            const Icon(Icons.person, size: 18), const SizedBox(width: 6), Expanded(child: Text(sel.name, overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.person, size: 18),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                sel.name,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
             IconButton(
               tooltip: 'Add Customer',
               padding: EdgeInsets.zero,
@@ -532,8 +594,16 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                   return ListTile(
                     dense: true,
                     leading: isSel ? Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary) : const Icon(Icons.person_outline),
-                    title: Text(c.name),
-                    subtitle: (c.email != null && c.email!.isNotEmpty) ? Text(c.email!, style: const TextStyle(fontSize: 11)) : null,
+                    title: Text(
+                      c.name,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: (c.email != null && c.email!.isNotEmpty)
+                        ? Text(
+                            c.email!,
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          )
+                        : null,
                     onTap: () { widget.onSelected(c.id.isEmpty ? null : c); setState(() { _expanded = false; _searchCtrl.clear(); }); },
                   );
                 },
@@ -556,9 +626,16 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) {
+          final scheme = Theme.of(ctx).colorScheme;
+          final texts = Theme.of(ctx).textTheme;
           return AlertDialog(
-            title: const Text('Add Customer'),
-            content: SizedBox(
+            title: Text(
+              'Add Customer',
+              style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+            ),
+            content: DefaultTextStyle(
+              style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+              child: SizedBox(
               width: 420,
               child: Form(
                 key: formKey,
@@ -592,6 +669,7 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                   ),
                 ),
               ),
+            ),
             ),
             actions: [
               TextButton(
@@ -643,10 +721,13 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                   }
                 },
                 icon: saving
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
                       )
                     : const Icon(Icons.save),
                 label: Text(saving ? 'Saving...' : 'Save'),

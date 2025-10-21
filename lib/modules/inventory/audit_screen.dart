@@ -8,6 +8,7 @@ import 'download_helper_stub.dart' if (dart.library.html) 'download_helper_web.d
 import 'import_products_screen.dart' show ImportProductsScreen;
 import 'Products/inventory.dart'; // access shared providers
 import 'Products/inventory_repository.dart' show ProductDoc; // product model
+import '../../core/theme/theme_utils.dart';
 
 // Public copy of active filter enum (was private in inventory.dart)
 enum ActiveFilter { all, active, inactive }
@@ -193,7 +194,16 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
                             );
                             return SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
-                              child: ConstrainedBox(constraints: BoxConstraints(minWidth: constraints.maxWidth), child: table),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                                child: DataTableTheme(
+                                  data: DataTableThemeData(
+                                    dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                                    headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                                  ),
+                                  child: table,
+                                ),
+                              ),
                             );
                           }),
                         ],
@@ -218,8 +228,60 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
       context: context,
       builder: (_) => const _ProductPickerDialog(),
     );
-    if (p != null) {
-      await _openEditDialog(p);
+    if (p == null) return;
+    if (!mounted) return;
+    final result = await showDialog<_AuditEditResult>(
+      context: context,
+      builder: (_) => _AuditEditDialog(
+        sku: p.sku,
+        store: _storeOverrides[p.sku] ?? p.stockAt('Store'),
+        warehouse: _whOverrides[p.sku] ?? p.stockAt('Warehouse'),
+        note: _noteOverrides[p.sku] ?? p.auditNote,
+      ),
+    );
+    if (result == null) return;
+    if (!mounted) return;
+    final user = ref.read(authStateProvider);
+    final origStore = p.stockAt('Store');
+    final origWh = p.stockAt('Warehouse');
+    setState(() {
+      if (result.store == origStore) {
+        _storeOverrides.remove(p.sku);
+      } else {
+        _storeOverrides[p.sku] = result.store;
+      }
+      if (result.warehouse == origWh) {
+        _whOverrides.remove(p.sku);
+      } else {
+        _whOverrides[p.sku] = result.warehouse;
+      }
+      if (result.note == null || result.note!.trim().isEmpty) {
+        _noteOverrides.remove(p.sku);
+      } else {
+        _noteOverrides[p.sku] = result.note!.trim();
+      }
+      final changed = (result.store != origStore) || (result.warehouse != origWh) || (result.note != (p.auditNote ?? ''));
+      if (changed) {
+        final by = (user?.email?.isNotEmpty ?? false) ? user!.email! : (user?.uid ?? 'local');
+        _overrideMeta[p.sku] = _AuditMeta(DateTime.now(), by);
+      } else {
+        _overrideMeta.remove(p.sku);
+      }
+    });
+    try {
+      if (user != null) {
+        await ref.read(inventoryRepoProvider).auditUpdateStock(
+              sku: p.sku,
+              storeQty: result.store,
+              warehouseQty: result.warehouse,
+              updatedBy: user.email ?? user.uid,
+              note: result.note?.trim().isEmpty ?? true ? null : result.note!.trim(),
+            );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      }
     }
   }
 
@@ -327,37 +389,61 @@ class _AuditEditDialogState extends State<_AuditEditDialog> {
 
   @override Widget build(BuildContext context){
     return AlertDialog(
-      title: Text('Audit ${widget.sku}'),
-      content: Form(
-        key: _formKey,
-        child: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(children:[
-                  Expanded(child: TextFormField(
-                    controller: _store,
-                    decoration: const InputDecoration(labelText:'Store Qty'),
-                    keyboardType: TextInputType.number,
-                    validator:(v){ final n=int.tryParse(v??''); if(n==null||n<0) return 'Enter >=0'; return null; },
-                  )),
-                  const SizedBox(width:12),
-                  Expanded(child: TextFormField(
-                    controller: _wh,
-                    decoration: const InputDecoration(labelText:'Warehouse Qty'),
-                    keyboardType: TextInputType.number,
-                    validator:(v){ final n=int.tryParse(v??''); if(n==null||n<0) return 'Enter >=0'; return null; },
-                  )),
-                ]),
-                const SizedBox(height:12),
-                TextFormField(
-                  controller: _note,
-                  decoration: const InputDecoration(labelText:'Note (optional)'),
-                  maxLines: 3,
-                ),
-              ],
+      title: Text(
+        'Audit ${widget.sku}',
+        style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+      ),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: Form(
+          key: _formKey,
+          child: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children:[
+                    Expanded(child: TextFormField(
+                      controller: _store,
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText:'Store Qty',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator:(v){ final n=int.tryParse(v??''); if(n==null||n<0) return 'Enter >=0'; return null; },
+                    )),
+                    const SizedBox(width:12),
+                    Expanded(child: TextFormField(
+                      controller: _wh,
+                      style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                      decoration: InputDecoration(
+                        labelText:'Warehouse Qty',
+                        labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                        isDense: true,
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator:(v){ final n=int.tryParse(v??''); if(n==null||n<0) return 'Enter >=0'; return null; },
+                    )),
+                  ]),
+                  const SizedBox(height:12),
+                  TextFormField(
+                    controller: _note,
+                    style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                    decoration: InputDecoration(
+                      labelText:'Note (optional)',
+                      labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                      isDense: true,
+                    ),
+                    maxLines: 3,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -393,8 +479,10 @@ class _ProductPickerDialogState extends ConsumerState<_ProductPickerDialog> {
   Widget build(BuildContext context){
     final async = ref.watch(productsStreamProvider);
     return AlertDialog(
-      title: const Text('Pick a product'),
-      content: SizedBox(
+      title: Text('Pick a product', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(
         width: 480,
         child: async.when(
           data: (list){
@@ -407,7 +495,14 @@ class _ProductPickerDialogState extends ConsumerState<_ProductPickerDialog> {
               children: [
                 TextField(
                   controller: _qCtrl,
-                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Search SKU/Name/Barcode'),
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: InputDecoration(
+                    prefixIcon: Icon(Icons.search, color: context.colors.onSurfaceVariant),
+                    labelText: 'Search SKU/Name/Barcode',
+                    labelStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    hintStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+                    isDense: true,
+                  ),
                   onChanged: (_)=> setState((){}),
                 ),
                 const SizedBox(height: 8),
@@ -419,8 +514,15 @@ class _ProductPickerDialogState extends ConsumerState<_ProductPickerDialog> {
                       final p = results[i];
                       return ListTile(
                         dense: true,
-                        title: Text('${p.sku} • ${p.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: p.barcode.isNotEmpty ? Text(p.barcode) : null,
+                        title: Text(
+                          '${p.sku} • ${p.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                        ),
+                        subtitle: p.barcode.isNotEmpty
+                            ? Text(p.barcode, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant))
+                            : null,
                         onTap: ()=> Navigator.pop(context, p),
                       );
                     },
@@ -432,6 +534,7 @@ class _ProductPickerDialogState extends ConsumerState<_ProductPickerDialog> {
           error: (e,_)=> SizedBox(width: 360, child: Text('Error: $e')),
           loading: ()=> const SizedBox(width: 360, height: 160, child: Center(child: CircularProgressIndicator())),
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel')),

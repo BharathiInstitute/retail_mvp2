@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 /// Purchase types supported in the dialog
 enum PurchaseType { noBill, gst, import, creditNote, debitNote }
@@ -199,8 +200,13 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     final totals = _computeTotals();
   final balance = ((totals.grand - _toDouble(paidCtrl)).clamp(0, double.infinity)).toDouble();
     return AlertDialog(
-      title: Text(widget.existingId == null ? 'New Purchase Invoice' : 'Edit Purchase Invoice'),
-      content: SizedBox(
+      title: Text(
+        widget.existingId == null ? 'New Purchase Invoice' : 'Edit Purchase Invoice',
+        style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+      ),
+      content: DefaultTextStyle(
+        style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+        child: SizedBox(
         width: 820,
         height: 620,
         child: Scrollbar(
@@ -237,7 +243,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                             IconButton(
                               tooltip: 'Add Item',
                               onPressed: () => setState(() => items.add(_ItemRow(name: TextEditingController(), qty: TextEditingController(text: '1'), price: TextEditingController(text: '0'), gstRate: 0))),
-                              icon: const Icon(Icons.add),
+                              icon: Icon(Icons.add, color: context.colors.onSurfaceVariant),
                             ),
                           ],
                         ),
@@ -254,12 +260,13 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             ),
           ),
         ),
+        ),
       ),
       actions: [
         if (widget.existingId != null)
           TextButton.icon(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
-            label: const Text('Delete', style: TextStyle(color: Colors.red)),
+            icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
+            label: Text('Delete', style: TextStyle(color: Theme.of(context).colorScheme.error)),
             onPressed: () async {
               // Capture UI handles before awaits
               final nav = Navigator.of(context);
@@ -267,12 +274,21 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
-                  title: const Text('Delete invoice?'),
-                  content: const Text('This will permanently delete this purchase invoice. This action cannot be undone.'),
+                  title: Text(
+                    'Delete invoice?',
+                    style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                  ),
+                  content: DefaultTextStyle(
+                    style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+                    child: const Text('This will permanently delete this purchase invoice. This action cannot be undone.'),
+                  ),
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                     FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Theme.of(ctx).colorScheme.error,
+                        foregroundColor: Theme.of(ctx).colorScheme.onError,
+                      ),
                       onPressed: () => Navigator.pop(ctx, true),
                       child: const Text('Delete'),
                     ),
@@ -466,7 +482,12 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
 
   Widget _inlineTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
-        child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold)),
+        child: Builder(
+          builder: (context) => Text(
+            text,
+            style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.bold),
+          ),
+        ),
       );
 
   Widget _buildHeader() {
@@ -479,11 +500,14 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           width: 200,
           child: DropdownButtonFormField<PurchaseType>(
             initialValue: type,
+            style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             items: PurchaseType.values
                 .map((t) => DropdownMenuItem(value: t, child: Text(_purchaseTypeLabel(t))))
                 .toList(),
             onChanged: (v) => setState(() => type = v ?? type),
             decoration: const InputDecoration(labelText: 'Purchase Type'),
+            iconEnabledColor: context.colors.onSurfaceVariant,
+            iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
           ),
         ),
         SizedBox(
@@ -504,7 +528,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             },
             child: InputDecorator(
               decoration: const InputDecoration(labelText: 'Invoice Date'),
-              child: Text(_fmtDate(invoiceDate)),
+              child: Text(_fmtDate(invoiceDate), style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface)),
             ),
           ),
         ),
@@ -512,12 +536,15 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           width: 160,
           child: DropdownButtonFormField<String>(
             initialValue: paymentMode,
+            style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             items: const [
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
               DropdownMenuItem(value: 'Bank', child: Text('Bank')),
             ],
             onChanged: (v) => setState(() => paymentMode = v ?? paymentMode),
             decoration: const InputDecoration(labelText: 'Payment Mode'),
+            iconEnabledColor: context.colors.onSurfaceVariant,
+            iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
           ),
         ),
       ],
@@ -533,6 +560,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           width: 180,
           child: TextFormField(
             controller: invoiceNoCtrl,
+            style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             decoration: const InputDecoration(labelText: 'Invoice No'),
           ),
         ),
@@ -541,6 +569,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             width: 200,
             child: TextFormField(
               controller: gstinCtrl,
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               decoration: const InputDecoration(labelText: 'Supplier GSTIN'),
             ),
           ),
@@ -548,6 +577,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           width: 320,
           child: TextFormField(
             controller: addressCtrl,
+            style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             decoration: const InputDecoration(labelText: 'Supplier Address'),
           ),
         ),
@@ -588,20 +618,23 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           ),
         ),
         const SizedBox(width: 8),
-  SizedBox(width: 90, child: TextFormField(controller: r.qty, decoration: const InputDecoration(labelText: 'Qty'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+  SizedBox(width: 90, child: TextFormField(controller: r.qty, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Qty'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
         const SizedBox(width: 8),
-  SizedBox(width: 120, child: TextFormField(controller: r.price, decoration: const InputDecoration(labelText: 'Unit Price ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+  SizedBox(width: 120, child: TextFormField(controller: r.price, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Unit Price ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
         const SizedBox(width: 8),
         if (type == PurchaseType.gst || type == PurchaseType.import)
           SizedBox(
             width: 120,
             child: DropdownButtonFormField<int>(
               initialValue: r.gstRate,
+              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               items: const [0, 5, 12, 18, 28]
                   .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
                   .toList(),
               onChanged: (v) => setState(() => r.gstRate = v ?? r.gstRate),
               decoration: const InputDecoration(labelText: 'Tax Rate'),
+              iconEnabledColor: context.colors.onSurfaceVariant,
+              iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
             ),
           ),
         const SizedBox(width: 8),
@@ -623,6 +656,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                     row.dispose();
                   }),
           icon: const Icon(Icons.close),
+          color: context.colors.onSurfaceVariant,
         ),
       ]),
     );
@@ -637,11 +671,11 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           _kv('CGST', t.cgst),
           _kv('SGST', t.sgst),
           _kv('IGST', t.igst),
-          SizedBox(width: 140, child: TextFormField(controller: cessCtrl, decoration: const InputDecoration(labelText: 'CESS ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+          SizedBox(width: 140, child: TextFormField(controller: cessCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'CESS ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
         ],
         if (type == PurchaseType.import) ...[
-          SizedBox(width: 140, child: TextFormField(controller: freightCtrl, decoration: const InputDecoration(labelText: 'Freight ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
-          SizedBox(width: 160, child: TextFormField(controller: customsCtrl, decoration: const InputDecoration(labelText: 'Customs Duty ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+          SizedBox(width: 140, child: TextFormField(controller: freightCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Freight ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+          SizedBox(width: 160, child: TextFormField(controller: customsCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Customs Duty ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           _kv('IGST', t.igst),
         ],
         _kv('Grand Total', t.grand, bold: true),
@@ -655,7 +689,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       runSpacing: 12,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        SizedBox(width: 160, child: TextFormField(controller: paidCtrl, decoration: const InputDecoration(labelText: 'Paid Amount ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+        SizedBox(width: 160, child: TextFormField(controller: paidCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Paid Amount ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
         _kv('Balance', balance),
       ],
     );
@@ -667,10 +701,10 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       spacing: 12,
       runSpacing: 12,
       children: [
-        SizedBox(width: 320, child: TextFormField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes'))),
-        SizedBox(width: 200, child: TextFormField(controller: utilityAmountCtrl, decoration: const InputDecoration(labelText: 'Amount ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+        SizedBox(width: 320, child: TextFormField(controller: notesCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Notes'))),
+        SizedBox(width: 200, child: TextFormField(controller: utilityAmountCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Amount ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
         if (type == PurchaseType.creditNote || type == PurchaseType.debitNote)
-          SizedBox(width: 260, child: TextFormField(controller: linkedInvoiceCtrl, decoration: const InputDecoration(labelText: 'Linked Invoice No'))),
+          SizedBox(width: 260, child: TextFormField(controller: linkedInvoiceCtrl, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Linked Invoice No'))),
       ],
     );
   }
@@ -707,11 +741,12 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   }
 
   Widget _kv(String label, double value, {bool bold = false}) {
-    final style = TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+    final style = (context.texts.bodyMedium ?? const TextStyle())
+        .copyWith(color: context.colors.onSurface, fontWeight: bold ? FontWeight.w700 : FontWeight.w400);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -821,6 +856,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
         if (current.isNotEmpty && !items.contains(current)) items.add(current);
         return DropdownButtonFormField<String>(
           isExpanded: true,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             initialValue: current.isEmpty ? null : current,
             items: items
                 .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
@@ -830,6 +866,8 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
             },
             decoration: const InputDecoration(labelText: 'Supplier Name'),
             hint: const Text('Select supplier'),
+            iconEnabledColor: Theme.of(context).colorScheme.onSurfaceVariant,
+            iconDisabledColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
           );
       },
     );
@@ -961,10 +999,11 @@ class _ProductAutocompleteState extends State<_ProductAutocomplete> {
         return TextFormField(
           controller: textCtrl,
           focusNode: focusNode,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             decoration: InputDecoration(
               labelText: 'Item / Product',
               suffixIcon: _selected == null
-                  ? const Icon(Icons.search)
+                  ? Icon(Icons.search, color: Theme.of(context).colorScheme.onSurfaceVariant)
                   : Tooltip(
                       message: 'Selected: ${_selected!.sku}',
                       child: InkWell(
@@ -974,7 +1013,7 @@ class _ProductAutocompleteState extends State<_ProductAutocomplete> {
                             widget.onProductSelected(null);
                           });
                         },
-                        child: const Icon(Icons.check_circle, color: Colors.green),
+                        child: Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary),
                       ),
                     ),
             ),
@@ -994,8 +1033,11 @@ class _ProductAutocompleteState extends State<_ProductAutocomplete> {
                   final opt = options.elementAt(i);
                   return ListTile(
                     dense: true,
-                    title: Text(opt.name),
-                    subtitle: Text('SKU: ${opt.sku}  •  ₹${opt.unitPrice.toStringAsFixed(2)}${opt.taxPct != null ? '  •  Tax ${opt.taxPct!.toStringAsFixed(0)}%' : ''}'),
+                    title: Text(opt.name, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                    subtitle: Text(
+                      'SKU: ${opt.sku}  •  ₹${opt.unitPrice.toStringAsFixed(2)}${opt.taxPct != null ? '  •  Tax ${opt.taxPct!.toStringAsFixed(0)}%' : ''}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
                     onTap: () => onSelected(opt),
                   );
                 },
@@ -1061,20 +1103,28 @@ class _PurchasesList extends StatelessWidget {
               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               title: Row(
                 children: [
-                  Expanded(child: Text(supplier.isEmpty ? '(No supplier)' : supplier, style: const TextStyle(fontWeight: FontWeight.w500))),
+                  Expanded(child: Text(
+                    supplier.isEmpty ? '(No supplier)' : supplier,
+                    style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600),
+                  )),
                   const SizedBox(width: 12),
                   Text(invoiceNo.isEmpty ? '' : '#$invoiceNo'),
                 ],
               ),
-              subtitle: Wrap(spacing: 12, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                if (type.isNotEmpty) Chip(label: Text(type), visualDensity: VisualDensity.compact),
-                if (invoiceDate.isNotEmpty) Text('Date: $invoiceDate'),
-                Text('Total: ₹${grand.toStringAsFixed(2)}'),
-                Text('Paid: ₹${paid.toStringAsFixed(2)}'),
-              ]),
+              subtitle: Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (type.isNotEmpty) Chip(label: Text(type, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)), visualDensity: VisualDensity.compact),
+                  if (invoiceDate.isNotEmpty) Text('Date: $invoiceDate', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                  Text('Total: ₹${grand.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                  Text('Paid: ₹${paid.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                ],
+              ),
               trailing: IconButton(
                 tooltip: 'Edit',
-                icon: const Icon(Icons.edit_outlined),
+                icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 onPressed: () => showEditPurchaseInvoiceDialog(context, d.id, m),
               ),
               onTap: () => showEditPurchaseInvoiceDialog(context, d.id, m),

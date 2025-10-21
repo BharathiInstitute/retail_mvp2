@@ -74,7 +74,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 										),
 										const SizedBox(height: 12),
 										if (_error != null)
-											Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+											Text(
+												_error!,
+												style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+											),
 										const SizedBox(height: 12),
 										FilledButton(
 											onPressed: _loading ? null : _submit,

@@ -26,9 +26,17 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
     final formKey = GlobalKey<FormState>();
     final val = await showDialog<double>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Form(
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final texts = Theme.of(ctx).textTheme;
+        return AlertDialog(
+        title: Text(
+          title,
+          style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
+        ),
+        content: DefaultTextStyle(
+          style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
+          child: Form(
           key: formKey,
           child: TextFormField(
             controller: ctrl,
@@ -42,7 +50,8 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
               return null;
             },
           ),
-        ),
+  ),
+  ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
@@ -54,7 +63,8 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
             child: const Text('Save'),
           ),
         ],
-      ),
+      );
+      },
     );
     if (val != null) {
       onSubmit(val);
@@ -165,7 +175,13 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Shift Summary', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Shift Summary',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 24,
@@ -212,7 +228,13 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Recent Invoices', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Recent Invoices',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
             const SizedBox(height: 12),
             // Constrain height and allow vertical scrolling to avoid overflow.
             ConstrainedBox(
@@ -252,15 +274,14 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
 
   Widget _openingBalanceCluster() {
     final theme = Theme.of(context);
-    TextStyle? labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    TextStyle? valueStyle = theme.textTheme.bodyMedium;
-    TextStyle? valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
+  TextStyle? valueStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface);
+  TextStyle? valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
     return SizedBox(
       width: 220,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Opening balance', style: labelStyle?.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
+          Text('Opening balance', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,7 +290,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Cash', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Cash', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_recentInvoicesCashTotal), style: valueStyle),
                   ],
@@ -280,7 +301,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Total', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Total', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_recentInvoicesTotal), style: valueBold),
                   ],
@@ -295,15 +316,14 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
 
   Widget _cashSalesCluster() {
     final theme = Theme.of(context);
-    TextStyle? labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    TextStyle? valueStyle = theme.textTheme.bodyMedium;
-    TextStyle? valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
+  TextStyle? valueStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface);
+  TextStyle? valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
     return SizedBox(
       width: 220,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Cash Sales', style: labelStyle?.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
+          Text('Cash Sales', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -312,7 +332,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Cash', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Cash', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_cashSales), style: valueStyle),
                   ],
@@ -323,7 +343,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Total', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Total', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_openingFloat + _cashSales), style: valueBold),
                   ],
@@ -338,15 +358,14 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
 
   Widget _closingBalanceCluster() {
     final theme = Theme.of(context);
-    final labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    final valueStyle = theme.textTheme.bodyMedium;
-    final valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
+  final valueStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface);
+  final valueBold = valueStyle?.copyWith(fontWeight: FontWeight.bold);
     return SizedBox(
       width: 220,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Closing Balance', style: labelStyle?.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
+          Text('Closing Balance', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -355,7 +374,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Cash', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Cash', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_recentInvoicesCashTotal), style: valueStyle),
                   ],
@@ -366,7 +385,7 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Total', style: labelStyle?.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Total', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 2),
                     Text(_currency(_recentInvoicesTotal), style: valueBold),
                   ],
@@ -399,7 +418,10 @@ class _RecentInvoicesTable extends StatelessWidget {
       stream: query.snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
-          return Text('Error: ${snap.error}', style: TextStyle(color: Theme.of(context).colorScheme.error));
+          return Text(
+            'Error: ${snap.error}',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
+          );
         }
         if (!snap.hasData) {
           return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
@@ -435,13 +457,14 @@ class _RecentInvoicesTable extends StatelessWidget {
           ]));
         }
         // Totals row
+        final bold = Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold);
         rows.add(DataRow(cells: [
-          const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold))),
+          DataCell(Text('TOTAL', style: bold)),
           const DataCell(Text('')),
           const DataCell(Text('')),
-          DataCell(Text(_amt(totalCash), style: const TextStyle(fontWeight: FontWeight.bold))),
-          DataCell(Text(_amt(totalUpiCard), style: const TextStyle(fontWeight: FontWeight.bold))),
-          DataCell(Text(_amt(overallTotal), style: const TextStyle(fontWeight: FontWeight.bold))),
+          DataCell(Text(_amt(totalCash), style: bold)),
+          DataCell(Text(_amt(totalUpiCard), style: bold)),
+          DataCell(Text(_amt(overallTotal), style: bold)),
         ]));
 
         // Notify parent of overall total (sum of last 10 invoices) for closing balance display.
@@ -452,25 +475,32 @@ class _RecentInvoicesTable extends StatelessWidget {
           });
         }
 
-        final headerStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontSize: 14,
+        final headerStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w600,
               letterSpacing: .2,
+              color: Theme.of(context).colorScheme.onSurface,
             );
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columnSpacing: 35,
-            headingRowHeight: 40,
-            columns: [
-              DataColumn(label: Text('Invoice #', style: headerStyle)),
-              DataColumn(label: Text('Date & Time', style: headerStyle)),
-              DataColumn(label: Text('Cashier', style: headerStyle)),
-              DataColumn(label: Text('Cash', style: headerStyle)),
-              DataColumn(label: Text('UPI/Card', style: headerStyle)),
-              DataColumn(label: Text('Total', style: headerStyle)),
-            ],
-            rows: rows,
+        final dataStyle = Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface);
+        return DataTableTheme(
+          data: DataTableThemeData(
+            headingTextStyle: headerStyle,
+            dataTextStyle: dataStyle,
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columnSpacing: 35,
+              headingRowHeight: 40,
+              columns: [
+                DataColumn(label: Text('Invoice #', style: headerStyle)),
+                DataColumn(label: Text('Date & Time', style: headerStyle)),
+                DataColumn(label: Text('Cashier', style: headerStyle)),
+                DataColumn(label: Text('Cash', style: headerStyle)),
+                DataColumn(label: Text('UPI/Card', style: headerStyle)),
+                DataColumn(label: Text('Total', style: headerStyle)),
+              ],
+              rows: rows,
+            ),
           ),
         );
       },

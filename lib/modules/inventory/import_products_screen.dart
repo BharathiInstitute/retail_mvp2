@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth.dart';
 import 'Products/inventory_repository.dart';
+import '../../core/theme/theme_utils.dart';
 
 /// Unified Products Import screen (CSV/XLSX): pick → preview → import → summary
 class ImportProductsScreen extends ConsumerStatefulWidget {
@@ -112,7 +113,7 @@ class _ImportProductsScreenState extends ConsumerState<ImportProductsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Step 1: Pick File (.csv / .xlsx)', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('Step 1: Pick File (.csv / .xlsx)', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
               const SizedBox(height: 12),
               Text(pickedFileName == null ? 'No file selected yet' : 'Selected: $pickedFileName'),
               const SizedBox(height: 12),
@@ -122,7 +123,7 @@ class _ImportProductsScreenState extends ConsumerState<ImportProductsScreen> {
                 label: const Text('Pick File (.csv / .xlsx)'),
               ),
               const SizedBox(height: 8),
-              const Text('Accepted: CSV with headers or XLSX (first sheet).', style: TextStyle(color: Colors.black54))
+              Text('Accepted: CSV with headers or XLSX (first sheet).', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))
             ],
           ),
         ),
@@ -843,27 +844,33 @@ class _PreviewTable extends StatelessWidget {
         thumbVisibility: true,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columns: [
-              const DataColumn(label: Text('Status')),
-              for (final h in headers) DataColumn(label: Text(h)),
-            ],
-            rows: [
-              for (final r in rows)
-                DataRow(
-                  color: r.status == _RowStatus.invalid
-                      ? WidgetStatePropertyAll(theme.colorScheme.error.withValues(alpha: 0.06))
-                      : null,
-                  cells: [
-                    DataCell(r.status == _RowStatus.valid
-                        ? const Tooltip(message: 'Valid', child: Text('✅'))
-                        : r.status == _RowStatus.invalid
-                            ? Tooltip(message: r.errors.join('\n'), child: const Text('❌'))
-                            : const Text('•')),
-                    for (final h in headers) DataCell(Text(r.raw[h] ?? '')),
-                  ],
-                ),
-            ],
+          child: DataTableTheme(
+            data: DataTableThemeData(
+              dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+              headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+            ),
+            child: DataTable(
+              columns: [
+                const DataColumn(label: Text('Status')),
+                for (final h in headers) DataColumn(label: Text(h)),
+              ],
+              rows: [
+                for (final r in rows)
+                  DataRow(
+            color: r.status == _RowStatus.invalid
+              ? WidgetStatePropertyAll(theme.colorScheme.error.withValues(alpha: 0.06))
+                        : null,
+                    cells: [
+                      DataCell(r.status == _RowStatus.valid
+                          ? const Tooltip(message: 'Valid', child: Text('✅'))
+                          : r.status == _RowStatus.invalid
+                              ? Tooltip(message: r.errors.join('\\n'), child: const Text('❌'))
+                              : const Text('•')),
+                      for (final h in headers) DataCell(Text(r.raw[h] ?? '')),
+                    ],
+                  ),
+              ],
+            ),
           ),
         ),
       ),

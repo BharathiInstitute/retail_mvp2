@@ -92,6 +92,25 @@
 			"command": "flutter analyze",
 			"isBackground": false,
 			"group": "build"
+		},
+		{
+			"label": "Flutter pub get",
+			"type": "shell",
+			"command": "flutter pub get",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Repo analyze (full)",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
+		},
+		{
+			"label": "Analyze after core flatten",
+			"type": "shell",
+			"command": "flutter analyze",
+			"group": "build"
 		}
 	]
 }
