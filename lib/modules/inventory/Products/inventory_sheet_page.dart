@@ -352,6 +352,21 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
   @override
   Widget build(BuildContext context) {
     final productsAsync = ref.watch(productsStreamProvider);
+  Widget withScrollbars(Widget child) {
+      // Two Scrollbars with different predicates allow showing both vertical and horizontal thumbs.
+      return Scrollbar(
+        thumbVisibility: true,
+        trackVisibility: false,
+        interactive: true,
+        child: Scrollbar(
+          thumbVisibility: true,
+          trackVisibility: false,
+          interactive: true,
+          notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+          child: child,
+        ),
+      );
+    }
     final toolbar = Padding(
       padding: EdgeInsets.symmetric(horizontal: _fullscreen ? 4 : 8, vertical: _fullscreen ? 4 : 8),
       child: Row(
@@ -452,7 +467,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
       return Scaffold(
         body: SafeArea(
           child: Column(
-            children: [toolbar, const Divider(height: 1), Expanded(child: gridWidget)],
+            children: [toolbar, const Divider(height: 1), Expanded(child: withScrollbars(gridWidget))],
           ),
         ),
       );
@@ -473,7 +488,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
         ],
       ),
       body: Column(
-        children: [toolbar, const Divider(height: 1), Expanded(child: gridWidget)],
+  children: [toolbar, const Divider(height: 1), Expanded(child: withScrollbars(gridWidget))],
       ),
     );
   }

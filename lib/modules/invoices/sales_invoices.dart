@@ -4,22 +4,35 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
+import 'package:retail_mvp2/modules/pos/device_class_icon.dart';
 
 // Simple wrapper page used by router for Sales invoices
 class SalesInvoicesScreen extends StatelessWidget {
-  const SalesInvoicesScreen({super.key});
+  final EdgeInsetsGeometry contentPadding;
+  final double searchLeftShift;
+  const SalesInvoicesScreen({super.key, this.contentPadding = const EdgeInsets.all(12), this.searchLeftShift = 0});
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: InvoicesListScreen(),
+    return Scaffold(
+      body: Stack(
+        children: [
+          InvoicesListScreen(
+            contentPadding: contentPadding,
+            searchLeftShift: searchLeftShift,
+          ),
+          const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
+        ],
+      ),
     );
   }
 }
 
 class InvoicesListScreen extends StatefulWidget {
   final String? invoiceId;
-  const InvoicesListScreen({super.key, this.invoiceId});
+  final EdgeInsetsGeometry contentPadding;
+  final double searchLeftShift;
+  const InvoicesListScreen({super.key, this.invoiceId, this.contentPadding = const EdgeInsets.all(12), this.searchLeftShift = 0});
 
   @override
   State<InvoicesListScreen> createState() => _InvoicesPageState();
@@ -32,9 +45,12 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
   DateTimeRange? dateRange;
   bool taxInclusive = true;
 
+  // Limit initial load to improve first-paint time; older items can be fetched on demand later
+  static const int _pageSize = 200;
   Stream<List<Invoice>> get _invoiceStream => FirebaseFirestore.instance
       .collection('invoices')
       .orderBy('timestampMs', descending: true)
+      .limit(_pageSize)
       .snapshots()
       .map((snap) {
         final list = <Invoice>[];
@@ -74,8 +90,9 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
           ..clear()
           ..addAll(data);
         final filtered = filteredInvoices(_invoicesCache);
+        // Wrap content in padding; left shift handled inside search bar area
         return Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: widget.contentPadding,
           child: isWide ? _wideLayout(filtered) : _narrowLayout(filtered),
         );
       },
@@ -85,29 +102,40 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
   Widget _wideLayout(List<Invoice> list) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _searchFilterBar(),
+          Transform.translate(offset: Offset(-widget.searchLeftShift, 0), child: _searchFilterBar()),
           const SizedBox(height: 8),
           Expanded(child: _invoiceList(list: list)),
         ],
       );
 
-  Widget _narrowLayout(List<Invoice> list) => ListView(
+  Widget _narrowLayout(List<Invoice> list) => Column(
         children: [
-          _searchFilterBar(),
+          Transform.translate(offset: Offset(-widget.searchLeftShift, 0), child: _searchFilterBar()),
           const SizedBox(height: 8),
-          _invoiceList(list: list),
+          // Use Expanded to constrain the inner ListView height on tablet/mobile
+          Expanded(child: _invoiceList(list: list)),
         ],
       );
 
-  Widget _searchFilterBar() => Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
+  Widget _searchFilterBar() => LayoutBuilder(builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 560;
+        final searchWidth = narrow ? 220.0 : 260.0;
+        final btnStyle = OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          visualDensity: VisualDensity.compact,
+        );
+        final children = <Widget>[
           SizedBox(
-            width: 260,
+            width: searchWidth,
             child: TextField(
-              decoration: const InputDecoration(labelText: 'Search (invoice no / customer)', prefixIcon: Icon(Icons.search)),
+              decoration: const InputDecoration(
+                hintText: 'Search (invoice no / customer)',
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                floatingLabelBehavior: FloatingLabelBehavior.never,
+              ),
               onChanged: (v) => setState(() => query = v),
             ),
           ),
@@ -122,6 +150,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
             onChanged: (v) => setState(() => statusFilter = v),
           ),
           OutlinedButton.icon(
+            style: btnStyle,
             onPressed: () async {
               final now = DateTime.now();
               final picked = await showDateRangePicker(
@@ -135,6 +164,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
             label: Text(dateRange == null ? 'Date Range' : '${_fmtDate(dateRange!.start)} → ${_fmtDate(dateRange!.end)}'),
           ),
           OutlinedButton.icon(
+            style: btnStyle,
             onPressed: () => setState(() {
               query = '';
               statusFilter = null;
@@ -143,8 +173,16 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
             icon: const Icon(Icons.clear),
             label: const Text('Clear'),
           ),
-        ],
-      );
+        ];
+        if (narrow) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [for (final w in children) Padding(padding: const EdgeInsets.only(right: 8), child: w)]),
+          );
+        } else {
+          return Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+        }
+      });
 
   Widget _invoiceList({double? height, required List<Invoice> list}) {
     final listView = ListView.separated(
@@ -168,7 +206,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
         );
       },
     );
-    final content = Card(child: Scrollbar(thumbVisibility: true, child: listView));
+    final content = Card(margin: EdgeInsets.zero, child: Scrollbar(thumbVisibility: true, child: listView));
     return height != null ? SizedBox(height: height, child: content) : content;
   }
 
@@ -177,8 +215,37 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
       context: context,
       useRootNavigator: true,
       builder: (dialogCtx) {
+        final size = MediaQuery.of(context).size;
+        final isNarrow = size.width < 600;
+        if (isNarrow) {
+          // Fullscreen dialog on mobile for complete visibility
+          return Dialog(
+            insetPadding: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            child: SafeArea(
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: StreamBuilder<Invoice>(
+                  stream: _singleInvoiceStream(inv),
+                  builder: (context, snap) {
+                    final current = snap.data ?? inv;
+                    return InvoiceDetailsContent(
+                      invoice: current,
+                      dialogCtx: dialogCtx,
+                      taxInclusive: taxInclusive,
+                      onDelete: (inv) => _deleteInvoice(inv, dialogCtx),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        }
+        // Default centered dialog for larger screens
         return Dialog(
           insetPadding: const EdgeInsets.all(16),
+          clipBehavior: Clip.antiAlias,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980, maxHeight: 720),
             child: StreamBuilder<Invoice>(
@@ -410,36 +477,42 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (!editing)
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTableTheme(
-                        data: DataTableThemeData(
-                          dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
-                          headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
-                        ),
-                        child: DataTable(
-                        columns: const [
-                          DataColumn(label: Text('SKU')),
-                          DataColumn(label: Text('Item')),
-                          DataColumn(label: Text('Qty')),
-                          DataColumn(label: Text('Price')),
-                          DataColumn(label: Text('GST %')),
-                          DataColumn(label: Text('Line Total')),
-                        ],
-                        rows: [
-                          for (final it in inv.items)
-                            DataRow(cells: [
-                              DataCell(Text(it.product.sku)),
-                              DataCell(Text(it.product.name)),
-                              DataCell(Text(it.qty.toString())),
-                              DataCell(Text('₹${it.product.price.toStringAsFixed(2)}')),
-                              DataCell(Text('${it.product.taxPercent}%')),
-                              DataCell(Text('₹${it.lineTotal(taxInclusive: widget.taxInclusive).toStringAsFixed(2)}')),
-                            ]),
-                        ],
+                    Builder(builder: (ctx) {
+                      final isNarrow = MediaQuery.of(ctx).size.width < 600;
+                      if (isNarrow) {
+                        return _mobileItemsList(inv);
+                      }
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: DataTableTheme(
+                          data: DataTableThemeData(
+                            dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                            headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
                           ),
-                      ),
-                    )
+                          child: DataTable(
+                            columns: const [
+                              DataColumn(label: Text('SKU')),
+                              DataColumn(label: Text('Item')),
+                              DataColumn(label: Text('Qty')),
+                              DataColumn(label: Text('Price')),
+                              DataColumn(label: Text('GST %')),
+                              DataColumn(label: Text('Line Total')),
+                            ],
+                            rows: [
+                              for (final it in inv.items)
+                                DataRow(cells: [
+                                  DataCell(Text(it.product.sku)),
+                                  DataCell(Text(it.product.name)),
+                                  DataCell(Text(it.qty.toString())),
+                                  DataCell(Text('₹${it.product.price.toStringAsFixed(2)}')),
+                                  DataCell(Text('${it.product.taxPercent}%')),
+                                  DataCell(Text('₹${it.lineTotal(taxInclusive: widget.taxInclusive).toStringAsFixed(2)}')),
+                                ]),
+                            ],
+                          ),
+                        ),
+                      );
+                    })
                   else ...[
                     Row(
                       children: [
@@ -517,76 +590,195 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
 
   Widget _editRow(int index) {
     final r = rows[index];
+    final w = MediaQuery.of(context).size.width;
+    final isNarrow = w < 600;
+    if (!isNarrow) {
+      // Wide layout (tablet/desktop): single row
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 120,
+              child: TextFormField(
+                initialValue: r.sku,
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'SKU'),
+                onChanged: (v) => r.sku = v.trim(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextFormField(
+                controller: r.name,
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'Item'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 80,
+              child: TextFormField(
+                controller: r.qty,
+                keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'Qty'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 140,
+              child: TextFormField(
+                controller: r.price,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'Unit Price ₹'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 120,
+              child: DropdownButtonFormField<int>(
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                items: const [0, 5, 12, 18, 28]
+                    .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
+                    .toList(),
+                onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
+                decoration: const InputDecoration(labelText: 'Tax Rate'),
+                iconEnabledColor: context.colors.onSurfaceVariant,
+                iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Remove',
+              onPressed: rows.length <= 1
+                  ? null
+                  : () => setState(() {
+                        final rem = rows.removeAt(index);
+                        rem.dispose();
+                      }),
+              icon: const Icon(Icons.close),
+              color: context.colors.onSurfaceVariant,
+            ),
+          ],
+        ),
+      );
+    }
+    // Narrow layout (mobile): stacked/wrapped to avoid horizontal overflow
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 120,
-            child: TextFormField(
-              initialValue: r.sku,
-              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
-              decoration: const InputDecoration(labelText: 'SKU'),
-              onChanged: (v) => r.sku = v.trim(),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: r.sku,
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: const InputDecoration(labelText: 'SKU'),
+                  onChanged: (v) => r.sku = v.trim(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 92,
+                child: TextFormField(
+                  controller: r.qty,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: const InputDecoration(labelText: 'Qty'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextFormField(
-              controller: r.name,
-              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
-              decoration: const InputDecoration(labelText: 'Item'),
-            ),
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: r.name,
+            style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+            decoration: const InputDecoration(labelText: 'Item'),
           ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 80,
-            child: TextFormField(
-              controller: r.qty,
-              keyboardType: const TextInputType.numberWithOptions(decimal: false),
-              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
-              decoration: const InputDecoration(labelText: 'Qty'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 120,
-            child: TextFormField(
-              controller: r.price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
-              decoration: const InputDecoration(labelText: 'Unit Price ₹'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 110,
-            child: DropdownButtonFormField<int>(
-              initialValue: r.taxPercent,
-              style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
-              items: const [0, 5, 12, 18, 28]
-                  .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
-                  .toList(),
-              onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
-              decoration: const InputDecoration(labelText: 'Tax Rate'),
-              iconEnabledColor: context.colors.onSurfaceVariant,
-              iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Remove',
-            onPressed: rows.length <= 1
-                ? null
-                : () => setState(() {
-                      final rem = rows.removeAt(index);
-                      rem.dispose();
-                    }),
-            icon: const Icon(Icons.close),
-            color: context.colors.onSurfaceVariant,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: r.price,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  decoration: const InputDecoration(labelText: 'Unit Price ₹'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 140,
+                child: DropdownButtonFormField<int>(
+                  style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                  items: const [0, 5, 12, 18, 28]
+                      .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
+                      .toList(),
+                  onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
+                  decoration: const InputDecoration(labelText: 'Tax Rate'),
+                  iconEnabledColor: context.colors.onSurfaceVariant,
+                  iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Remove',
+                onPressed: rows.length <= 1
+                    ? null
+                    : () => setState(() {
+                          final rem = rows.removeAt(index);
+                          rem.dispose();
+                        }),
+                icon: const Icon(Icons.close),
+                color: context.colors.onSurfaceVariant,
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _mobileItemsList(Invoice inv) {
+    final labelStyle = context.texts.labelSmall?.copyWith(
+      color: context.colors.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+    );
+    final valueStyle = context.texts.bodySmall?.copyWith(color: context.colors.onSurface);
+    final moneyStyle = context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontFeatures: const [FontFeature.tabularFigures()]);
+    return Column(
+      children: [
+        for (final it in inv.items)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: Text(it.product.sku, style: valueStyle)),
+                    Text('Qty ${it.qty}', style: labelStyle),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(it.product.name, style: valueStyle),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Price: ₹${it.product.price.toStringAsFixed(2)}', style: moneyStyle),
+                    Text('GST: ${it.product.taxPercent}%', style: labelStyle),
+                    Text('Line: ₹${it.lineTotal(taxInclusive: widget.taxInclusive).toStringAsFixed(2)}', style: moneyStyle),
+                  ],
+                ),
+                const Divider(height: 16),
+              ],
+            ),
+          ),
+      ],
     );
   }
 

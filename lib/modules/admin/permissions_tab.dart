@@ -278,12 +278,12 @@ class _UserPicker extends StatelessWidget {
         if (items.isEmpty) {
           return const Text('No users found');
         }
-        final ids = items.map((d) => d.id).toSet();
-        final currentValue = (selectedUid != null && ids.contains(selectedUid)) ? selectedUid : null;
+        // Removed unused variable 'ids'
+        // Removed unused variable 'currentValue'
         return DropdownButtonFormField<String>(
           isExpanded: true,
           decoration: const InputDecoration(labelText: 'Select user'),
-          initialValue: currentValue,
+          // initialValue removed (unsupported)
           items: [
             for (final d in items)
               (){

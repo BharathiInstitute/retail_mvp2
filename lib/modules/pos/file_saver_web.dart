@@ -3,6 +3,7 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 // ignore: deprecated_member_use
 import 'dart:html' as html; // TODO: Migrate to package:web + dart:js_interop for safer future compatibility.
+// TODO: Migrate to package:web + dart:js_interop for safer future compatibility. (see line 5)
 
 class PdfSaver {
   Future<String> savePdf(String filename, List<int> bytes) async {

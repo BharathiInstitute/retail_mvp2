@@ -199,6 +199,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   Widget build(BuildContext context) {
     final totals = _computeTotals();
   final balance = ((totals.grand - _toDouble(paidCtrl)).clamp(0, double.infinity)).toDouble();
+    final size = MediaQuery.of(context).size;
+    final double contentWidth = size.width > 860 ? 820 : (size.width - 24).clamp(320, 820);
+    final double contentHeight = size.height > 700 ? 620 : (size.height - 24).clamp(420, 620);
     return AlertDialog(
       title: Text(
         widget.existingId == null ? 'New Purchase Invoice' : 'Edit Purchase Invoice',
@@ -206,9 +209,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       ),
       content: DefaultTextStyle(
         style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
-        child: SizedBox(
-        width: 820,
-        height: 620,
+  child: SizedBox(
+  width: contentWidth,
+  height: contentHeight,
         child: Scrollbar(
           controller: _scrollCtrl,
           thumbVisibility: true,
@@ -499,7 +502,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 200,
           child: DropdownButtonFormField<PurchaseType>(
-            initialValue: type,
+            // initialValue removed (unsupported)
             style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             items: PurchaseType.values
                 .map((t) => DropdownMenuItem(value: t, child: Text(_purchaseTypeLabel(t))))
@@ -535,7 +538,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         SizedBox(
           width: 160,
           child: DropdownButtonFormField<String>(
-            initialValue: paymentMode,
+            // initialValue removed (unsupported)
             style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
             items: const [
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
@@ -595,12 +598,81 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
 
   Widget _itemRow(int index) {
     final r = items[index];
+    final isNarrow = MediaQuery.of(context).size.width < 600;
+    if (!isNarrow) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: Row(children: [
+          Expanded(
+            flex: 3,
+            child: _ProductAutocomplete(
+              controller: r.name,
+              initialSku: r.sku,
+              onProductSelected: (prod) {
+                setState(() {
+                  r.sku = prod?.sku;
+                  if ((r.price.text.trim().isEmpty || r.price.text == '0') && prod != null) {
+                    r.price.text = prod.unitPrice.toStringAsFixed(2);
+                  }
+                  if ((type == PurchaseType.gst || type == PurchaseType.import) && prod?.taxPct != null) {
+                    r.gstRate = (prod!.taxPct ?? 0).toInt();
+                  }
+                });
+              },
+              products: _products,
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(width: 90, child: TextFormField(controller: r.qty, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Qty'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+          const SizedBox(width: 8),
+          SizedBox(width: 120, child: TextFormField(controller: r.price, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Unit Price ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
+          const SizedBox(width: 8),
+          if (type == PurchaseType.gst || type == PurchaseType.import)
+            SizedBox(
+              width: 120,
+              child: DropdownButtonFormField<int>(
+                // initialValue removed (unsupported)
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                items: const [0, 5, 12, 18, 28]
+                    .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
+                    .toList(),
+                onChanged: (v) => setState(() => r.gstRate = v ?? r.gstRate),
+                decoration: const InputDecoration(labelText: 'Tax Rate'),
+                iconEnabledColor: context.colors.onSurfaceVariant,
+                iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+              ),
+            ),
+          const SizedBox(width: 8),
+          // Computed line amount
+          SizedBox(
+            width: 110,
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: 'Amount'),
+              child: Text(_fmtAmount((double.tryParse(r.qty.text) ?? 0) * (double.tryParse(r.price.text) ?? 0))),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Remove',
+            onPressed: items.length <= 1
+                ? null
+                : () => setState(() {
+                      final row = items.removeAt(index);
+                      row.dispose();
+                    }),
+            icon: const Icon(Icons.close),
+            color: context.colors.onSurfaceVariant,
+          ),
+        ]),
+      );
+    }
+    // Mobile layout: stack fields to avoid horizontal overflow
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(children: [
-        Expanded(
-          flex: 3,
-          child: _ProductAutocomplete(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _ProductAutocomplete(
             controller: r.name,
             initialSku: r.sku,
             onProductSelected: (prod) {
@@ -616,17 +688,32 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             },
             products: _products,
           ),
-        ),
-        const SizedBox(width: 8),
-  SizedBox(width: 90, child: TextFormField(controller: r.qty, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Qty'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
-        const SizedBox(width: 8),
-  SizedBox(width: 120, child: TextFormField(controller: r.price, style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface), decoration: const InputDecoration(labelText: 'Unit Price ₹'), keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
-        const SizedBox(width: 8),
-        if (type == PurchaseType.gst || type == PurchaseType.import)
-          SizedBox(
-            width: 120,
-            child: DropdownButtonFormField<int>(
-              initialValue: r.gstRate,
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: TextFormField(
+                controller: r.qty,
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'Qty'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextFormField(
+                controller: r.price,
+                style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
+                decoration: const InputDecoration(labelText: 'Unit Price ₹'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          if (type == PurchaseType.gst || type == PurchaseType.import)
+            DropdownButtonFormField<int>(
+              // initialValue removed (unsupported)
               style: context.texts.bodyMedium?.copyWith(color: context.colors.onSurface),
               items: const [0, 5, 12, 18, 28]
                   .map((v) => DropdownMenuItem(value: v, child: Text('GST $v%')))
@@ -636,29 +723,30 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               iconEnabledColor: context.colors.onSurfaceVariant,
               iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
             ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Amount'),
+                  child: Text(_fmtAmount((double.tryParse(r.qty.text) ?? 0) * (double.tryParse(r.price.text) ?? 0))),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Remove',
+                onPressed: items.length <= 1
+                    ? null
+                    : () => setState(() {
+                          final row = items.removeAt(index);
+                          row.dispose();
+                        }),
+                icon: const Icon(Icons.close),
+                color: context.colors.onSurfaceVariant,
+              ),
+            ],
           ),
-        const SizedBox(width: 8),
-        // Computed line amount
-        SizedBox(
-          width: 110,
-          child: InputDecorator(
-            decoration: const InputDecoration(labelText: 'Amount'),
-            child: Text(_fmtAmount((double.tryParse(r.qty.text) ?? 0) * (double.tryParse(r.price.text) ?? 0))),
-          ),
-        ),
-        const SizedBox(width: 8),
-        IconButton(
-          tooltip: 'Remove',
-          onPressed: items.length <= 1
-              ? null
-              : () => setState(() {
-                    final row = items.removeAt(index);
-                    row.dispose();
-                  }),
-          icon: const Icon(Icons.close),
-          color: context.colors.onSurfaceVariant,
-        ),
-      ]),
+        ],
+      ),
     );
   }
 
@@ -857,7 +945,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
         return DropdownButtonFormField<String>(
           isExpanded: true,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-            initialValue: current.isEmpty ? null : current,
+            // initialValue removed (unsupported)
             items: items
                 .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                 .toList(),
@@ -1073,7 +1161,8 @@ class _PurchasesList extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = FirebaseFirestore.instance.collection('purchase_invoices');
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: col.orderBy('timestampMs', descending: true).snapshots(),
+      // Limit initial load to speed up list rendering on large datasets
+      stream: col.orderBy('timestampMs', descending: true).limit(200).snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
           return Center(child: Text('Error loading purchases: ${snap.error}'));
@@ -1121,11 +1210,6 @@ class _PurchasesList extends StatelessWidget {
                   Text('Total: ₹${grand.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
                   Text('Paid: ₹${paid.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
                 ],
-              ),
-              trailing: IconButton(
-                tooltip: 'Edit',
-                icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                onPressed: () => showEditPurchaseInvoiceDialog(context, d.id, m),
               ),
               onTap: () => showEditPurchaseInvoiceDialog(context, d.id, m),
             );

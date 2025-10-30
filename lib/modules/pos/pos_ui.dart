@@ -16,7 +16,8 @@ import 'pos_invoices/invoice_models.dart';
 import 'pos_invoices/invoice_pdf.dart' as pdf_gen; // For PDF generation (email attachment only; download removed)
 import 'pos_invoices/invoice_email_service.dart';
 import 'pos.dart'; // models & enums
-import 'pos_search_scan_fav.dart';
+import 'pos_search_scan_fav_fixed.dart';
+import 'device_class_icon.dart';
 import '../inventory/Products/inventory_repository.dart';
 import 'pos_checkout.dart';
 import 'credit_service.dart';
@@ -978,14 +979,15 @@ class _PosPageState extends State<PosPage> {
         _cacheProducts = allProducts;
         final filtered = _filteredProducts(allProducts);
         final pagePadding = isDesktop ? const EdgeInsets.all(12.0) : (isTablet ? const EdgeInsets.all(8.0) : const EdgeInsets.all(12.0));
-        return Padding(
-          padding: pagePadding,
-          child: isDesktop
-              ? _wideLayout(filtered, allProducts)
-              : isTablet
-                  ? _tabletLayout(filtered, allProducts)
-                  : _narrowLayout(filtered, allProducts),
-        );
+        final body = isDesktop
+            ? _wideLayout(filtered, allProducts)
+            : isTablet
+                ? _tabletLayout(filtered, allProducts)
+                : _narrowLayout(filtered, allProducts);
+        return Stack(children: [
+          Padding(padding: pagePadding, child: body),
+          const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
+        ]);
       },
     ));
   }
@@ -1005,7 +1007,7 @@ class _PosPageState extends State<PosPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 420,
+          width: 360,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1044,31 +1046,38 @@ class _PosPageState extends State<PosPage> {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: CartSection(
-            cart: cart,
-            heldOrders: heldOrders,
-            onHold: holdCart,
-            onResumeSelect: (ctx) async {
-              final sel = await showDialog<HeldOrder>(
-                context: ctx,
-                builder: (_) => _HeldOrdersDialog(orders: heldOrders),
-              );
-              if (sel != null) {
-                resumeHeld(sel);
-              }
-              return sel;
-            },
-            onClear: () {
-              setState(() => cart.clear());
-              _snack('Cart cleared');
-            },
-            onChangeQty: (sku, d) => changeQty(sku, d),
-            onRemove: (sku) => removeFromCart(sku),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: CartSection(
+                  cart: cart,
+                  heldOrders: heldOrders,
+                  onHold: holdCart,
+                  onResumeSelect: (ctx) async {
+                    final sel = await showDialog<HeldOrder>(
+                      context: ctx,
+                      builder: (_) => _HeldOrdersDialog(orders: heldOrders),
+                    );
+                    if (sel != null) {
+                      resumeHeld(sel);
+                    }
+                    return sel;
+                  },
+                  onClear: () {
+                    setState(() => cart.clear());
+                    _snack('Cart cleared');
+                  },
+                  onChangeQty: (sku, d) => changeQty(sku, d),
+                  onRemove: (sku) => removeFromCart(sku),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(width: 12),
         SizedBox(
-          width: 360,
+          width: 300,
           child: CheckoutPanel(
             customersStream: _customerStream,
             initialCustomers: customers,
@@ -1158,26 +1167,42 @@ class _PosPageState extends State<PosPage> {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: CartSection(
-            cart: cart,
-            heldOrders: heldOrders,
-            onHold: holdCart,
-            onResumeSelect: (ctx) async {
-              final sel = await showDialog<HeldOrder>(
-                context: ctx,
-                builder: (_) => _HeldOrdersDialog(orders: heldOrders),
-              );
-              if (sel != null) {
-                resumeHeld(sel);
-              }
-              return sel;
-            },
-            onClear: () {
-              setState(() => cart.clear());
-              _snack('Cart cleared');
-            },
-            onChangeQty: (sku, d) => changeQty(sku, d),
-            onRemove: (sku) => removeFromCart(sku),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _CustomersDropdownCard(
+                customersStream: _customerStream,
+                initialCustomers: customers,
+                selectedCustomer: selectedCustomer,
+                walkIn: walkIn,
+                availablePoints: _availablePoints,
+                onSelected: (c) => _onCustomerSelected(c),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: CartSection(
+                  cart: cart,
+                  heldOrders: heldOrders,
+                  onHold: holdCart,
+                  onResumeSelect: (ctx) async {
+                    final sel = await showDialog<HeldOrder>(
+                      context: ctx,
+                      builder: (_) => _HeldOrdersDialog(orders: heldOrders),
+                    );
+                    if (sel != null) {
+                      resumeHeld(sel);
+                    }
+                    return sel;
+                  },
+                  onClear: () {
+                    setState(() => cart.clear());
+                    _snack('Cart cleared');
+                  },
+                  onChangeQty: (sku, d) => changeQty(sku, d),
+                  onRemove: (sku) => removeFromCart(sku),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(width: 8),
@@ -1259,6 +1284,15 @@ class _PosPageState extends State<PosPage> {
           allProducts: allProducts,
           favoriteSkus: favoriteSkus,
           onAdd: (p) => addToCart(p),
+        ),
+        const SizedBox(height: 8),
+        _CustomersDropdownCard(
+          customersStream: _customerStream,
+          initialCustomers: customers,
+          selectedCustomer: selectedCustomer,
+          walkIn: walkIn,
+          availablePoints: _availablePoints,
+          onSelected: (c) => _onCustomerSelected(c),
         ),
         const SizedBox(height: 8),
         CartSection(
@@ -1594,5 +1628,95 @@ class _HeldOrdersDialogState extends State<_HeldOrdersDialog> {
 
 // ---------------- Simple Print Settings Dialog (placeholder) ----------------
 // Print Settings UI removed; printing now sends to backend default printer.
+
+
+// Lightweight Customers dropdown/details card placed below cart section
+class _CustomersDropdownCard extends StatelessWidget {
+  final Stream<List<Customer>> customersStream;
+  final List<Customer> initialCustomers;
+  final Customer? selectedCustomer;
+  final Customer walkIn;
+  final double availablePoints;
+  final ValueChanged<Customer?> onSelected;
+
+  const _CustomersDropdownCard({
+    required this.customersStream,
+    required this.initialCustomers,
+    required this.selectedCustomer,
+    required this.walkIn,
+    required this.availablePoints,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      child: ExpansionTile(
+        leading: const Icon(Icons.person_search_outlined),
+        title: const Text('Customers'),
+        childrenPadding: const EdgeInsets.only(bottom: 12, left: 12, right: 12),
+        children: [
+          StreamBuilder<List<Customer>>(
+            stream: customersStream,
+            initialData: initialCustomers,
+            builder: (ctx, snap) {
+              final raw = snap.data ?? initialCustomers;
+              final list = <Customer>[walkIn, ...raw.where((c) => c.id != walkIn.id)];
+              Customer value = list.first;
+              final selId = selectedCustomer?.id ?? value.id;
+              for (final c in list) {
+                if (c.id == selId) { value = c; break; }
+              }
+              return DropdownButtonFormField<Customer>(
+                value: value,
+                items: list
+                    .map((c) => DropdownMenuItem<Customer>(value: c, child: Text(c.name, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: onSelected,
+                decoration: const InputDecoration(
+                  labelText: 'Select customer',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          _InfoRow(icon: Icons.phone_iphone, label: 'Phone', value: selectedCustomer?.phone?.isNotEmpty == true ? selectedCustomer!.phone! : '—'),
+          _InfoRow(icon: Icons.email_outlined, label: 'Email', value: selectedCustomer?.email?.isNotEmpty == true ? selectedCustomer!.email! : '—'),
+          _InfoRow(icon: Icons.stars_outlined, label: 'Status', value: (selectedCustomer?.status ?? 'walk-in').toString()),
+          _InfoRow(icon: Icons.savings_outlined, label: 'Points', value: availablePoints.toStringAsFixed(0)),
+          _InfoRow(icon: Icons.account_balance_wallet_outlined, label: 'Credit', value: '₹${(selectedCustomer?.creditBalance ?? 0).toStringAsFixed(2)}'),
+          const SizedBox(height: 4),
+          Divider(height: 1, color: cs.outlineVariant),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  const _InfoRow({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant))),
+          Text(value, style: tt.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
 
 

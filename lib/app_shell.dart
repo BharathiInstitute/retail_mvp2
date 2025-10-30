@@ -13,7 +13,9 @@ import 'core/theme/font_controller.dart';
 // Module screens used by the router
 import 'modules/dashboard/dashboard.dart';
 import 'modules/pos/pos_ui.dart';
+import 'modules/pos/pos_two_section_tab.dart';
 import 'modules/pos/pos_cashier.dart';
+import 'modules/pos/pos_mobile.dart';
 import 'modules/inventory/Products/inventory.dart';
 import 'modules/inventory/stock_movements_screen.dart';
 import 'modules/inventory/transfers_screen.dart';
@@ -21,6 +23,7 @@ import 'modules/inventory/suppliers_screen.dart';
 import 'modules/inventory/alerts_screen.dart';
 import 'modules/inventory/audit_screen.dart';
 import 'modules/invoices/sales_invoices.dart';
+import 'modules/sales/sales_tab.dart';
 import 'modules/invoices/purchse_invoice.dart';
 // Removed legacy invoices tabs; using standalone screens
 import 'modules/crm/crm.dart';
@@ -142,7 +145,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/pos',
               name: 'pos',
-              pageBuilder: (context, state) => const NoTransitionPage(child: PosPage()),
+              pageBuilder: (context, state) => const NoTransitionPage(child: _PosEntry()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/pos-tab',
+              name: 'pos-tab',
+              pageBuilder: (context, state) => const NoTransitionPage(child: PosTwoSectionTabPage()),
+            ),
+          ]),
+          // Explicit mobile POS route to allow directly opening the mobile layout from the side menu
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/pos-mobile',
+              name: 'pos-mobile',
+              pageBuilder: (context, state) => const NoTransitionPage(child: PosMobilePage()),
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -209,6 +227,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               pageBuilder: (context, state) => const NoTransitionPage(child: SalesInvoicesScreen()),
             ),
           ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/invoices/sales-tab',
+              name: 'invoices-sales-tab',
+              pageBuilder: (context, state) => const NoTransitionPage(child: SalesTabPage()),
+            ),
+          ]),
+          
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/invoices/purchases',
@@ -373,12 +399,34 @@ class AppShell extends ConsumerWidget {
       })) ),
       body: Row(
         children: [
-          if (isWide) SizedBox(width: 220, child: _SideMenu(isWide: true, onGo: (r) => _goTo(context, r))),
+          if (isWide)
+            Consumer(builder: (context, ref, _) {
+              final extended = ref.watch(navRailExtendedProvider);
+              final width = extended ? 220.0 : 64.0;
+              return SizedBox(width: width, child: _SideMenu(isWide: true, onGo: (r) => _goTo(context, r)));
+            }),
           Expanded(child: navigationShell),
         ],
       ),
       bottomNavigationBar: null,
     );
+  }
+}
+
+// Route entry that picks the POS layout based on width
+class _PosEntry extends StatelessWidget {
+  const _PosEntry();
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.of(context).size.width;
+    if (w < 700) {
+      return const PosMobilePage();
+    }
+    final isTablet = w >= 700 && w < 1280;
+    if (isTablet) {
+      return const PosTwoSectionTabPage();
+    }
+    return const PosPage();
   }
 }
 
@@ -395,7 +443,10 @@ class _SideMenu extends ConsumerWidget {
   final isOwner = ref.watch(ownerProvider).asData?.value ?? false;
     final currentPath = GoRouterState.of(context).matchedLocation;
 
+    final extended = ref.watch(navRailExtendedProvider);
+
     Widget header() {
+      if (!extended) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Row(
@@ -435,10 +486,13 @@ class _SideMenu extends ConsumerWidget {
     Widget item(String label, IconData icon, String route, {String? screenKey, int indent = 0}) {
       final canAccess = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
       final selected = currentPath == route || (route != '/' && currentPath.startsWith(route));
-      return ListTile(
+      final tile = ListTile(
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-        contentPadding: EdgeInsets.only(left: 12.0 + indent * 14.0, right: 12),
+        minLeadingWidth: 0,
+        contentPadding: extended
+            ? EdgeInsets.only(left: 12.0 + indent * 14.0, right: 12)
+            : const EdgeInsets.symmetric(horizontal: 8),
         leading: Icon(
           icon,
           size: 20,
@@ -446,18 +500,19 @@ class _SideMenu extends ConsumerWidget {
               ? context.colors.primary
               : (canAccess ? context.colors.onSurfaceVariant : context.colors.onSurfaceVariant),
         ),
-        title: Text(
-          label,
-          style: context.texts.bodySmall?.copyWith(
-            color: context.colors.onSurface,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        trailing: canAccess
-            ? null
-            : Icon(Icons.lock_outline, size: 16, color: context.colors.onSurfaceVariant),
+        title: extended
+            ? Text(
+                label,
+                style: context.texts.bodySmall?.copyWith(
+                  color: context.colors.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : null,
+        trailing: extended && !canAccess
+            ? Icon(Icons.lock_outline, size: 16, color: context.colors.onSurfaceVariant)
+            : null,
         selected: selected,
-        // Keep tile enabled for readability in dark mode; gate access in handler.
         onTap: () {
           if (canAccess) {
             onGo(route);
@@ -467,34 +522,39 @@ class _SideMenu extends ConsumerWidget {
           }
         },
       );
+      return extended ? tile : Tooltip(message: label, child: tile);
     }
 
     Widget groupHeader(String label, IconData icon, StateProvider<bool> expandState, {bool disabled = false}) {
       final expanded = ref.watch(expandState);
-      return ListTile(
+      final tile = ListTile(
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        contentPadding: extended ? const EdgeInsets.symmetric(horizontal: 12) : const EdgeInsets.symmetric(horizontal: 8),
         leading: Icon(
           icon,
           size: 20,
           color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
         ),
-        title: Text(
-          label,
-          style: context.texts.bodySmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
-          ),
-        ),
-        trailing: Icon(
-          expanded ? Icons.expand_less : Icons.expand_more,
-          size: 18,
-          color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
-        ),
-        // Keep header readable; if disabled, ignore tap but don't dim text.
+        title: extended
+            ? Text(
+                label,
+                style: context.texts.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
+                ),
+              )
+            : null,
+        trailing: extended
+            ? Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 18,
+                color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
+              )
+            : null,
         onTap: disabled ? null : () => ref.read(expandState.notifier).state = !expanded,
       );
+      return extended ? tile : Tooltip(message: label, child: tile);
     }
 
     List<Widget> children = [
@@ -506,6 +566,8 @@ class _SideMenu extends ConsumerWidget {
         groupHeader('POS', Icons.point_of_sale_outlined, posMenuExpandedProvider),
         if (ref.watch(posMenuExpandedProvider)) ...[
           item('POS Main', Icons.store_mall_directory_outlined, '/pos', screenKey: ScreenKeys.posMain, indent: 1),
+          item('POS Tab', Icons.tablet_mac_outlined, '/pos-tab', screenKey: ScreenKeys.posMain, indent: 1),
+          item('POS Mobile', Icons.phone_iphone_outlined, '/pos-mobile', screenKey: ScreenKeys.posMain, indent: 1),
           item('POS Cashier', Icons.account_circle_outlined, '/pos-cashier', screenKey: ScreenKeys.posCashier, indent: 1),
         ],
       ],
@@ -528,6 +590,7 @@ class _SideMenu extends ConsumerWidget {
         groupHeader('Invoices', Icons.receipt_long_outlined, invoicesMenuExpandedProvider),
         if (ref.watch(invoicesMenuExpandedProvider)) ...[
           item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
+          item('Sales (Tab)', Icons.tablet_mac_outlined, '/invoices/sales-tab', screenKey: ScreenKeys.invSales, indent: 1),
           item('Purchases', Icons.shopping_cart_outlined, '/invoices/purchases', screenKey: ScreenKeys.invPurchases, indent: 1),
         ],
       ],
@@ -546,22 +609,30 @@ class _SideMenu extends ConsumerWidget {
       ],
       const Divider(height: 8),
       if (user != null)
-        ListTile(
-          dense: true,
-          visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-          leading: Icon(Icons.logout, size: 20, color: context.colors.onSurface),
-          title: Text(
-            'Logout',
-            style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
-          ),
-          onTap: () async {
-            try {
-              final messenger = ScaffoldMessenger.maybeOf(context); messenger?.clearSnackBars();
-              final rootCtx = rootNavigatorKey.currentContext; if (rootCtx != null) { GoRouter.of(rootCtx).go('/login'); }
-              Future.microtask(() => ref.read(authRepositoryProvider).signOut());
-            } catch (_) {}
-          },
-        ),
+        Builder(builder: (context) {
+          final extended = ref.watch(navRailExtendedProvider);
+          final tile = ListTile(
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+            minLeadingWidth: 0,
+            contentPadding: extended ? const EdgeInsets.symmetric(horizontal: 12) : const EdgeInsets.symmetric(horizontal: 8),
+            leading: Icon(Icons.logout, size: 20, color: context.colors.onSurface),
+            title: extended
+                ? Text(
+                    'Logout',
+                    style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                  )
+                : null,
+            onTap: () async {
+              try {
+                final messenger = ScaffoldMessenger.maybeOf(context); messenger?.clearSnackBars();
+                final rootCtx = rootNavigatorKey.currentContext; if (rootCtx != null) { GoRouter.of(rootCtx).go('/login'); }
+                Future.microtask(() => ref.read(authRepositoryProvider).signOut());
+              } catch (_) {}
+            },
+          );
+          return extended ? tile : Tooltip(message: 'Logout', child: tile);
+        }),
     ];
 
     return Column(

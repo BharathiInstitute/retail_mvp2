@@ -61,6 +61,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   String _search = '';
   _ActiveFilter _activeFilter = _ActiveFilter.all;
   int _gstFilter = -1; // -1 => All, otherwise 0/5/12/18
+  // Horizontal scroll controller for drag/swipe panning on desktop/tablet/mobile
+  final ScrollController _hScrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _hScrollCtrl.dispose();
+    super.dispose();
+  }
 
   List<ProductDoc> _applyFilters(List<ProductDoc> src) {
     Iterable<ProductDoc> it = src;
@@ -89,101 +97,112 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-          Transform.translate(
-            offset: const Offset(0, -4),
-            child: SizedBox(
-              width: 280,
-              child: TextField(
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  labelText: 'Search SKU/Name/Barcode',
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onChanged: (v) => setState(() => _search = v),
+        LayoutBuilder(builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 560;
+          final searchWidth = narrow ? 220.0 : 280.0;
+          final btnMinH = 36.0;
+          final btnPad = const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
+          final compactFilled = FilledButton.styleFrom(
+            minimumSize: Size(0, btnMinH),
+            padding: btnPad,
+            visualDensity: VisualDensity.compact,
+          );
+          final compactOutlined = OutlinedButton.styleFrom(
+            minimumSize: Size(0, btnMinH),
+            padding: btnPad,
+            visualDensity: VisualDensity.compact,
+          );
+          final searchBox = SizedBox(
+            width: searchWidth,
+            child: TextField(
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search SKU/Name/Barcode',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                floatingLabelBehavior: FloatingLabelBehavior.never,
               ),
+              onChanged: (v) => setState(() => _search = v),
             ),
-          ),
-          const SizedBox(width: 16),
-          Transform.translate(
-            offset: const Offset(0, -4),
-            child: DropdownButton<_ActiveFilter>(
-              value: _activeFilter,
-              onChanged: (v) => setState(() => _activeFilter = v ?? _ActiveFilter.all),
-              items: const [
-                DropdownMenuItem(value: _ActiveFilter.all, child: Text('All')),
-                DropdownMenuItem(value: _ActiveFilter.active, child: Text('Active')),
-                DropdownMenuItem(value: _ActiveFilter.inactive, child: Text('Inactive')),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Transform.translate(
-            offset: const Offset(0, -4),
-            child: DropdownButton<int>(
-              value: _gstFilter,
-              onChanged: (v) => setState(() => _gstFilter = v ?? -1),
-              items: const [
-                DropdownMenuItem(value: -1, child: Text('GST: All')),
-                DropdownMenuItem(value: 0, child: Text('GST 0%')),
-                DropdownMenuItem(value: 5, child: Text('GST 5%')),
-                DropdownMenuItem(value: 12, child: Text('GST 12%')),
-                DropdownMenuItem(value: 18, child: Text('GST 18%')),
-              ],
-            ),
-          ),
-          FilledButton.icon(
-            onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Product'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: () => _exportCsv(),
-            icon: const Icon(Icons.file_download_outlined),
-            label: const Text('Export CSV'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: isSignedIn
-                ? () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ImportProductsScreen()),
-                    )
-                : _requireSignInNotice,
-            icon: const Icon(Icons.file_upload_outlined),
-            label: const Text('Import CSV'),
-          ),
-          const SizedBox(width: 8),
-          Builder(builder: (_) {
-            final hasData = !async.isLoading && async.hasValue && (async.valueOrNull?.isNotEmpty ?? false);
-            return OutlinedButton.icon(
-              onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
-              icon: const Icon(Icons.qr_code_2),
-              label: const Text('Barcodes PDF'),
-            );
-          }),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const InventorySheetPage()),
-            ),
-            icon: const Icon(Icons.grid_on_outlined),
-            label: const Text('Update Sheet'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const InvoiceAnalysisPage()),
-            ),
-            icon: const Icon(Icons.analytics_outlined),
-            label: const Text('Invoice Analysis'),
-          ),
-        ]),
+          );
+          final activeDrop = DropdownButton<_ActiveFilter>(
+            value: _activeFilter,
+            onChanged: (v) => setState(() => _activeFilter = v ?? _ActiveFilter.all),
+            items: const [
+              DropdownMenuItem(value: _ActiveFilter.all, child: Text('All')),
+              DropdownMenuItem(value: _ActiveFilter.active, child: Text('Active')),
+              DropdownMenuItem(value: _ActiveFilter.inactive, child: Text('Inactive')),
+            ],
+          );
+          final gstDrop = DropdownButton<int>(
+            value: _gstFilter,
+            onChanged: (v) => setState(() => _gstFilter = v ?? -1),
+            items: const [
+              DropdownMenuItem(value: -1, child: Text('GST: All')),
+              DropdownMenuItem(value: 0, child: Text('GST 0%')),
+              DropdownMenuItem(value: 5, child: Text('GST 5%')),
+              DropdownMenuItem(value: 12, child: Text('GST 12%')),
+              DropdownMenuItem(value: 18, child: Text('GST 18%')),
+            ],
+          );
+          return Wrap(
+            spacing: narrow ? 6 : 8,
+            runSpacing: narrow ? 6 : 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              searchBox,
+              activeDrop,
+              gstDrop,
+              FilledButton.icon(
+                style: compactFilled,
+                onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
+                icon: const Icon(Icons.add),
+                label: const Text('Add Product'),
+              ),
+              OutlinedButton.icon(
+                style: compactOutlined,
+                onPressed: () => _exportCsv(),
+                icon: const Icon(Icons.file_download_outlined),
+                label: const Text('Export CSV'),
+              ),
+              OutlinedButton.icon(
+                style: compactOutlined,
+                onPressed: isSignedIn
+                    ? () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const ImportProductsScreen()),
+                        )
+                    : _requireSignInNotice,
+                icon: const Icon(Icons.file_upload_outlined),
+                label: const Text('Import CSV'),
+              ),
+              Builder(builder: (_) {
+                final hasData = !async.isLoading && async.hasValue && (async.valueOrNull?.isNotEmpty ?? false);
+                return OutlinedButton.icon(
+                  style: compactOutlined,
+                  onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
+                  icon: const Icon(Icons.qr_code_2),
+                  label: const Text('Barcodes PDF'),
+                );
+              }),
+              OutlinedButton.icon(
+                style: compactOutlined,
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const InventorySheetPage()),
+                ),
+                icon: const Icon(Icons.grid_on_outlined),
+                label: const Text('Update Sheet'),
+              ),
+              OutlinedButton.icon(
+                style: compactOutlined,
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const InvoiceAnalysisPage()),
+                ),
+                icon: const Icon(Icons.analytics_outlined),
+                label: const Text('Invoice Analysis'),
+              ),
+            ],
+          );
+        }),
         const SizedBox(height: 12),
         Expanded(
           child: Card(
@@ -202,6 +221,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final table = DataTable(
+                        columnSpacing: 28,
+                        horizontalMargin: 12,
                         columns: const [
                           DataColumn(label: Text('SKU')),
                           DataColumn(label: Text('Name')),
@@ -246,17 +267,36 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                             ),
                         ],
                       );
-                      return SingleChildScrollView(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                            child: DataTableTheme(
-                              data: DataTableThemeData(
-                                dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                                headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                      // Make the table robust when the side menu expands (reduced width):
+                      // wrap with horizontal Scrollbar+SingleChildScrollView first, then vertical inside.
+                      return Scrollbar(
+                        thumbVisibility: true,
+                        notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) {
+                            if (!_hScrollCtrl.hasClients) return;
+                            final maxExtent = _hScrollCtrl.position.maxScrollExtent;
+                            double next = _hScrollCtrl.offset - details.delta.dx;
+                            if (next < 0) next = 0;
+                            if (next > maxExtent) next = maxExtent;
+                            _hScrollCtrl.jumpTo(next);
+                          },
+                          child: SingleChildScrollView(
+                            controller: _hScrollCtrl,
+                            physics: const ClampingScrollPhysics(),
+                            scrollDirection: Axis.horizontal,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                              child: SingleChildScrollView(
+                                child: DataTableTheme(
+                                  data: DataTableThemeData(
+                                    dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                                    headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                                  ),
+                                  child: table,
+                                ),
                               ),
-                              child: table,
                             ),
                           ),
                         ),

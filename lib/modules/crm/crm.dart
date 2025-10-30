@@ -164,56 +164,84 @@ class _CrmListScreenState extends State<CrmListScreen> {
 
 	@override
 	Widget build(BuildContext context) {
+		final isMobile = MediaQuery.of(context).size.width < 560;
 		final listPanel = Card(
+			margin: isMobile ? EdgeInsets.zero : null,
 			child: Column(
 				children: [
 					Padding(
-						padding: const EdgeInsets.all(12.0),
-						child: Wrap(
-							spacing: 8,
-							runSpacing: 8,
-							crossAxisAlignment: WrapCrossAlignment.center,
-							children: [
-								SizedBox(
-									width: 280,
-									child: TextField(
-										style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
-										decoration: InputDecoration(
-											prefixIcon: Icon(Icons.search, color: context.colors.onSurfaceVariant),
-											labelText: 'Search (name, phone, email)',
-											labelStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
-											hintStyle: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+						padding: isMobile ? EdgeInsets.zero : const EdgeInsets.all(12.0),
+											child: LayoutBuilder(builder: (context, constraints) {
+												final narrow = constraints.maxWidth < 560;
+												final searchWidth = narrow ? 220.0 : 280.0;
+												final btnStyle = ElevatedButton.styleFrom(
+													minimumSize: const Size(0, 36),
+													padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+													visualDensity: VisualDensity.compact,
+												);
+												final outlined = OutlinedButton.styleFrom(
+													minimumSize: const Size(0, 36),
+													padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+													visualDensity: VisualDensity.compact,
+												);
+												final children = <Widget>[
+													SizedBox(
+														width: searchWidth,
+														child: TextField(
+															style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+															decoration: InputDecoration(
+																prefixIcon: Icon(Icons.search, color: context.colors.onSurfaceVariant),
+																hintText: 'Search (name, phone, email)',
+																isDense: true,
+																contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+																floatingLabelBehavior: FloatingLabelBehavior.never,
+															),
+															onChanged: (v) => setState(() => query = v),
+														),
+													),
+																				DropdownButton<LoyaltyFilter>(
+														value: loyaltyFilter,
+														style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+														dropdownColor: context.colors.surface,
+														iconEnabledColor: context.colors.onSurfaceVariant,
+														items: const [
+															DropdownMenuItem(value: LoyaltyFilter.all, child: Text('All')),
+															DropdownMenuItem(value: LoyaltyFilter.bronze, child: Text('Bronze')),
+															DropdownMenuItem(value: LoyaltyFilter.silver, child: Text('Silver')),
+															DropdownMenuItem(value: LoyaltyFilter.gold, child: Text('Gold')),
+														],
+														onChanged: (v) => setState(() => loyaltyFilter = v ?? LoyaltyFilter.all),
+													),
+																				SizedBox(width: narrow ? 4 : 8),
+													ElevatedButton.icon(
+														style: btnStyle,
+														onPressed: _quickAddCustomer,
+														icon: const Icon(Icons.person_add),
+														label: const Text('Add Customer'),
+													),
+													if (!narrow)
+														OutlinedButton.icon(
+															style: outlined,
+															onPressed: _exportCsv,
+															icon: const Icon(Icons.file_download),
+															label: const Text('Export CSV'),
+														),
+												];
+												if (narrow) {
+													return SingleChildScrollView(
+														scrollDirection: Axis.horizontal,
+														child: Row(children: [for (final w in children) Padding(padding: EdgeInsets.only(right: narrow ? 4 : 8), child: w)]),
+													);
+												} else {
+													return Wrap(
+														spacing: 8,
+														runSpacing: 8,
+														crossAxisAlignment: WrapCrossAlignment.center,
+														children: children,
+													);
+												}
+											}),
 										),
-										onChanged: (v) => setState(() => query = v),
-									),
-								),
-								DropdownButton<LoyaltyFilter>(
-									value: loyaltyFilter,
-									style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
-									dropdownColor: context.colors.surface,
-									iconEnabledColor: context.colors.onSurfaceVariant,
-									items: const [
-										DropdownMenuItem(value: LoyaltyFilter.all, child: Text('All')),
-										DropdownMenuItem(value: LoyaltyFilter.bronze, child: Text('Bronze')),
-										DropdownMenuItem(value: LoyaltyFilter.silver, child: Text('Silver')),
-										DropdownMenuItem(value: LoyaltyFilter.gold, child: Text('Gold')),
-									],
-									onChanged: (v) => setState(() => loyaltyFilter = v ?? LoyaltyFilter.all),
-								),
-								const SizedBox(width: 8),
-								ElevatedButton.icon(
-									onPressed: _quickAddCustomer,
-									icon: const Icon(Icons.person_add),
-									label: const Text('Add Customer'),
-								),
-								OutlinedButton.icon(
-									onPressed: _exportCsv,
-									icon: const Icon(Icons.file_download),
-									label: const Text('Export CSV'),
-								),
-							],
-						),
-					),
 					const Divider(height: 1),
 					Expanded(
 						child: StreamBuilder<List<CrmCustomer>>(
@@ -272,7 +300,7 @@ class _CrmListScreenState extends State<CrmListScreen> {
 			),
 		);
 
-		return Padding(padding: const EdgeInsets.all(12), child: listPanel);
+		return Padding(padding: isMobile ? EdgeInsets.zero : const EdgeInsets.all(12), child: listPanel);
 	}
 }
 

@@ -15,6 +15,14 @@ class TransfersScreen extends ConsumerStatefulWidget {
 
 class _TransfersScreenState extends ConsumerState<TransfersScreen> {
   String _filter = '';
+  // Horizontal scroll controller for drag/swipe panning
+  final ScrollController _hScrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _hScrollCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,16 +72,31 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                   margin: EdgeInsets.zero,
                   child: LayoutBuilder(builder: (context, constraints) {
                     final minWidth = constraints.maxWidth; // ensure fills width
-                    return SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minWidth: minWidth),
-                        child: DataTableTheme(
-                          data: DataTableThemeData(
-                            dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
-                            headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
-                          ),
-                          child: DataTable(
+                    return Scrollbar(
+                      thumbVisibility: true,
+                      notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragUpdate: (details) {
+                          if (!_hScrollCtrl.hasClients) return;
+                          final maxExtent = _hScrollCtrl.position.maxScrollExtent;
+                          double next = _hScrollCtrl.offset - details.delta.dx;
+                          if (next < 0) next = 0;
+                          if (next > maxExtent) next = maxExtent;
+                          _hScrollCtrl.jumpTo(next);
+                        },
+                        child: SingleChildScrollView(
+                          controller: _hScrollCtrl,
+                          physics: const ClampingScrollPhysics(),
+                          scrollDirection: Axis.horizontal,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: minWidth),
+                            child: DataTableTheme(
+                              data: DataTableThemeData(
+                                dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                                headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                              ),
+                              child: DataTable(
                           columns: const [
                             DataColumn(label: Text('Date')),
                             DataColumn(label: Text('SKU')),
@@ -113,6 +136,8 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                 ],
                               ),
                           ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -166,7 +191,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                 Row(children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      initialValue: from,
+                      // initialValue removed (unsupported)
                       items: const ['Store', 'Warehouse']
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
@@ -183,7 +208,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      initialValue: to,
+                      // initialValue removed (unsupported)
                       items: const ['Store', 'Warehouse']
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
@@ -491,7 +516,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _from,
+                          // initialValue removed (unsupported)
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -508,7 +533,7 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _to,
+                          // initialValue removed (unsupported)
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),

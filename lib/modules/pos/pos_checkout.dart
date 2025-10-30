@@ -107,8 +107,8 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
         _kv('Subtotal', widget.subtotal),
         _kv('Discount', -widget.discountValue),
         if (widget.redeemValue > 0) _kv('Redeemed (Pts)', -widget.redeemValue),
-  const SizedBox(height: 6),
-  Builder(builder: (context) => Text('GST Breakdown', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700))),
+        const SizedBox(height: 6),
+        Builder(builder: (context) => Text('GST Breakdown', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700))),
         ...taxesByRate.entries.map((e) => _kv('GST ${e.key}%', e.value)),
         const Divider(),
         _kv('Grand Total', widget.grandTotal),
@@ -124,21 +124,23 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
           redeemedPoints: widget.getRedeemedPoints(),
         ),
         const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _payModeButton(context, PaymentMode.cash, 'Cash', Icons.payments)),
-          const SizedBox(width: 8),
-          Expanded(child: _payModeButton(context, PaymentMode.upi, 'UPI', Icons.qr_code)),
-        ]),
+  _paymentModesSection(buildButton: (mode, label, icon) => _payModeButton(context, mode, label, icon)),
         if (widget.selectedPaymentMode == PaymentMode.credit) ...[
           const SizedBox(height: 8),
-          TextField(
-            controller: _creditAmountCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Amount Paid Now (₹)',
-              prefixIcon: Icon(Icons.receipt_long),
-              border: OutlineInputBorder(),
-              helperText: 'Leave blank = 0. Less than payable → rest becomes new credit. More than payable → extra repays old credit.',
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: TextField(
+                controller: _creditAmountCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Amount Paid Now (₹)',
+                  prefixIcon: Icon(Icons.receipt_long),
+                  border: OutlineInputBorder(),
+                  helperText: 'Leave blank = 0. Less than payable → rest becomes new credit. More than payable → extra repays old credit.',
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 4),
@@ -147,52 +149,36 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
             payable: widget.payableTotal,
             existingCredit: widget.selectedCustomer?.creditBalance ?? 0,
           ),
-  ],
-  const SizedBox(height: 12),
-  Row(children: [
-          ElevatedButton.icon(
-            onPressed: () { final qp = widget.onQuickPrint; if (qp != null) qp(); },
-            icon: const Icon(Icons.print),
-            label: const Text('Print'),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Print Settings',
-            onPressed: () => _openPrintSettings(context),
-            icon: const Icon(Icons.settings),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () {
-                if (widget.selectedPaymentMode == PaymentMode.credit) {
-                  final amt = double.tryParse(_creditAmountCtrl.text.trim()) ?? 0;
-                  // If there is a cart (mixed sale) use mixed callback, else repayment-only callback
-                  if (kDebugMode) {
-                    debugPrint('[CheckoutPanel] Credit button pressed cartItems=${widget.cart.length} amt=$amt mixCb=${widget.onCheckoutCreditMix!=null} repayCb=${widget.onPayCredit!=null}');
-                  }
-                  if (widget.cart.isNotEmpty) {
-                    if (widget.onCheckoutCreditMix != null) {
-                      widget.onCheckoutCreditMix!(amt);
-                    } else if (kDebugMode) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing credit mix callback')));
-                    }
-                  } else {
-                    if (widget.onPayCredit != null) {
-                      widget.onPayCredit!(amt);
-                    } else if (kDebugMode) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing credit repay callback')));
-                    }
-                  }
-                } else {
-                  widget.onCheckout();
+        ],
+        const SizedBox(height: 12),
+  _actionsSection(
+          onQuickPrint: widget.onQuickPrint,
+          onCheckout: () {
+            if (widget.selectedPaymentMode == PaymentMode.credit) {
+              final amt = double.tryParse(_creditAmountCtrl.text.trim()) ?? 0;
+              if (kDebugMode) {
+                debugPrint('[CheckoutPanel] Credit button pressed cartItems=${widget.cart.length} amt=$amt mixCb=${widget.onCheckoutCreditMix!=null} repayCb=${widget.onPayCredit!=null}');
+              }
+              if (widget.cart.isNotEmpty) {
+                if (widget.onCheckoutCreditMix != null) {
+                  widget.onCheckoutCreditMix!(amt);
+                } else if (kDebugMode) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing credit mix callback')));
                 }
-              },
-              icon: const Icon(Icons.check_circle),
-              label: Text(widget.selectedPaymentMode == PaymentMode.credit ? 'Checkout (Credit Mix)' : 'Checkout'),
-            ),
-          ),
-        ]),
+              } else {
+                if (widget.onPayCredit != null) {
+                  widget.onPayCredit!(amt);
+                } else if (kDebugMode) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing credit repay callback')));
+                }
+              }
+            } else {
+              widget.onCheckout();
+            }
+          },
+          openPrintSettings: () => _openPrintSettings(context),
+          creditMode: widget.selectedPaymentMode == PaymentMode.credit,
+        ),
       ]),
     );
     return Card(
@@ -201,6 +187,89 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
         thumbVisibility: true,
         child: content,
       ),
+    );
+  }
+
+  // Localized responsive section: payment modes
+  Widget _paymentModesSection({
+    required Widget Function(PaymentMode mode, String label, IconData icon) buildButton,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 420;
+        if (narrow) {
+          return Column(children: [
+            SizedBox(width: double.infinity, child: buildButton(PaymentMode.cash, 'Cash', Icons.payments)),
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: buildButton(PaymentMode.upi, 'UPI', Icons.qr_code)),
+          ]);
+        }
+        return Row(children: [
+          Expanded(child: buildButton(PaymentMode.cash, 'Cash', Icons.payments)),
+          const SizedBox(width: 8),
+          Expanded(child: buildButton(PaymentMode.upi, 'UPI', Icons.qr_code)),
+        ]);
+      },
+    );
+  }
+
+  // Localized responsive section: actions (print/settings/checkout)
+  Widget _actionsSection({
+    required VoidCallback? onQuickPrint,
+    required VoidCallback openPrintSettings,
+    required VoidCallback onCheckout,
+    required bool creditMode,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 420;
+        if (narrow) {
+          return Column(children: [
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              ElevatedButton.icon(
+                onPressed: () { final qp = onQuickPrint; if (qp != null) qp(); },
+                icon: const Icon(Icons.print),
+                label: const Text('Print'),
+              ),
+              IconButton(
+                tooltip: 'Print Settings',
+                onPressed: openPrintSettings,
+                icon: const Icon(Icons.settings),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onCheckout,
+                icon: const Icon(Icons.check_circle),
+                label: Text(creditMode ? 'Checkout (Credit Mix)' : 'Checkout'),
+              ),
+            ),
+          ]);
+        }
+        return Row(children: [
+          ElevatedButton.icon(
+            onPressed: () { final qp = onQuickPrint; if (qp != null) qp(); },
+            icon: const Icon(Icons.print),
+            label: const Text('Print'),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Print Settings',
+            onPressed: openPrintSettings,
+            icon: const Icon(Icons.settings),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: onCheckout,
+              icon: const Icon(Icons.check_circle),
+              label: Text(creditMode ? 'Checkout (Credit Mix)' : 'Checkout'),
+            ),
+          ),
+        ]);
+      },
     );
   }
   Widget _payModeButton(BuildContext context, PaymentMode mode, String label, IconData icon) {
@@ -480,31 +549,37 @@ class _RedeemSection extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 8),
       Row(children: [
-        Expanded(child: TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            labelText: 'Redeem Points',
-            prefixIcon: const Icon(Icons.card_giftcard),
-            helperText: helper,
-            errorText: errorText,
-            suffixIcon: (availablePoints > 0)
-                ? Tooltip(
-                    message: 'Available: ${availablePoints.toStringAsFixed(0)}',
-                    child: Padding(
-                        padding: const EdgeInsets.only(right: 8.0),
-                        child: Center(
-                            widthFactor: 1,
-                            child: Text(
-                              availablePoints.toStringAsFixed(0),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(fontWeight: FontWeight.w600),
-                            ))))
-                : null,
+        Flexible(child: Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 280),
+            child: TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                labelText: 'Redeem Points',
+                prefixIcon: const Icon(Icons.card_giftcard),
+                helperText: helper,
+                errorText: errorText,
+                suffixIcon: (availablePoints > 0)
+                    ? Tooltip(
+                        message: 'Available: ${availablePoints.toStringAsFixed(0)}',
+                        child: Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: Center(
+                                widthFactor: 1,
+                                child: Text(
+                                  availablePoints.toStringAsFixed(0),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ))))
+                    : null,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => onChange(),
+            ),
           ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          onChanged: (_) => onChange(),
         )),
         const SizedBox(width: 8),
         ElevatedButton(onPressed: availablePoints <= 0 ? null : onMax, child: const Text('Max')),
@@ -578,7 +653,12 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
               child: TextField(
                 controller: _searchCtrl,
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name / email / phone', isDense: true, border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Search name / email / phone',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                ),
                 onChanged: (_) => setState(() {}),
               ),
             ),

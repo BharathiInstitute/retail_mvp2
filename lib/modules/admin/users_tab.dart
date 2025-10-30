@@ -365,7 +365,7 @@ class _AddUserDialogState extends State<_AddUserDialog> {
               ]),
               const SizedBox(height:8),
               DropdownButtonFormField<String>(
-                initialValue: _role,
+                // initialValue removed (unsupported)
                 style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
                 dropdownColor: context.colors.surface,
                 iconEnabledColor: context.colors.onSurfaceVariant,
@@ -537,12 +537,7 @@ class _EditUserDialogState extends State<_EditUserDialog>{
   // If the current role is something like 'previous_owner', keep it as a selectable item
   // so DropdownButtonFormField does not assert. We still allow changing it to a supported role.
   static const List<String> _allowedRoles = ['manager','cashier','clerk','accountant'];
-  String _normalizeRoleValue(String role){
-    // If role is null/empty, fallback
-    final r = role.isEmpty ? 'cashier' : role;
-    // We return r as-is; items builder will include it if not allowed.
-    return r;
-  }
+  // Removed unused function _normalizeRoleValue
   List<DropdownMenuItem<String>> _buildRoleItems(String current){
     final items = <DropdownMenuItem<String>>[];
     if(!_allowedRoles.contains(current)){
@@ -590,7 +585,7 @@ class _EditUserDialogState extends State<_EditUserDialog>{
           ),
           const SizedBox(height:8),
           DropdownButtonFormField<String>(
-            initialValue: _normalizeRoleValue(_role),
+            // initialValue removed (unsupported)
             style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
             dropdownColor: context.colors.surface,
             iconEnabledColor: context.colors.onSurfaceVariant,

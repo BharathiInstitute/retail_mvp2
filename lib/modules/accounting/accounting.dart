@@ -180,10 +180,18 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 			);
 		}
 
-		return ListView(padding: const EdgeInsets.all(16), children: [
-			salesCard, const SizedBox(height: 12), gstrCard, const SizedBox(height: 12), pnlCard, const SizedBox(height: 12),
-			taxCard, const SizedBox(height: 12), exportCard, const SizedBox(height: 12), cashBookCard,
-		]);
+			// On narrow/mobile screens, hide GST Reports placeholder card to reduce clutter
+				return ListView(padding: const EdgeInsets.all(16), children: [
+					salesCard,
+					const SizedBox(height: 12),
+					// gstrCard intentionally omitted on mobile
+					pnlCard,
+					const SizedBox(height: 12),
+					taxCard,
+					const SizedBox(height: 12),
+					// exportCard intentionally omitted on mobile
+					cashBookCard,
+				]);
 	}
 }
 

@@ -30,7 +30,9 @@ class AppTypography {
     return themed.copyWith(
       headlineSmall: themed.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
       titleLarge: themed.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-      titleMedium: themed.titleMedium?.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
+      // Reduce TextField/content size: InputDecorator uses titleMedium by default
+      // Lowering to 14 makes text inside input fields smaller without impacting body text.
+      titleMedium: themed.titleMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
       bodyLarge: themed.bodyLarge?.copyWith(fontSize: 14.5),
       bodyMedium: themed.bodyMedium?.copyWith(fontSize: 13.5),
       labelLarge: themed.labelLarge?.copyWith(letterSpacing: 0.2),

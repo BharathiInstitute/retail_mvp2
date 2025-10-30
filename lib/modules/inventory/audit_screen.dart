@@ -1,11 +1,9 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
 import 'Products/inventory_repository.dart';
-import 'Products/csv_utils.dart';
-import 'download_helper_stub.dart' if (dart.library.html) 'download_helper_web.dart';
-import 'import_products_screen.dart' show ImportProductsScreen;
+// Removed CSV export/import for Audit screen
 import 'Products/inventory.dart'; // access shared providers
 import 'Products/inventory_repository.dart' show ProductDoc; // product model
 import '../../core/theme/theme_utils.dart';
@@ -60,40 +58,56 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-        Row(children:[
-          Transform.translate(
-            offset: const Offset(0,-4),
-            child: SizedBox(
-              width: 260,
-              child: TextField(
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.search),labelText:'Search SKU/Name/Barcode',isDense:true,contentPadding: EdgeInsets.symmetric(horizontal:12,vertical:8)),
-                onChanged:(v)=>setState(()=>_search=v),
+        LayoutBuilder(builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 640;
+          final actions = const SizedBox.shrink();
+
+          if (isNarrow) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children:[
+                Expanded(
+                  child: Transform.translate(
+                    offset: const Offset(0,-4),
+                    child: TextField(
+                      decoration: const InputDecoration(prefixIcon: Icon(Icons.search),labelText:'Search SKU/Name/Barcode',isDense:true,contentPadding: EdgeInsets.symmetric(horizontal:12,vertical:8)),
+                      onChanged:(v)=>setState(()=>_search=v),
+                    ),
+                  ),
+                ),
+                const SizedBox(width:8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('Audit'),
+                  onPressed: _openQuickAudit,
+                ),
+              ]),
+              const SizedBox(height:8),
+              actions,
+            ]);
+          }
+          // Wide layout
+          return Row(children:[
+            Transform.translate(
+              offset: const Offset(0,-4),
+              child: SizedBox(
+                width: 260,
+                child: TextField(
+                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search),labelText:'Search SKU/Name/Barcode',isDense:true,contentPadding: EdgeInsets.symmetric(horizontal:12,vertical:8)),
+                  onChanged:(v)=>setState(()=>_search=v),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width:12),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.inventory_2_outlined),
-            label: const Text('Audit'),
-            onPressed: _openQuickAudit,
-          ),
-          const SizedBox(width:16),
-          const Spacer(),
-          Builder(builder: (context){
-            final user = ref.watch(authStateProvider); final isSignedIn = user!=null;
-            return Row(mainAxisSize: MainAxisSize.min, children:[
-              // Minimal inline add product trigger removed (using import screen only)
-              const SizedBox(width:8),
-              OutlinedButton.icon(onPressed: ()=>_exportCsv(), icon: const Icon(Icons.file_download_outlined), label: const Text('Export CSV')),
-              const SizedBox(width:8),
-              OutlinedButton.icon(
-                onPressed: isSignedIn ? ()=> Navigator.of(context).push(MaterialPageRoute(builder: (_)=> const ImportProductsScreen()))
-                                     : ()=> ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in to import products.'))),
-                icon: const Icon(Icons.file_upload_outlined), label: const Text('Import CSV'),
-              ),
-            ]);
-          })
-        ]),
+            const SizedBox(width:12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: const Text('Audit'),
+              onPressed: _openQuickAudit,
+            ),
+            const SizedBox(width:16),
+            const Spacer(),
+            actions,
+          ]);
+        }),
         const SizedBox(height:8),
         Padding(
           padding: const EdgeInsets.only(bottom:4.0),
@@ -192,16 +206,28 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
                                 ),
                               ],
                             );
-                            return SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                                child: DataTableTheme(
-                                  data: DataTableThemeData(
-                                    dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
-                                    headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                            return Scrollbar(
+                              thumbVisibility: true,
+                              notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                              child: ScrollConfiguration(
+                                behavior: const MaterialScrollBehavior().copyWith(dragDevices: {
+                                  PointerDeviceKind.mouse,
+                                  PointerDeviceKind.touch,
+                                  PointerDeviceKind.stylus,
+                                  PointerDeviceKind.trackpad,
+                                }),
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                                    child: DataTableTheme(
+                                      data: DataTableThemeData(
+                                        dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                                        headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                                      ),
+                                      child: table,
+                                    ),
                                   ),
-                                  child: table,
                                 ),
                               ),
                             );
@@ -337,27 +363,7 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     }
   }
 
-  void _exportCsv(){
-    final products = ref.read(productsStreamProvider).maybeWhen(data:(d)=>d, orElse: ()=> <ProductDoc>[]);
-    final filtered = _applyFilters(products);
-    final rows = <List<String>>[];
-    rows.add(['SKU','Name','Barcode','UnitPrice','GST','Store','Warehouse','Total','StoreOverridden','WarehouseOverridden','UpdatedDate','UpdatedBy','Note']);
-    for(final p in filtered){
-      final store = _storeOverrides[p.sku] ?? p.stockAt('Store');
-      final wh = _whOverrides[p.sku] ?? p.stockAt('Warehouse');
-      final meta = _overrideMeta[p.sku];
-      final docDate = p.updatedAt;
-      final docBy = p.updatedBy;
-      final note = _noteOverrides[p.sku] ?? p.auditNote ?? '';
-      rows.add([
-        p.sku,p.name,p.barcode,p.unitPrice.toStringAsFixed(2),(p.taxPct??0).toString(),store.toString(),wh.toString(),(store+wh).toString(),(_storeOverrides.containsKey(p.sku)).toString(),(_whOverrides.containsKey(p.sku)).toString(),
-        meta != null ? _fmtDateTime(meta.updatedAt) : (docDate!=null ? _fmtDateTime(docDate) : ''),
-        meta?.updatedBy ?? (docBy ?? ''),
-        note,
-      ]);
-    }
-    final csv = CsvUtils.listToCsv(rows); final bytes = Uint8List.fromList(csv.codeUnits); downloadBytes(bytes,'audit_export.csv','text/csv');
-  }
+  // Export CSV removed per request.
 }
 
 class _AuditEditResult {

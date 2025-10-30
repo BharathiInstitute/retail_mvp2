@@ -51,6 +51,14 @@ class SuppliersScreen extends ConsumerStatefulWidget {
 
 class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   String _search = '';
+  // Horizontal scroll controller to enable drag-to-pan on desktop/tablet/mobile
+  final ScrollController _hScrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _hScrollCtrl.dispose();
+    super.dispose();
+  }
 
   List<SupplierDoc> _filter(List<SupplierDoc> list) {
     final q = _search.trim().toLowerCase();
@@ -70,24 +78,47 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Expanded(
-              child: TextField(
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  labelText: 'Search name / phone / email',
-                  isDense: true,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final narrow = constraints.maxWidth < 480;
+              // Compact search field with a max width so it doesn't dominate the row
+              final searchField = Flexible(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: narrow ? 260 : 420),
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search name / phone / email',
+                        isDense: true,
+                        floatingLabelBehavior: FloatingLabelBehavior.never,
+                      ),
+                      onChanged: (v) => setState(() => _search = v),
+                    ),
+                  ),
                 ),
-                onChanged: (v) => setState(() => _search = v),
-              ),
-            ),
-            const SizedBox(width: 12),
-            FilledButton.icon(
-              onPressed: _openAddDialog,
-              icon: const Icon(Icons.add),
-              label: const Text('Add Supplier'),
-            ),
-          ]),
+              );
+              final addBtn = FilledButton.icon(
+                onPressed: _openAddDialog,
+                icon: const Icon(Icons.add),
+                label: const Text('Add Supplier'),
+              );
+              if (narrow) {
+                // On mobile, place search and button in a single row with tight spacing
+                return Row(children: [
+                  searchField,
+                  const SizedBox(width: 8),
+                  Flexible(flex: 0, child: addBtn),
+                ]);
+              }
+              return Row(children: [
+                searchField,
+                const SizedBox(width: 12),
+                addBtn,
+              ]);
+            },
+          ),
           const SizedBox(height: 12),
           Expanded(
             child: Card(
@@ -103,7 +134,59 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                   }
                   return LayoutBuilder(
                     builder: (context, constraints) {
+                      final addressWidth = constraints.maxWidth < 480 ? 220.0 : 300.0;
+                      // On narrow screens, render a mobile-friendly stacked list instead of a wide DataTable
+                      if (constraints.maxWidth < 560) {
+                        return Scrollbar(
+                          thumbVisibility: true,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemBuilder: (context, i) {
+                              final s = filtered[i];
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                title: Text(s.name, style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600)),
+                                subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  if (s.address.isNotEmpty)
+                                    Text(s.address, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurfaceVariant)),
+                                  const SizedBox(height: 2),
+                                  Row(children: [
+                                    Expanded(child: Text(s.phone, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface))),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(s.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface)))
+                                  ]),
+                                ]),
+                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  IconButton(
+                                    tooltip: 'Call',
+                                    icon: const Icon(Icons.call),
+                                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Call ${s.phone} (demo)')),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Email',
+                                    icon: const Icon(Icons.email_outlined),
+                                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Email ${s.email} (demo)')),
+                                    ),
+                                  ),
+                                ]),
+                                onTap: () => _openEditDialog(s),
+                                onLongPress: () => _deleteSupplier(context, s.id),
+                              );
+                            },
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemCount: filtered.length,
+                          ),
+                        );
+                      }
                       final table = DataTable(
+                        columnSpacing: 24,
+                        headingRowHeight: 42,
+                        dataRowMinHeight: 40,
+                        dataRowMaxHeight: 46,
                         columns: const [
                           DataColumn(label: Text('Name')),
                           DataColumn(label: Text('Address')),
@@ -121,10 +204,10 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                               },
                               onLongPress: () => _deleteSupplier(context, s.id),
                               cells: [
-                                DataCell(Text(s.name)),
-                                DataCell(SizedBox(width: 300, child: Text(s.address))),
-                                DataCell(Text(s.phone)),
-                                DataCell(Text(s.email)),
+                                DataCell(Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false)),
+                                DataCell(SizedBox(width: addressWidth, child: Text(s.address, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false))),
+                                DataCell(Text(s.phone, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false)),
+                                DataCell(Text(s.email, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false)),
                                 DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
                                   IconButton(
                                     tooltip: 'Call',
@@ -145,16 +228,33 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                             ),
                         ],
                       );
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                          child: DataTableTheme(
-                            data: DataTableThemeData(
-                              dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
-                              headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                      return Scrollbar(
+                        thumbVisibility: true,
+                        notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) {
+                            if (!_hScrollCtrl.hasClients) return;
+                            final maxExtent = _hScrollCtrl.position.maxScrollExtent;
+                            double next = _hScrollCtrl.offset - details.delta.dx;
+                            if (next < 0) next = 0;
+                            if (next > maxExtent) next = maxExtent;
+                            _hScrollCtrl.jumpTo(next);
+                          },
+                          child: SingleChildScrollView(
+                            controller: _hScrollCtrl,
+                            physics: const ClampingScrollPhysics(),
+                            scrollDirection: Axis.horizontal,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                              child: DataTableTheme(
+                                data: DataTableThemeData(
+                                  dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                                  headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                                ),
+                                child: table,
+                              ),
                             ),
-                            child: table,
                           ),
                         ),
                       );

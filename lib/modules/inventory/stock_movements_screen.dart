@@ -164,7 +164,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                 Row(children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      initialValue: type,
+                      // initialValue removed (unsupported)
                       items: const ['Inbound', 'Outbound', 'Adjust']
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
@@ -176,7 +176,7 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      initialValue: location,
+                      // initialValue removed (unsupported)
                       items: const ['Store', 'Warehouse']
                           .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
@@ -458,7 +458,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                     Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _type,
+                          // initialValue removed (unsupported)
                           items: const ['Inbound', 'Outbound', 'Adjust']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
@@ -470,7 +470,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _location,
+                          // initialValue removed (unsupported)
                           items: const ['Store', 'Warehouse']
                               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),

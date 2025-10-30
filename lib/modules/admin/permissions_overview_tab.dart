@@ -91,7 +91,7 @@ class _ThemeFontSettingsDialogState extends ConsumerState<_ThemeFontSettingsDial
             Text('Font', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              initialValue: _font,
+              // initialValue removed (unsupported)
               style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
               dropdownColor: Theme.of(context).colorScheme.surface,
               iconEnabledColor: Theme.of(context).colorScheme.onSurfaceVariant,

@@ -72,6 +72,14 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
   bool _showExpired = true;
   bool _showSoon = true;
   bool _showWarn = true;
+  // Horizontal scroll controller for mouse/touch drag gestures
+  final ScrollController _hScrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _hScrollCtrl.dispose();
+    super.dispose();
+  }
 
   List<ProductAlert> _applyFilters(List<ProductAlert> src) {
     return src.where((a) {
@@ -129,16 +137,10 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Text('Alerts', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(width: 16),
-          const Tooltip(
-            message: 'Low Stock: totalQty <= 5\nExpiring Soon: expiry <= 7 days\nExpiry Warning: expiry <= 30 days\nExpired: expiry < today',
-            child: Icon(Icons.info_outline, size: 18),
-          ),
-          const Spacer(),
-          // Filter chips
-          Wrap(spacing: 6, runSpacing: 4, children: [
+        // Filter chips (title removed and layout made wrap-aware to avoid overflow)
+        LayoutBuilder(builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 560;
+          final chips = <Widget>[
             FilterChip(
               label: Text('Low Stock', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showLowStock,
@@ -171,8 +173,25 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
               checkmarkColor: _flagColor(context, 'Expiry Warning'),
               avatar: Icon(Icons.timelapse, size: 16, color: _flagColor(context, 'Expiry Warning')),
             ),
-          ])
-        ]),
+          ];
+          if (narrow) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final w in chips) Padding(padding: const EdgeInsets.only(right: 6), child: w),
+                ],
+              ),
+            );
+          } else {
+            return Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: chips,
+            );
+          }
+        }),
         const SizedBox(height: 8),
         Expanded(
           child: productsAsync.when(
@@ -232,18 +251,38 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                         ])
                     ],
                   );
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.vertical,
+                  return Scrollbar(
+                    thumbVisibility: true,
                     child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                        child: DataTableTheme(
-                          data: DataTableThemeData(
-                            dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
-                            headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                      scrollDirection: Axis.vertical,
+                      child: Scrollbar(
+                        thumbVisibility: true,
+                        notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) {
+                            if (!_hScrollCtrl.hasClients) return;
+                            final maxExtent = _hScrollCtrl.position.maxScrollExtent;
+                            double next = _hScrollCtrl.offset - details.delta.dx;
+                            if (next < 0) next = 0;
+                            if (next > maxExtent) next = maxExtent;
+                            _hScrollCtrl.jumpTo(next);
+                          },
+                          child: SingleChildScrollView(
+                            controller: _hScrollCtrl,
+                            physics: const ClampingScrollPhysics(),
+                            scrollDirection: Axis.horizontal,
+                            child: ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                            child: DataTableTheme(
+                              data: DataTableThemeData(
+                                dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
+                                headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
+                              ),
+                              child: table,
+                            ),
+                            ),
                           ),
-                          child: table,
                         ),
                       ),
                     ),

@@ -97,6 +97,122 @@ class AppColors extends ThemeExtension<AppColors> {
   }
 }
 
+/// Global size and spacing tokens accessible via ThemeExtension.
+class AppSizes extends ThemeExtension<AppSizes> {
+  // Radii
+  final double radiusSm;
+  final double radiusMd;
+  final double radiusLg;
+
+  // Gaps (spacing scale)
+  final double gapXs;
+  final double gapSm;
+  final double gapMd;
+  final double gapLg;
+
+  // Field paddings
+  final double fieldVPad;
+  final double fieldHPad;
+
+  // Button paddings
+  final double buttonVPad;
+  final double buttonHPad;
+
+  // Table row sizes
+  final double tableHeadingRowHeight;
+  final double tableDataRowMinHeight;
+  final double tableDataRowMaxHeight;
+
+  const AppSizes({
+    required this.radiusSm,
+    required this.radiusMd,
+    required this.radiusLg,
+    required this.gapXs,
+    required this.gapSm,
+    required this.gapMd,
+    required this.gapLg,
+    required this.fieldVPad,
+    required this.fieldHPad,
+    required this.buttonVPad,
+    required this.buttonHPad,
+    required this.tableHeadingRowHeight,
+    required this.tableDataRowMinHeight,
+    required this.tableDataRowMaxHeight,
+  });
+
+  static AppSizes defaults = const AppSizes(
+    radiusSm: 8,
+    radiusMd: 12,
+    radiusLg: 16,
+    gapXs: 4,
+    gapSm: 8,
+    gapMd: 12,
+    gapLg: 16,
+    fieldVPad: 8,
+    fieldHPad: 12,
+    buttonVPad: 10,
+    buttonHPad: 14,
+    tableHeadingRowHeight: 44,
+    tableDataRowMinHeight: 40,
+    tableDataRowMaxHeight: 44,
+  );
+
+  @override
+  AppSizes copyWith({
+    double? radiusSm,
+    double? radiusMd,
+    double? radiusLg,
+    double? gapXs,
+    double? gapSm,
+    double? gapMd,
+    double? gapLg,
+    double? fieldVPad,
+    double? fieldHPad,
+    double? buttonVPad,
+    double? buttonHPad,
+    double? tableHeadingRowHeight,
+    double? tableDataRowMinHeight,
+    double? tableDataRowMaxHeight,
+  }) => AppSizes(
+        radiusSm: radiusSm ?? this.radiusSm,
+        radiusMd: radiusMd ?? this.radiusMd,
+        radiusLg: radiusLg ?? this.radiusLg,
+        gapXs: gapXs ?? this.gapXs,
+        gapSm: gapSm ?? this.gapSm,
+        gapMd: gapMd ?? this.gapMd,
+        gapLg: gapLg ?? this.gapLg,
+        fieldVPad: fieldVPad ?? this.fieldVPad,
+        fieldHPad: fieldHPad ?? this.fieldHPad,
+        buttonVPad: buttonVPad ?? this.buttonVPad,
+        buttonHPad: buttonHPad ?? this.buttonHPad,
+        tableHeadingRowHeight: tableHeadingRowHeight ?? this.tableHeadingRowHeight,
+        tableDataRowMinHeight: tableDataRowMinHeight ?? this.tableDataRowMinHeight,
+        tableDataRowMaxHeight: tableDataRowMaxHeight ?? this.tableDataRowMaxHeight,
+      );
+
+  @override
+  AppSizes lerp(ThemeExtension<AppSizes>? other, double t) {
+    if (other is! AppSizes) return this;
+    double l(double a, double b) => a + (b - a) * t;
+    return AppSizes(
+      radiusSm: l(radiusSm, other.radiusSm),
+      radiusMd: l(radiusMd, other.radiusMd),
+      radiusLg: l(radiusLg, other.radiusLg),
+      gapXs: l(gapXs, other.gapXs),
+      gapSm: l(gapSm, other.gapSm),
+      gapMd: l(gapMd, other.gapMd),
+      gapLg: l(gapLg, other.gapLg),
+      fieldVPad: l(fieldVPad, other.fieldVPad),
+      fieldHPad: l(fieldHPad, other.fieldHPad),
+      buttonVPad: l(buttonVPad, other.buttonVPad),
+      buttonHPad: l(buttonHPad, other.buttonHPad),
+      tableHeadingRowHeight: l(tableHeadingRowHeight, other.tableHeadingRowHeight),
+      tableDataRowMinHeight: l(tableDataRowMinHeight, other.tableDataRowMinHeight),
+      tableDataRowMaxHeight: l(tableDataRowMaxHeight, other.tableDataRowMaxHeight),
+    );
+  }
+}
+
 class AppTheme {
   AppTheme._();
 
@@ -108,18 +224,26 @@ class AppTheme {
 
   static ThemeData light(BuildContext context, {required String fontKey}) {
     final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.light);
+    final sizes = AppSizes.defaults;
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
       textTheme: _textTheme(context, fontKey: fontKey),
-      extensions: <ThemeExtension<dynamic>>[AppColors.light],
+      extensions: <ThemeExtension<dynamic>>[AppColors.light, sizes],
       canvasColor: scheme.surface,
+      cardTheme: CardThemeData(
+        color: scheme.surface,
+        elevation: 1,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+        margin: EdgeInsets.all(sizes.gapSm),
+      ),
       popupMenuTheme: PopupMenuThemeData(
         color: scheme.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 6,
         textStyle: TextStyle(color: scheme.onSurface),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusSm)),
       ),
       chipTheme: ChipThemeData(
         labelStyle: _textTheme(context, fontKey: fontKey).labelSmall?.copyWith(color: scheme.onSurface),
@@ -149,40 +273,84 @@ class AppTheme {
         foregroundColor: scheme.onSurface,
         elevation: 0,
       ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      ),
+      filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+      )),
+      elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+      )),
+      outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+        side: BorderSide(color: scheme.outline),
+      )),
+      textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusSm)),
+      )),
       inputDecorationTheme: InputDecorationTheme(
-        border: const OutlineInputBorder(),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
         isDense: true,
-        labelStyle: TextStyle(color: scheme.onSurfaceVariant),
-        floatingLabelStyle: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600),
-        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+        contentPadding: EdgeInsets.symmetric(horizontal: sizes.fieldHPad, vertical: sizes.fieldVPad),
+        labelStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+        floatingLabelStyle: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600, fontSize: 12.5),
+        hintStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
         prefixIconColor: scheme.onSurfaceVariant,
         suffixIconColor: scheme.onSurfaceVariant,
-        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: scheme.outlineVariant)),
-        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: scheme.primary, width: 1.2)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(sizes.radiusMd),
+          borderSide: BorderSide(color: scheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(sizes.radiusMd),
+          borderSide: BorderSide(color: scheme.primary, width: 1.2),
+        ),
+      ),
+      dataTableTheme: DataTableThemeData(
+        headingRowHeight: sizes.tableHeadingRowHeight,
+        dataRowMinHeight: sizes.tableDataRowMinHeight,
+        dataRowMaxHeight: sizes.tableDataRowMaxHeight,
+        dividerThickness: 1,
+        headingTextStyle: _textTheme(context, fontKey: fontKey).labelLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+        ),
+        dataTextStyle: _textTheme(context, fontKey: fontKey).bodyMedium?.copyWith(color: scheme.onSurface),
+      ),
+      searchBarTheme: SearchBarThemeData(
+        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+        elevation: const WidgetStatePropertyAll(0),
+        shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd))),
+        hintStyle: WidgetStatePropertyAll(TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5)),
+        textStyle: WidgetStatePropertyAll(TextStyle(color: scheme.onSurface, fontSize: 14)),
       ),
     );
   }
 
   static ThemeData dark(BuildContext context, {required String fontKey}) {
     final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark);
+    final sizes = AppSizes.defaults;
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
       textTheme: _textTheme(context, fontKey: fontKey),
-      extensions: <ThemeExtension<dynamic>>[AppColors.dark],
+      extensions: <ThemeExtension<dynamic>>[AppColors.dark, sizes],
       canvasColor: scheme.surfaceContainerHigh,
+      cardTheme: CardThemeData(
+        color: scheme.surfaceContainerHigh,
+        elevation: 1,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+        margin: EdgeInsets.all(sizes.gapSm),
+      ),
       popupMenuTheme: PopupMenuThemeData(
         color: scheme.surfaceContainerHigh,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
         textStyle: TextStyle(color: scheme.onSurface),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusSm)),
       ),
       chipTheme: ChipThemeData(
         labelStyle: _textTheme(context, fontKey: fontKey).labelSmall?.copyWith(color: scheme.onSurface),
@@ -212,22 +380,58 @@ class AppTheme {
         foregroundColor: scheme.onSurface,
         elevation: 0,
       ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      ),
+      filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+      )),
+      elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+      )),
+      outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
+        side: BorderSide(color: scheme.outline),
+      )),
+      textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
+        padding: EdgeInsets.symmetric(horizontal: sizes.buttonHPad, vertical: sizes.buttonVPad),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusSm)),
+      )),
       inputDecorationTheme: InputDecorationTheme(
-        border: const OutlineInputBorder(),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(sizes.radiusMd)),
         isDense: true,
-        labelStyle: TextStyle(color: scheme.onSurfaceVariant),
-        floatingLabelStyle: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600),
-        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+        contentPadding: EdgeInsets.symmetric(horizontal: sizes.fieldHPad, vertical: sizes.fieldVPad),
+        labelStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+        floatingLabelStyle: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600, fontSize: 12.5),
+        hintStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
         prefixIconColor: scheme.onSurfaceVariant,
         suffixIconColor: scheme.onSurfaceVariant,
-        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: scheme.outlineVariant)),
-        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: scheme.primary, width: 1.2)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(sizes.radiusMd),
+          borderSide: BorderSide(color: scheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(sizes.radiusMd),
+          borderSide: BorderSide(color: scheme.primary, width: 1.2),
+        ),
+      ),
+      dataTableTheme: DataTableThemeData(
+        headingRowHeight: sizes.tableHeadingRowHeight,
+        dataRowMinHeight: sizes.tableDataRowMinHeight,
+        dataRowMaxHeight: sizes.tableDataRowMaxHeight,
+        dividerThickness: 1,
+        headingTextStyle: _textTheme(context, fontKey: fontKey).labelLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+        ),
+        dataTextStyle: _textTheme(context, fontKey: fontKey).bodyMedium?.copyWith(color: scheme.onSurface),
+      ),
+      searchBarTheme: SearchBarThemeData(
+        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHigh),
+        elevation: const WidgetStatePropertyAll(0),
+        shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(sizes.radiusMd))),
+        hintStyle: WidgetStatePropertyAll(TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5)),
+        textStyle: WidgetStatePropertyAll(TextStyle(color: scheme.onSurface, fontSize: 14)),
       ),
     );
   }
