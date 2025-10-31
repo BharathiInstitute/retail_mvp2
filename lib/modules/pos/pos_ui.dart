@@ -18,13 +18,15 @@ import 'pos_invoices/invoice_email_service.dart';
 import 'pos.dart'; // models & enums
 import 'pos_search_scan_fav_fixed.dart';
 import 'device_class_icon.dart';
-import '../inventory/Products/inventory_repository.dart';
 import 'pos_checkout.dart';
 import 'credit_service.dart';
 import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
 import 'printing/windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
 import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'printing/web_print_fallback.dart';
 import '../../core/app_keys.dart';
+import '../../core/paging/paged_list_controller.dart';
+import '../../core/loading/page_loader_overlay.dart';
+import '../../core/firebase/firestore_paging.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
 const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);
@@ -47,7 +49,7 @@ class PosPage extends StatefulWidget {
 
 class _PosPageState extends State<PosPage> {
   // Firestore-backed products cache (for quick lookup by barcode/SKU)
-  List<Product> _cacheProducts = [];
+  final List<Product> _cacheProducts = [];
 
   // POS customers: Walk-in plus CRM customers from Firestore
   static final Customer walkIn = Customer(id: '', name: 'Walk-in Customer');
@@ -56,6 +58,10 @@ class _PosPageState extends State<PosPage> {
   final TextEditingController barcodeCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
   final TextEditingController customerSearchCtrl = TextEditingController();
+  final ScrollController _productsScrollCtrl = ScrollController();
+  Timer? _searchDebounce;
+
+  late final PagedListController<Product> _productsPager;
 
   final Map<String, CartItem> cart = {};
   final List<HeldOrder> heldOrders = [];
@@ -119,6 +125,41 @@ class _PosPageState extends State<PosPage> {
       notify: () => setState(() {}),
       showMessage: _snack,
     );
+    // Initialize paged products controller with Firestore-backed paging and optional name prefix search
+    _productsPager = PagedListController<Product>(
+      pageSize: 50,
+      loadPage: (cursor) async {
+        final qText = searchCtrl.text.trim();
+        Query<Map<String, dynamic>> base = FirebaseFirestore.instance
+            .collection('inventory')
+            .orderBy('name');
+        if (qText.length >= 2) {
+          base = base.startAt([qText]).endAt(['$qText\uf8ff']);
+        }
+        final (items, next) = await fetchFirestorePage<Product>(
+          base: base,
+          after: cursor as DocumentSnapshot<Map<String, dynamic>>?,
+          pageSize: _productsPager.pageSize,
+          map: (doc) => Product.fromDoc(doc),
+        );
+        // Build cache for scanner incremental lookup
+        _cacheProducts.addAll(items);
+        return (items, next);
+      },
+    );
+    _productsPager.resetAndLoad();
+
+    _productsScrollCtrl.addListener(_maybeLoadMoreProducts);
+  }
+
+  @override
+  void dispose() {
+    _productsScrollCtrl.dispose();
+    _searchDebounce?.cancel();
+    _productsPager.dispose();
+    _customerDocSub?.cancel();
+    _scannerFocusNode.dispose();
+    super.dispose();
   }
 
   String _resolveBackendBase() {
@@ -664,21 +705,7 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  // ---------------- Temporary placeholder cart/product helpers ----------------
-  // Replace placeholder with live Firestore stream from inventory collection.
-  final InventoryRepository _inventoryRepo = InventoryRepository();
-  Stream<List<Product>> get _productStream => _inventoryRepo.streamProducts().map((docs) {
-        final list = docs.map((d) => Product(
-              sku: d.sku,
-              name: d.name,
-              price: d.unitPrice,
-              stock: d.totalStock,
-              taxPercent: (d.taxPct ?? 0).toInt(),
-              barcode: d.barcode.isEmpty ? null : d.barcode,
-              ref: FirebaseFirestore.instance.collection('inventory').doc(d.sku),
-            )).toList();
-        return list;
-      });
+  // ---------------- Cart/product helpers ----------------
   void addToCart(Product p) { cart.update(p.sku, (ex) => ex.copyWith(qty: ex.qty + 1), ifAbsent: () => CartItem(product: p, qty: 1)); setState(() {}); }
   void changeQty(String sku, int delta) { final it = cart[sku]; if (it==null) return; final nq = it.qty + delta; if (nq<=0) { cart.remove(sku);} else { cart[sku]=it.copyWith(qty: nq);} setState(() {}); }
   void removeFromCart(String sku){ cart.remove(sku); setState(() {}); }
@@ -963,46 +990,57 @@ class _PosPageState extends State<PosPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth >= 1280;
     final isTablet = screenWidth >= 900 && screenWidth < 1280;
+    final pagePadding = isDesktop
+        ? const EdgeInsets.all(12.0)
+        : (isTablet ? const EdgeInsets.all(8.0) : const EdgeInsets.all(12.0));
+
+    final productsState = _productsPager.state;
+    final products = productsState.items;
+
+    final body = isDesktop
+        ? _wideLayout(products)
+        : isTablet
+            ? _tabletLayout(products)
+            : _narrowLayout(products);
+
     return KeyboardListener(
       focusNode: _scannerFocusNode,
       onKeyEvent: _handleKeyEvent,
-      child: StreamBuilder<List<Product>>(
-      stream: _productStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text('Error loading products: ${snapshot.error}'));
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final allProducts = snapshot.data!;
-        _cacheProducts = allProducts;
-        final filtered = _filteredProducts(allProducts);
-        final pagePadding = isDesktop ? const EdgeInsets.all(12.0) : (isTablet ? const EdgeInsets.all(8.0) : const EdgeInsets.all(12.0));
-        final body = isDesktop
-            ? _wideLayout(filtered, allProducts)
-            : isTablet
-                ? _tabletLayout(filtered, allProducts)
-                : _narrowLayout(filtered, allProducts);
-        return Stack(children: [
-          Padding(padding: pagePadding, child: body),
-          const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
-        ]);
-      },
-    ));
+      child: Stack(children: [
+        Padding(
+          padding: pagePadding,
+          child: PageLoaderOverlay(
+            loading: products.isEmpty && productsState.loading,
+            error: products.isEmpty ? productsState.error : null,
+            onRetry: () => _productsPager.resetAndLoad(),
+            child: body,
+          ),
+        ),
+        const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
+      ]),
+    );
   }
 
-  List<Product> _filteredProducts(List<Product> products) {
-    final q = searchCtrl.text.trim().toLowerCase();
-    if (q.isEmpty) return products;
-    return products.where((p) =>
-      (p.sku.toLowerCase().contains(q)) ||
-      (p.name.toLowerCase().contains(q)) ||
-      ((p.barcode ?? '').toLowerCase().contains(q))
-    ).toList();
+  void _maybeLoadMoreProducts() {
+    if (!_productsScrollCtrl.hasClients) return;
+    final extentAfter = _productsScrollCtrl.position.extentAfter;
+    if (extentAfter < 600) {
+      _productsPager.loadMore();
+    }
   }
 
-  Widget _wideLayout(List<Product> filtered, List<Product> allProducts) {
+  void _onSearchChangedDebounced() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _cacheProducts.clear();
+      _productsPager.resetAndLoad();
+      if (mounted) setState(() {});
+    });
+  }
+
+  
+
+  Widget _wideLayout(List<Product> products) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1018,26 +1056,30 @@ class _PosPageState extends State<PosPage> {
                 scannerConnected: _isScannerConnected,
                 onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
                 onBarcodeSubmitted: _scan,
-                onSearchChanged: () => setState(() {}),
+                onSearchChanged: _onSearchChangedDebounced,
               ),
               const SizedBox(height: 8),
               Expanded(
-                child: PosProductList(
-                  products: filtered,
-                  favoriteSkus: favoriteSkus,
-                  onAdd: (p) => addToCart(p),
-                  onToggleFavorite: (p) => setState(() {
-                    if (favoriteSkus.contains(p.sku)) {
-                      favoriteSkus.remove(p.sku);
-                    } else {
-                      favoriteSkus.add(p.sku);
-                    }
-                  }),
+                child: Scrollbar(
+                  controller: _productsScrollCtrl,
+                  child: PosProductList(
+                    scrollController: _productsScrollCtrl,
+                    products: products,
+                    favoriteSkus: favoriteSkus,
+                    onAdd: (p) => addToCart(p),
+                    onToggleFavorite: (p) => setState(() {
+                      if (favoriteSkus.contains(p.sku)) {
+                        favoriteSkus.remove(p.sku);
+                      } else {
+                        favoriteSkus.add(p.sku);
+                      }
+                    }),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
               PosPopularItemsGrid(
-                allProducts: allProducts,
+                allProducts: products,
                 favoriteSkus: favoriteSkus,
                 onAdd: (p) => addToCart(p),
               ),
@@ -1123,7 +1165,7 @@ class _PosPageState extends State<PosPage> {
   }
 
   // Tablet layout: similar to wide but with reduced widths and spacing
-  Widget _tabletLayout(List<Product> filtered, List<Product> allProducts) {
+  Widget _tabletLayout(List<Product> products) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1139,26 +1181,30 @@ class _PosPageState extends State<PosPage> {
                 scannerConnected: _isScannerConnected,
                 onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
                 onBarcodeSubmitted: _scan,
-                onSearchChanged: () => setState(() {}),
+                onSearchChanged: _onSearchChangedDebounced,
               ),
               const SizedBox(height: 6),
               Expanded(
-                child: PosProductList(
-                  products: filtered,
-                  favoriteSkus: favoriteSkus,
-                  onAdd: (p) => addToCart(p),
-                  onToggleFavorite: (p) => setState(() {
-                    if (favoriteSkus.contains(p.sku)) {
-                      favoriteSkus.remove(p.sku);
-                    } else {
-                      favoriteSkus.add(p.sku);
-                    }
-                  }),
+                child: Scrollbar(
+                  controller: _productsScrollCtrl,
+                  child: PosProductList(
+                    scrollController: _productsScrollCtrl,
+                    products: products,
+                    favoriteSkus: favoriteSkus,
+                    onAdd: (p) => addToCart(p),
+                    onToggleFavorite: (p) => setState(() {
+                      if (favoriteSkus.contains(p.sku)) {
+                        favoriteSkus.remove(p.sku);
+                      } else {
+                        favoriteSkus.add(p.sku);
+                      }
+                    }),
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
               PosPopularItemsGrid(
-                allProducts: allProducts,
+                allProducts: products,
                 favoriteSkus: favoriteSkus,
                 onAdd: (p) => addToCart(p),
               ),
@@ -1251,7 +1297,7 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  Widget _narrowLayout(List<Product> filtered, List<Product> allProducts) {
+  Widget _narrowLayout(List<Product> products) {
     return ListView(
       children: [
         PosSearchAndScanCard(
@@ -1261,27 +1307,31 @@ class _PosPageState extends State<PosPage> {
           scannerConnected: _isScannerConnected,
           onScannerToggle: (v) => v ? _activateScanner() : _deactivateScanner(finalize: true),
           onBarcodeSubmitted: _scan,
-          onSearchChanged: () => setState(() {}),
+          onSearchChanged: _onSearchChangedDebounced,
         ),
         const SizedBox(height: 8),
         SizedBox(
           height: 200,
-          child: PosProductList(
-            products: filtered,
-            favoriteSkus: favoriteSkus,
-            onAdd: (p) => addToCart(p),
-            onToggleFavorite: (p) => setState(() {
-              if (favoriteSkus.contains(p.sku)) {
-                favoriteSkus.remove(p.sku);
-              } else {
-                favoriteSkus.add(p.sku);
-              }
-            }),
+          child: Scrollbar(
+            controller: _productsScrollCtrl,
+            child: PosProductList(
+              scrollController: _productsScrollCtrl,
+              products: products,
+              favoriteSkus: favoriteSkus,
+              onAdd: (p) => addToCart(p),
+              onToggleFavorite: (p) => setState(() {
+                if (favoriteSkus.contains(p.sku)) {
+                  favoriteSkus.remove(p.sku);
+                } else {
+                  favoriteSkus.add(p.sku);
+                }
+              }),
+            ),
           ),
         ),
         const SizedBox(height: 8),
         PosPopularItemsGrid(
-          allProducts: allProducts,
+          allProducts: products,
           favoriteSkus: favoriteSkus,
           onAdd: (p) => addToCart(p),
         ),
@@ -1669,7 +1719,7 @@ class _CustomersDropdownCard extends StatelessWidget {
                 if (c.id == selId) { value = c; break; }
               }
               return DropdownButtonFormField<Customer>(
-                value: value,
+                initialValue: value,
                 items: list
                     .map((c) => DropdownMenuItem<Customer>(value: c, child: Text(c.name, overflow: TextOverflow.ellipsis)))
                     .toList(),

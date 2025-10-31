@@ -247,6 +247,7 @@ class PosProductList extends StatelessWidget {
   final Set<String> favoriteSkus;
   final ValueChanged<Product> onAdd;
   final ValueChanged<Product> onToggleFavorite;
+  final ScrollController? scrollController;
 
   const PosProductList({
     super.key,
@@ -254,11 +255,13 @@ class PosProductList extends StatelessWidget {
     required this.favoriteSkus,
     required this.onAdd,
     required this.onToggleFavorite,
+    this.scrollController,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
+      controller: scrollController,
       padding: const EdgeInsets.all(8),
       itemCount: products.length,
       separatorBuilder: (_, __) => const Divider(height: 1),

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
+import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
+import 'package:retail_mvp2/core/firebase/firestore_paging.dart';
+import 'package:retail_mvp2/core/loading/page_loader_overlay.dart';
 
 /// Purchase types supported in the dialog
 enum PurchaseType { noBill, gst, import, creditNote, debitNote }
@@ -58,6 +63,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
 
   // Cached inventory products (simple live snapshot once per rebuild via StreamBuilder below)
   List<_ProductLite> _products = const [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _invSub;
 
   @override
   void initState() {
@@ -101,8 +107,8 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       freightCtrl.text = '${summary['freight'] ?? 0}';
       customsCtrl.text = '${summary['customs'] ?? 0}';
     }
-    // Load inventory products stream
-    FirebaseFirestore.instance.collection('inventory').snapshots().listen((snap) {
+    // Load inventory products stream and keep a handle so we can cancel on dispose
+    _invSub = FirebaseFirestore.instance.collection('inventory').snapshots().listen((snap) {
       final prods = snap.docs.map((d) {
         final m = d.data();
         double toD(v) => v is int ? v.toDouble() : (v is double ? v : double.tryParse(v?.toString() ?? '') ?? 0);
@@ -115,6 +121,8 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       }).where((p) => p.name.isNotEmpty).toList();
       prods.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (mounted) setState(() => _products = prods);
+    }, onError: (_) {
+      // Ignore transient errors (e.g., during logout teardown on web)
     });
   }
 
@@ -157,6 +165,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   utilityAmountCtrl.dispose();
   linkedInvoiceCtrl.dispose();
     _scrollCtrl.dispose();
+    _invSub?.cancel();
     super.dispose();
   }
 
@@ -989,10 +998,10 @@ class _ProductAutocomplete extends StatefulWidget {
 }
 
 // Simple wrapper page used by router for Purchases invoices list
-class PurchasesInvoicesScreen extends StatelessWidget {
+class PurchasesInvoicesScreen extends ConsumerWidget {
   const PurchasesInvoicesScreen({super.key});
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(12.0),
@@ -1001,13 +1010,16 @@ class PurchasesInvoicesScreen extends StatelessWidget {
           children: [
             Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
               FilledButton.icon(
-                onPressed: () => showPurchaseInvoiceDialog(context),
+                onPressed: () async {
+                  await showPurchaseInvoiceDialog(context);
+                  ref.read(purchaseInvoicesPagedControllerProvider).resetAndLoad();
+                },
                 icon: const Icon(Icons.add_shopping_cart),
                 label: const Text('New Purchase Invoice'),
               ),
             ]),
             const SizedBox(height: 12),
-            Expanded(child: _PurchasesList()),
+            const Expanded(child: _PurchasesList()),
           ],
         ),
       ),
@@ -1139,8 +1151,36 @@ class _ProductAutocompleteState extends State<_ProductAutocomplete> {
 }
 
 /// Purchase invoices list (replaces legacy _PurchasesList from invoices_tabs.dart)
-class _PurchasesList extends StatelessWidget {
+class _PurchasesList extends ConsumerStatefulWidget {
   const _PurchasesList();
+  @override
+  ConsumerState<_PurchasesList> createState() => _PurchasesListState();
+}
+
+class _PurchasesListState extends ConsumerState<_PurchasesList> {
+  final ScrollController _vScrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _vScrollCtrl.addListener(_maybeLoadMore);
+  }
+
+  @override
+  void dispose() {
+    _vScrollCtrl.removeListener(_maybeLoadMore);
+    _vScrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _maybeLoadMore() {
+    if (!_vScrollCtrl.hasClients) return;
+    if (_vScrollCtrl.position.extentAfter < 600) {
+      final c = ref.read(purchaseInvoicesPagedControllerProvider);
+      final s = c.state;
+      if (!s.loading && !s.endReached) c.loadMore();
+    }
+  }
 
   double _asDouble(dynamic v) {
     if (v is num) return v.toDouble();
@@ -1159,63 +1199,106 @@ class _PurchasesList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col = FirebaseFirestore.instance.collection('purchase_invoices');
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      // Limit initial load to speed up list rendering on large datasets
-      stream: col.orderBy('timestampMs', descending: true).limit(200).snapshots(),
-      builder: (context, snap) {
-        if (snap.hasError) {
-          return Center(child: Text('Error loading purchases: ${snap.error}'));
-        }
-        if (!snap.hasData) {
-          return const Center(child: SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2)));
-        }
-        final docs = snap.data!.docs;
-        if (docs.isEmpty) {
-          return const Center(child: Text('No purchase invoices yet'));
-        }
-        return ListView.separated(
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final d = docs[index];
-            final m = d.data();
-            final supplier = (m['supplier'] ?? '') as String;
-            final invoiceNo = (m['invoiceNo'] ?? '') as String;
-            final type = (m['type'] ?? '') as String;
-            final invoiceDate = _fmtShortDate(m['invoiceDate'] as String?);
-            final sum = (m['summary'] as Map?) ?? const {};
-            final grand = _asDouble(sum['grandTotal']);
-            final paid = _asDouble(((m['payment'] as Map?) ?? const {})['paid']);
+    final paged = ref.watch(purchaseInvoicesPagedControllerProvider);
+    final state = paged.state;
+    return PageLoaderOverlay(
+      loading: state.loading && state.items.isEmpty,
+      error: state.error,
+      onRetry: () => ref.read(purchaseInvoicesPagedControllerProvider).resetAndLoad(),
+      child: state.items.isEmpty && !state.loading
+          ? const Center(child: Text('No purchase invoices yet'))
+          : ListView.separated(
+              controller: _vScrollCtrl,
+              itemCount: state.items.length + (state.endReached ? 0 : 1),
+              separatorBuilder: (context, i) => i < state.items.length ? const Divider(height: 1) : const SizedBox.shrink(),
+              itemBuilder: (context, index) {
+                if (index >= state.items.length) {
+                  // Footer loader / load more button
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: state.loading
+                        ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)))
+                        : Center(
+                            child: OutlinedButton.icon(
+                              onPressed: () => ref.read(purchaseInvoicesPagedControllerProvider).loadMore(),
+                              icon: const Icon(Icons.more_horiz),
+                              label: const Text('Load more'),
+                            ),
+                          ),
+                  );
+                }
+                final item = state.items[index];
+                final m = item.data;
+                final supplier = (m['supplier'] ?? '') as String;
+                final invoiceNo = (m['invoiceNo'] ?? '') as String;
+                final type = (m['type'] ?? '') as String;
+                final invoiceDate = _fmtShortDate(m['invoiceDate'] as String?);
+                final sum = (m['summary'] as Map?) ?? const {};
+                final grand = _asDouble(sum['grandTotal']);
+                final paid = _asDouble(((m['payment'] as Map?) ?? const {})['paid']);
 
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              title: Row(
-                children: [
-                  Expanded(child: Text(
-                    supplier.isEmpty ? '(No supplier)' : supplier,
-                    style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600),
-                  )),
-                  const SizedBox(width: 12),
-                  Text(invoiceNo.isEmpty ? '' : '#$invoiceNo'),
-                ],
-              ),
-              subtitle: Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  if (type.isNotEmpty) Chip(label: Text(type, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)), visualDensity: VisualDensity.compact),
-                  if (invoiceDate.isNotEmpty) Text('Date: $invoiceDate', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                  Text('Total: ₹${grand.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                  Text('Paid: ₹${paid.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                ],
-              ),
-              onTap: () => showEditPurchaseInvoiceDialog(context, d.id, m),
-            );
-          },
-        );
-      },
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(
+                        supplier.isEmpty ? '(No supplier)' : supplier,
+                        style: context.texts.titleSmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w600),
+                      )),
+                      const SizedBox(width: 12),
+                      Text(invoiceNo.isEmpty ? '' : '#$invoiceNo'),
+                    ],
+                  ),
+                  subtitle: Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (type.isNotEmpty) Chip(label: Text(type, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)), visualDensity: VisualDensity.compact),
+                      if (invoiceDate.isNotEmpty) Text('Date: $invoiceDate', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                      Text('Total: ₹${grand.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                      Text('Paid: ₹${paid.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                    ],
+                  ),
+                  onTap: () async {
+                    await showEditPurchaseInvoiceDialog(context, item.id, m);
+                    if (mounted) {
+                      ref.read(purchaseInvoicesPagedControllerProvider).resetAndLoad();
+                    }
+                  },
+                );
+              },
+            ),
     );
   }
 }
+
+class PurchaseListItem {
+  final String id;
+  final Map<String, dynamic> data;
+  PurchaseListItem({required this.id, required this.data});
+}
+
+final purchaseInvoicesPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<PurchaseListItem>>((ref) {
+  final base = FirebaseFirestore.instance
+      .collection('purchase_invoices')
+      .orderBy('timestampMs', descending: true);
+
+  final controller = PagedListController<PurchaseListItem>(
+    pageSize: 100,
+    loadPage: (cursor) async {
+      final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      final (items, next) = await fetchFirestorePage<PurchaseListItem>(
+        base: base,
+        after: after,
+        pageSize: 100,
+        map: (d) => PurchaseListItem(id: d.id, data: d.data()),
+      );
+      return (items, next);
+    },
+  );
+
+  Future.microtask(controller.resetAndLoad);
+  ref.onDispose(controller.dispose);
+  return controller;
+});

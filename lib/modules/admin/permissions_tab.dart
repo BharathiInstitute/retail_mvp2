@@ -29,7 +29,6 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
     _ScreenRow('POS Cashier', ScreenKeys.posCashier),
     _ScreenRow('Inventory (Products)', ScreenKeys.invProducts),
     _ScreenRow('Stock Movements', ScreenKeys.invStockMovements),
-    _ScreenRow('Transfers', ScreenKeys.invTransfers),
     _ScreenRow('Suppliers', ScreenKeys.invSuppliers),
     _ScreenRow('Alerts', ScreenKeys.invAlerts),
     _ScreenRow('Audit', ScreenKeys.invAudit),

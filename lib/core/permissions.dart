@@ -11,7 +11,6 @@ class ScreenKeys {
   static const posCashier = 'pos.cashier';
   static const invProducts = 'inventory.products';
   static const invStockMovements = 'inventory.stock-movements';
-  static const invTransfers = 'inventory.transfers';
   static const invSuppliers = 'inventory.suppliers';
   static const invAlerts = 'inventory.alerts';
   static const invAudit = 'inventory.audit';
@@ -124,7 +123,6 @@ String? screenKeyForPath(String path) {
   if (path.startsWith('/pos')) return ScreenKeys.posMain;
   // Inventory detailed routes first
   if (path.startsWith('/inventory/stock-movement')) return ScreenKeys.invStockMovements;
-  if (path.startsWith('/inventory/stock-transfer')) return ScreenKeys.invTransfers;
   if (path.startsWith('/inventory/suppliers')) return ScreenKeys.invSuppliers;
   if (path.startsWith('/inventory/alerts')) return ScreenKeys.invAlerts;
   if (path.startsWith('/inventory/audit')) return ScreenKeys.invAudit;

@@ -4,6 +4,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../core/paging/paged_list_controller.dart';
+import '../../../core/firebase/firestore_paging.dart';
+import '../../../core/loading/page_loader_overlay.dart';
 
 import '../../../core/auth/auth.dart';
 import '../../../core/permissions.dart';
@@ -48,6 +53,32 @@ final inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRe
 final tenantIdProvider = Provider<String?>((ref) { final user = ref.watch(authStateProvider); return user?.uid; });
 final productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) { final repo = ref.watch(inventoryRepoProvider); return repo.streamProducts(tenantId: null); });
 
+// Paged controller for Products (initial page blocks UI via PageLoaderOverlay)
+final productsPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<ProductDoc>>((ref) {
+  final base = FirebaseFirestore.instance
+      .collection('inventory')
+      .orderBy('name');
+
+  final controller = PagedListController<ProductDoc>(
+    pageSize: 50,
+    loadPage: (cursor) async {
+      final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      final (items, next) = await fetchFirestorePage<ProductDoc>(
+        base: base,
+        after: after,
+        pageSize: 50,
+        map: (d) => ProductDoc.fromDoc(d),
+      );
+      return (items, next);
+    },
+  );
+
+  // Kick first load
+  Future.microtask(controller.resetAndLoad);
+  ref.onDispose(controller.dispose);
+  return controller;
+});
+
 // (Date formatting helpers for transfers were removed with extraction; not needed here.)
 
 class _CloudProductsView extends ConsumerStatefulWidget {
@@ -63,11 +94,34 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   int _gstFilter = -1; // -1 => All, otherwise 0/5/12/18
   // Horizontal scroll controller for drag/swipe panning on desktop/tablet/mobile
   final ScrollController _hScrollCtrl = ScrollController();
+  // Vertical controller for infinite scroll
+  final ScrollController _vScrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _vScrollCtrl.addListener(_maybeLoadMoreOnScroll);
+  }
 
   @override
   void dispose() {
     _hScrollCtrl.dispose();
+    _vScrollCtrl.removeListener(_maybeLoadMoreOnScroll);
+    _vScrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _maybeLoadMoreOnScroll() {
+    if (!_vScrollCtrl.hasClients) return;
+    final extentAfter = _vScrollCtrl.position.extentAfter;
+    // If we're within ~2 viewports of the bottom, try to load more
+    if (extentAfter < 600) {
+      final controller = ref.read(productsPagedControllerProvider);
+      final s = controller.state;
+      if (!s.loading && !s.endReached) {
+        controller.loadMore();
+      }
+    }
   }
 
   List<ProductDoc> _applyFilters(List<ProductDoc> src) {
@@ -91,7 +145,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
 
   @override
   Widget build(BuildContext context) {
-  final async = ref.watch(productsStreamProvider);
+    final paged = ref.watch(productsPagedControllerProvider);
+    final state = paged.state;
     final user = ref.watch(authStateProvider);
     final bool isSignedIn = user != null;
     return Padding(
@@ -176,7 +231,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                 label: const Text('Import CSV'),
               ),
               Builder(builder: (_) {
-                final hasData = !async.isLoading && async.hasValue && (async.valueOrNull?.isNotEmpty ?? false);
+                final hasData = state.items.isNotEmpty;
                 return OutlinedButton.icon(
                   style: compactOutlined,
                   onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
@@ -205,15 +260,19 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
         }),
         const SizedBox(height: 12),
         Expanded(
-          child: Card(
-            child: async.when(
-              data: (list) {
-                if (list.isEmpty) {
+          child: PageLoaderOverlay(
+            loading: state.loading && state.items.isEmpty,
+            error: state.error,
+            onRetry: () => ref.read(productsPagedControllerProvider).resetAndLoad(),
+            child: Card(
+              child: Builder(builder: (context) {
+                final list = state.items;
+                if (list.isEmpty && !state.loading) {
                   return const Center(child: Text('No products found in Inventory.'));
                 }
                 final filtered = _applyFilters(list);
                 _currentProducts = filtered; // cache (export current view)
-                if (filtered.isEmpty) {
+                if (filtered.isEmpty && !state.loading) {
                   return const Center(child: Text('No products match the filters.'));
                 }
                 return Padding(
@@ -237,76 +296,88 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                         rows: [
                           for (final p in filtered)
                             DataRow(
-                              // Tap anywhere on the row to edit
                               onSelectChanged: (selected) {
                                 if (selected == true && isSignedIn) {
                                   _openEditDialog(context, p);
                                 }
                               },
-                              // Long-press to delete (confirmation dialog will appear)
                               onLongPress: isSignedIn ? () => _confirmDelete(context, p) : null,
                               cells: [
-                              DataCell(Text(p.sku)),
-                              DataCell(Text(p.name)),
-                              DataCell(Text(p.barcode)),
-                              DataCell(Text('₹${p.unitPrice.toStringAsFixed(2)}')),
-                              DataCell(Text((p.taxPct ?? 0).toString())),
-                              DataCell(Text(p.stockAt('Store').toString())),
-                              DataCell(Text(p.stockAt('Warehouse').toString())),
-                              DataCell(Text(p.totalStock.toString())),
-                              DataCell(
-                                Builder(
-                                  builder: (context) {
-                                    final scheme = Theme.of(context).colorScheme;
-                                    final color = p.isActive ? scheme.primary : scheme.error;
-                                    return Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: color);
-                                  },
+                                DataCell(Text(p.sku)),
+                                DataCell(Text(p.name)),
+                                DataCell(Text(p.barcode)),
+                                DataCell(Text('₹${p.unitPrice.toStringAsFixed(2)}')),
+                                DataCell(Text((p.taxPct ?? 0).toString())),
+                                DataCell(Text(p.stockAt('Store').toString())),
+                                DataCell(Text(p.stockAt('Warehouse').toString())),
+                                DataCell(Text(p.totalStock.toString())),
+                                DataCell(
+                                  Builder(
+                                    builder: (context) {
+                                      final scheme = Theme.of(context).colorScheme;
+                                      final color = p.isActive ? scheme.primary : scheme.error;
+                                      return Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: color);
+                                    },
+                                  ),
                                 ),
-                              ),
                               ],
                             ),
                         ],
                       );
-                      // Make the table robust when the side menu expands (reduced width):
-                      // wrap with horizontal Scrollbar+SingleChildScrollView first, then vertical inside.
-                      return Scrollbar(
-                        thumbVisibility: true,
-                        notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onHorizontalDragUpdate: (details) {
-                            if (!_hScrollCtrl.hasClients) return;
-                            final maxExtent = _hScrollCtrl.position.maxScrollExtent;
-                            double next = _hScrollCtrl.offset - details.delta.dx;
-                            if (next < 0) next = 0;
-                            if (next > maxExtent) next = maxExtent;
-                            _hScrollCtrl.jumpTo(next);
-                          },
-                          child: SingleChildScrollView(
-                            controller: _hScrollCtrl,
-                            physics: const ClampingScrollPhysics(),
-                            scrollDirection: Axis.horizontal,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                              child: SingleChildScrollView(
-                                child: DataTableTheme(
-                                  data: DataTableThemeData(
-                                    dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                                    headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                      return Column(
+                        children: [
+                          Expanded(
+                            child: Scrollbar(
+                              thumbVisibility: true,
+                              notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onHorizontalDragUpdate: (details) {
+                                  if (!_hScrollCtrl.hasClients) return;
+                                  final maxExtent = _hScrollCtrl.position.maxScrollExtent;
+                                  double next = _hScrollCtrl.offset - details.delta.dx;
+                                  if (next < 0) next = 0;
+                                  if (next > maxExtent) next = maxExtent;
+                                  _hScrollCtrl.jumpTo(next);
+                                },
+                                child: SingleChildScrollView(
+                                  controller: _hScrollCtrl,
+                                  physics: const ClampingScrollPhysics(),
+                                  scrollDirection: Axis.horizontal,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                                    child: SingleChildScrollView(
+                                      controller: _vScrollCtrl,
+                                      child: DataTableTheme(
+                                        data: DataTableThemeData(
+                                          dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                                          headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+                                        ),
+                                        child: table,
+                                      ),
+                                    ),
                                   ),
-                                  child: table,
                                 ),
                               ),
                             ),
                           ),
-                        ),
+                          if (!state.endReached)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: state.loading
+                                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : OutlinedButton.icon(
+                                      onPressed: () => ref.read(productsPagedControllerProvider).loadMore(),
+                                      icon: const Icon(Icons.more_horiz),
+                                      label: const Text('Load more'),
+                                    ),
+                            ),
+                        ],
                       );
                     },
                   ),
                 );
-              },
-              error: (e, st) => _errorView(context, e),
-              loading: () => const Center(child: CircularProgressIndicator()),
+              }),
             ),
           ),
         ),
@@ -315,13 +386,6 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   }
 
   
-
-  Widget _errorView(BuildContext context, Object e) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text('Error: $e'),
-        ),
-      );
 
   Future<void> _openAddDialog(BuildContext context) async {
     final user = ref.read(authStateProvider);
@@ -358,6 +422,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       storeQty: result.storeQty,
       warehouseQty: result.warehouseQty,
     );
+    // Refresh first page to include new item if visible
+    ref.read(productsPagedControllerProvider).resetAndLoad();
     if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product added')));
   }
 
@@ -382,6 +448,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       costPrice: result.costPrice,
       isActive: result.isActive,
     );
+    ref.read(productsPagedControllerProvider).resetAndLoad();
     if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product updated')));
   }
 
@@ -419,6 +486,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     if (ok != true) return;
   final repo = ref.read(inventoryRepoProvider);
     await repo.deleteProduct(sku: p.sku);
+    ref.read(productsPagedControllerProvider).resetAndLoad();
     if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
   }
 

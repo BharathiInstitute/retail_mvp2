@@ -18,7 +18,6 @@ import 'modules/pos/pos_cashier.dart';
 import 'modules/pos/pos_mobile.dart';
 import 'modules/inventory/Products/inventory.dart';
 import 'modules/inventory/stock_movements_screen.dart';
-import 'modules/inventory/transfers_screen.dart';
 import 'modules/inventory/suppliers_screen.dart';
 import 'modules/inventory/alerts_screen.dart';
 import 'modules/inventory/audit_screen.dart';
@@ -188,13 +187,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               path: '/inventory/stock-movement',
               name: 'inventory-stock-movement',
               pageBuilder: (context, state) => const NoTransitionPage(child: StockMovementsScreen()),
-            ),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(
-              path: '/inventory/stock-transfer',
-              name: 'inventory-stock-transfer',
-              pageBuilder: (context, state) => const NoTransitionPage(child: TransfersScreen()),
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -579,12 +571,11 @@ class _SideMenu extends ConsumerWidget {
       ],
 
       // Inventory group
-      if (perms != UserPermissions.empty && (canView(ScreenKeys.invProducts) || canView(ScreenKeys.invStockMovements) || canView(ScreenKeys.invTransfers) || canView(ScreenKeys.invSuppliers) || canView(ScreenKeys.invAlerts) || canView(ScreenKeys.invAudit))) ...[
+  if (perms != UserPermissions.empty && (canView(ScreenKeys.invProducts) || canView(ScreenKeys.invStockMovements) || canView(ScreenKeys.invSuppliers) || canView(ScreenKeys.invAlerts) || canView(ScreenKeys.invAudit))) ...[
         groupHeader('Inventory', Icons.inventory_2_outlined, inventoryMenuExpandedProvider),
         if (ref.watch(inventoryMenuExpandedProvider)) ...[
           item('Products', Icons.list_alt_outlined, '/inventory/products', screenKey: ScreenKeys.invProducts, indent: 1),
           item('Stock Movement', Icons.swap_vert_outlined, '/inventory/stock-movement', screenKey: ScreenKeys.invStockMovements, indent: 1),
-          item('Stock Transfer', Icons.compare_arrows_outlined, '/inventory/stock-transfer', screenKey: ScreenKeys.invTransfers, indent: 1),
           item('Suppliers', Icons.local_shipping_outlined, '/inventory/suppliers', screenKey: ScreenKeys.invSuppliers, indent: 1),
           item('Alerts', Icons.notifications_active_outlined, '/inventory/alerts', screenKey: ScreenKeys.invAlerts, indent: 1),
           item('Audit', Icons.rule_folder_outlined, '/inventory/audit', screenKey: ScreenKeys.invAudit, indent: 1),
@@ -637,14 +628,21 @@ class _SideMenu extends ConsumerWidget {
                     // Debounce logout to avoid repeated sign-outs and route churn
                     ref.read(logoutInProgressProvider.notifier).state = true;
                     try {
-                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      final messenger = scaffoldMessengerKey.currentState;
                       messenger?.clearSnackBars();
                       // Ensure no lingering focus from previous routes
                       FocusManager.instance.primaryFocus?.unfocus();
                       // Close any open drawers before navigating away to avoid overlay/barrier lingering
-                      await Navigator.of(context).maybePop();
+                      final nav = rootNavigatorKey.currentState;
+                      if (nav != null) {
+                        await nav.maybePop();
+                      }
                       // Sign out first to avoid redirecting back to a protected route while still logged in.
                       await ref.read(authRepositoryProvider).signOut();
+                      // Immediately invalidate derived auth-dependent providers to break listeners fast.
+                      ref.invalidate(permissionsProvider);
+                      ref.invalidate(ownerProvider);
+                      ref.invalidate(authStateProvider);
                       // Give the framework a moment to settle route pops/animations (drawer closing, etc.)
                       await Future<void>.delayed(const Duration(milliseconds: 50));
                       // Hard-close any remaining overlays on root navigator to avoid stuck modal barriers
@@ -655,12 +653,16 @@ class _SideMenu extends ConsumerWidget {
                         }
                       }
                       // Replace the entire stack with /login on the root router (no back to protected screens)
-                      final rootCtx = rootNavigatorKey.currentContext;
-                      if (rootCtx != null) {
-                        final router = GoRouter.of(rootCtx);
-                        router.replace('/login');
-                        // Optional: force a refresh to ensure redirect guards immediately see logged-out state
-                        router.refresh();
+                      final router = ref.read(appRouterProvider);
+                      {
+                        // Schedule navigation on next frame to avoid racing with disposals
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          router.replace('/login');
+                          // Ensure redirect guards see the latest state
+                          router.refresh();
+                        });
+                        // Also queue a microtask as a fallback in case of long frame
+                        Future.microtask(() { try { router.replace('/login'); router.refresh(); } catch (_) {} });
                       }
                     } catch (_) {
                       // no-op

@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/theme_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../core/app_keys.dart';
+import '../../core/paging/paged_list_controller.dart';
+import '../../core/loading/page_loader_overlay.dart';
+import '../../core/firebase/firestore_paging.dart';
 
 // CRM: List customers from Firestore with search/filter, add, edit, and delete.
 
@@ -16,16 +20,35 @@ class CrmListScreen extends StatefulWidget {
 class _CrmListScreenState extends State<CrmListScreen> {
 	String query = '';
 	LoyaltyFilter loyaltyFilter = LoyaltyFilter.all;
+	final ScrollController _scrollCtrl = ScrollController();
+	Timer? _searchDebounce;
+	late final PagedListController<CrmCustomer> _pager;
 
-	Stream<List<CrmCustomer>> _customerStream() {
-		final col = FirebaseFirestore.instance.collection('customers');
-		// Order by name if available; otherwise map and sort client-side.
-		return col.snapshots().map((s) {
-			final list = s.docs.map((d) => CrmCustomer.fromDoc(d)).toList();
-			list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-			return list;
-		});
-	}
+		@override
+		void initState() {
+			super.initState();
+			_pager = PagedListController<CrmCustomer>(
+				pageSize: 50,
+				loadPage: (cursor) async {
+					Query<Map<String, dynamic>> base = FirebaseFirestore.instance
+							.collection('customers')
+							.orderBy('name');
+					final q = query.trim();
+					if (q.length >= 2) {
+						base = base.startAt([q]).endAt(['$q\uf8ff']);
+					}
+					final (items, next) = await fetchFirestorePage<CrmCustomer>(
+						base: base,
+						after: cursor as DocumentSnapshot<Map<String, dynamic>>?,
+						pageSize: _pager.pageSize,
+						map: (doc) => CrmCustomer.fromDoc(doc),
+					);
+					return (items, next);
+				},
+			);
+			_pager.resetAndLoad();
+			_scrollCtrl.addListener(_maybeLoadMore);
+		}
 
 	List<CrmCustomer> _applyFilters(List<CrmCustomer> input) {
 		final q = query.trim().toLowerCase();
@@ -39,6 +62,30 @@ class _CrmListScreenState extends State<CrmListScreen> {
 			return matchesQuery && matchesLoyalty;
 		}).toList();
 	}
+
+		@override
+		void dispose() {
+			_scrollCtrl.dispose();
+			_searchDebounce?.cancel();
+			_pager.dispose();
+			super.dispose();
+		}
+
+		void _maybeLoadMore() {
+			if (!_scrollCtrl.hasClients) return;
+			if (_scrollCtrl.position.extentAfter < 600) {
+				_pager.loadMore();
+			}
+		}
+
+		void _onSearchChangedDebounced(String v) {
+			setState(() => query = v);
+			_searchDebounce?.cancel();
+			_searchDebounce = Timer(const Duration(milliseconds: 300), () {
+				_pager.resetAndLoad();
+				setState(() {});
+			});
+		}
 
 	void _showCsvDialog(String csv) {
 		final dlgCtx = rootNavigatorKey.currentContext;
@@ -187,7 +234,7 @@ class _CrmListScreenState extends State<CrmListScreen> {
 												final children = <Widget>[
 													SizedBox(
 														width: searchWidth,
-														child: TextField(
+																											child: TextField(
 															style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
 															decoration: InputDecoration(
 																prefixIcon: Icon(Icons.search, color: context.colors.onSurfaceVariant),
@@ -196,7 +243,7 @@ class _CrmListScreenState extends State<CrmListScreen> {
 																contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
 																floatingLabelBehavior: FloatingLabelBehavior.never,
 															),
-															onChanged: (v) => setState(() => query = v),
+																												onChanged: _onSearchChangedDebounced,
 														),
 													),
 																				DropdownButton<LoyaltyFilter>(
@@ -243,59 +290,53 @@ class _CrmListScreenState extends State<CrmListScreen> {
 											}),
 										),
 					const Divider(height: 1),
-					Expanded(
-						child: StreamBuilder<List<CrmCustomer>>(
-							stream: _customerStream(),
-							builder: (context, snapshot) {
-								if (snapshot.hasError) {
-									return Center(child: Text('Error: ${snapshot.error}'));
-								}
-								if (!snapshot.hasData) {
-									return const Center(
-										child: Padding(
-											padding: EdgeInsets.all(24.0),
-											child: CircularProgressIndicator(),
+										Expanded(
+											child: Builder(builder: (context) {
+												final state = _pager.state;
+												final list = _applyFilters(state.items);
+												return PageLoaderOverlay(
+													loading: state.items.isEmpty && state.loading,
+													error: state.items.isEmpty ? state.error : null,
+													onRetry: () => _pager.resetAndLoad(),
+													child: list.isEmpty
+															? const Center(child: Text('No customers'))
+															: Scrollbar(
+																	thumbVisibility: true,
+																	child: ListView.separated(
+																		controller: _scrollCtrl,
+																		itemCount: list.length,
+																		separatorBuilder: (_, __) => const Divider(height: 1),
+																		itemBuilder: (_, i) {
+																			final c = list[i];
+																			return ListTile(
+																				onTap: () => _editCustomer(c.copy()),
+																				onLongPress: () => _deleteCustomer(c),
+																				leading: CircleAvatar(child: Text(c.initials)),
+																				title: Row(
+																					children: [
+																						Expanded(child: Text(c.name, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface))),
+																						_loyaltyChip(c.status),
+																					],
+																				),
+																				subtitle: Text(
+																					'${c.email} • ${c.phone}',
+																					style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
+																				),
+																				trailing: Column(
+																					mainAxisAlignment: MainAxisAlignment.center,
+																					crossAxisAlignment: CrossAxisAlignment.end,
+																					children: [
+																						Text('₹${c.totalSpend.toStringAsFixed(2)}', style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
+																						Text('Last: ${_fmtDate(c.lastVisit)}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
+																					],
+																				),
+																			);
+																		},
+																	),
+																),
+												);
+											}),
 										),
-									);
-								}
-								final list = _applyFilters(snapshot.data!);
-								if (list.isEmpty) return const Center(child: Text('No customers'));
-								return Scrollbar(
-									thumbVisibility: true,
-									child: ListView.separated(
-										itemCount: list.length,
-										separatorBuilder: (_, __) => const Divider(height: 1),
-										itemBuilder: (_, i) {
-											final c = list[i];
-											return ListTile(
-												onTap: () => _editCustomer(c.copy()),
-												onLongPress: () => _deleteCustomer(c),
-												leading: CircleAvatar(child: Text(c.initials)),
-												title: Row(
-													children: [
-														Expanded(child: Text(c.name, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface))),
-														_loyaltyChip(c.status),
-													],
-												),
-												subtitle: Text(
-												  '${c.email} • ${c.phone}',
-												  style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant),
-												),
-												trailing: Column(
-													mainAxisAlignment: MainAxisAlignment.center,
-													crossAxisAlignment: CrossAxisAlignment.end,
-													children: [
-														Text('₹${c.totalSpend.toStringAsFixed(2)}', style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
-														Text('Last: ${_fmtDate(c.lastVisit)}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
-													],
-												),
-											);
-										},
-									),
-								);
-							},
-						),
-					),
 				],
 			),
 		);

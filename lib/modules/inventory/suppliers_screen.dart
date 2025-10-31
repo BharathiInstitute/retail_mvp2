@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/theme_utils.dart';
+import '../../core/paging/paged_list_controller.dart';
+import '../../core/firebase/firestore_paging.dart';
+import '../../core/loading/page_loader_overlay.dart';
 
 // --- Inlined Supplier model & repository (moved from supplier_repository.dart) ---
 class SupplierDoc {
@@ -36,10 +39,35 @@ class SupplierRepository {
 /// Repository provider for suppliers (scoped for reuse if needed elsewhere)
 final supplierRepoProvider = Provider<SupplierRepository>((ref) => SupplierRepository());
 
-/// Stream provider for suppliers list.
+/// Stream provider kept for any legacy/aux consumers (not used by screen now)
 final supplierStreamProvider = StreamProvider.autoDispose<List<SupplierDoc>>((ref) {
   final repo = ref.watch(supplierRepoProvider);
   return repo.streamSuppliers();
+});
+
+/// Paged controller for suppliers used by the screen
+final suppliersPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<SupplierDoc>>((ref) {
+  final base = FirebaseFirestore.instance
+      .collection('suppliers')
+      .orderBy('name');
+
+  final controller = PagedListController<SupplierDoc>(
+    pageSize: 50,
+    loadPage: (cursor) async {
+      final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      final (items, next) = await fetchFirestorePage<SupplierDoc>(
+        base: base,
+        after: after,
+        pageSize: 50,
+        map: (d) => SupplierDoc.fromSnap(d),
+      );
+      return (items, next);
+    },
+  );
+
+  Future.microtask(controller.resetAndLoad);
+  ref.onDispose(controller.dispose);
+  return controller;
 });
 
 /// Public Suppliers screen widget (moved out of inventory.dart)
@@ -53,11 +81,31 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   String _search = '';
   // Horizontal scroll controller to enable drag-to-pan on desktop/tablet/mobile
   final ScrollController _hScrollCtrl = ScrollController();
+  // Vertical controller for infinite scroll
+  final ScrollController _vScrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _vScrollCtrl.addListener(_maybeLoadMoreOnScroll);
+  }
 
   @override
   void dispose() {
     _hScrollCtrl.dispose();
+    _vScrollCtrl.removeListener(_maybeLoadMoreOnScroll);
+    _vScrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _maybeLoadMoreOnScroll() {
+    if (!_vScrollCtrl.hasClients) return;
+    final after = _vScrollCtrl.position.extentAfter;
+    if (after < 600) {
+      final c = ref.read(suppliersPagedControllerProvider);
+      final s = c.state;
+      if (!s.loading && !s.endReached) c.loadMore();
+    }
   }
 
   List<SupplierDoc> _filter(List<SupplierDoc> list) {
@@ -72,7 +120,8 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(supplierStreamProvider);
+    final paged = ref.watch(suppliersPagedControllerProvider);
+    final state = paged.state;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(
@@ -121,25 +170,29 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: Card(
-              child: async.when(
-                data: (list) {
-                  // Sign-in requirement removed.
-                  if (list.isEmpty) {
+            child: PageLoaderOverlay(
+              loading: state.loading && state.items.isEmpty,
+              error: state.error,
+              onRetry: () => ref.read(suppliersPagedControllerProvider).resetAndLoad(),
+              child: Card(
+                child: Builder(builder: (context) {
+                  final list = state.items;
+                  if (list.isEmpty && !state.loading) {
                     return const Center(child: Text('No suppliers found.'));
                   }
                   final filtered = _filter(list);
-                  if (filtered.isEmpty) {
+                  if (filtered.isEmpty && !state.loading) {
                     return const Center(child: Text('No suppliers match search.'));
                   }
                   return LayoutBuilder(
                     builder: (context, constraints) {
                       final addressWidth = constraints.maxWidth < 480 ? 220.0 : 300.0;
-                      // On narrow screens, render a mobile-friendly stacked list instead of a wide DataTable
+                      // Narrow: stacked list with infinite scroll
                       if (constraints.maxWidth < 560) {
                         return Scrollbar(
                           thumbVisibility: true,
                           child: ListView.separated(
+                            controller: _vScrollCtrl,
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             itemBuilder: (context, i) {
                               final s = filtered[i];
@@ -182,6 +235,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                           ),
                         );
                       }
+                      // Wide: DataTable with horizontal + vertical scroll
                       final table = DataTable(
                         columnSpacing: 24,
                         headingRowHeight: 42,
@@ -252,7 +306,10 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                                   dataTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface),
                                   headingTextStyle: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
                                 ),
-                                child: table,
+                                child: SingleChildScrollView(
+                                  controller: _vScrollCtrl,
+                                  child: table,
+                                ),
                               ),
                             ),
                           ),
@@ -260,9 +317,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
                       );
                     },
                   );
-                },
-                error: (e, st) => Center(child: Text('Error: $e')),
-                loading: () => const Center(child: CircularProgressIndicator()),
+                }),
               ),
             ),
           ),
@@ -281,6 +336,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
     if (result == null) return;
     await repo.addSupplier(name: result.name,address: result.address,phone: result.phone,email: result.email);
     if (!mounted) return;
+    ref.read(suppliersPagedControllerProvider).resetAndLoad();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier added')));
   }
 
@@ -293,6 +349,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
     if (result == null) return;
     await repo.updateSupplier(id: doc.id,name: result.name,address: result.address,phone: result.phone,email: result.email);
     if (!mounted) return;
+    ref.read(suppliersPagedControllerProvider).resetAndLoad();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier updated')));
   }
 
@@ -322,6 +379,7 @@ class _SuppliersScreenState extends ConsumerState<SuppliersScreen> {
   final repo = ref.read(supplierRepoProvider);
   await repo.deleteSupplier(id: id);
   if (!mounted) return;
+  ref.read(suppliersPagedControllerProvider).resetAndLoad();
   rootMessenger.showSnackBar(const SnackBar(content: Text('Supplier deleted')));
   }
 }

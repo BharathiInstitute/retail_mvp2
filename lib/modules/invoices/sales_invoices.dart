@@ -2,9 +2,13 @@
 // Content mirrors the original to avoid breakages.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
 import 'package:retail_mvp2/modules/pos/device_class_icon.dart';
+import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
+import 'package:retail_mvp2/core/firebase/firestore_paging.dart';
+import 'package:retail_mvp2/core/loading/page_loader_overlay.dart';
 
 // Simple wrapper page used by router for Sales invoices
 class SalesInvoicesScreen extends StatelessWidget {
@@ -28,40 +32,45 @@ class SalesInvoicesScreen extends StatelessWidget {
   }
 }
 
-class InvoicesListScreen extends StatefulWidget {
+class InvoicesListScreen extends ConsumerStatefulWidget {
   final String? invoiceId;
   final EdgeInsetsGeometry contentPadding;
   final double searchLeftShift;
   const InvoicesListScreen({super.key, this.invoiceId, this.contentPadding = const EdgeInsets.all(12), this.searchLeftShift = 0});
 
   @override
-  State<InvoicesListScreen> createState() => _InvoicesPageState();
+  ConsumerState<InvoicesListScreen> createState() => _InvoicesPageState();
 }
 
-class _InvoicesPageState extends State<InvoicesListScreen> {
-  final List<Invoice> _invoicesCache = [];
+class _InvoicesPageState extends ConsumerState<InvoicesListScreen> {
   String query = '';
   String? statusFilter;
   DateTimeRange? dateRange;
   bool taxInclusive = true;
+  // Vertical controller for infinite scroll
+  final ScrollController _vScrollCtrl = ScrollController();
 
-  // Limit initial load to improve first-paint time; older items can be fetched on demand later
-  static const int _pageSize = 200;
-  Stream<List<Invoice>> get _invoiceStream => FirebaseFirestore.instance
-      .collection('invoices')
-      .orderBy('timestampMs', descending: true)
-      .limit(_pageSize)
-      .snapshots()
-      .map((snap) {
-        final list = <Invoice>[];
-        for (final d in snap.docs) {
-          final data = d.data();
-          try {
-            list.add(Invoice.fromFirestore(data, docId: d.id));
-          } catch (_) {}
-        }
-        return list;
-      });
+  @override
+  void initState() {
+    super.initState();
+    _vScrollCtrl.addListener(_maybeLoadMoreOnScroll);
+  }
+
+  @override
+  void dispose() {
+    _vScrollCtrl.removeListener(_maybeLoadMoreOnScroll);
+    _vScrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _maybeLoadMoreOnScroll() {
+    if (!_vScrollCtrl.hasClients) return;
+    if (_vScrollCtrl.position.extentAfter < 600) {
+      final c = ref.read(salesInvoicesPagedControllerProvider);
+      final s = c.state;
+      if (!s.loading && !s.endReached) c.loadMore();
+    }
+  }
 
   List<Invoice> filteredInvoices(List<Invoice> source) {
     return source.where((inv) {
@@ -76,26 +85,17 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 1100;
-    return StreamBuilder<List<Invoice>>(
-      stream: _invoiceStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text('Error loading invoices: ${snapshot.error}'));
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final data = snapshot.data!;
-        _invoicesCache
-          ..clear()
-          ..addAll(data);
-        final filtered = filteredInvoices(_invoicesCache);
-        // Wrap content in padding; left shift handled inside search bar area
-        return Padding(
-          padding: widget.contentPadding,
-          child: isWide ? _wideLayout(filtered) : _narrowLayout(filtered),
-        );
-      },
+    final paged = ref.watch(salesInvoicesPagedControllerProvider);
+    final state = paged.state;
+    final filtered = filteredInvoices(state.items);
+    return PageLoaderOverlay(
+      loading: state.loading && state.items.isEmpty,
+      error: state.error,
+      onRetry: () => ref.read(salesInvoicesPagedControllerProvider).resetAndLoad(),
+      child: Padding(
+        padding: widget.contentPadding,
+        child: isWide ? _wideLayout(filtered) : _narrowLayout(filtered),
+      ),
     );
   }
 
@@ -186,6 +186,7 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
 
   Widget _invoiceList({double? height, required List<Invoice> list}) {
     final listView = ListView.separated(
+      controller: _vScrollCtrl,
       itemCount: list.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (_, i) {
@@ -317,6 +318,8 @@ class _InvoicesPageState extends State<InvoicesListScreen> {
       if (context.mounted) {
         final messenger = ScaffoldMessenger.of(dialogCtx);
         messenger.showSnackBar(const SnackBar(content: Text('Invoice deleted')));
+        // Refresh first page to reflect deletion
+        ref.read(salesInvoicesPagedControllerProvider).resetAndLoad();
         // Close details dialog
         if (Navigator.of(dialogCtx, rootNavigator: true).canPop()) {
           Navigator.of(dialogCtx, rootNavigator: true).pop();
@@ -1028,3 +1031,28 @@ class _SalesItemRow {
 }
 
 String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}' ;
+
+// Paged controller provider for Sales Invoices
+final salesInvoicesPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<Invoice>>((ref) {
+  final base = FirebaseFirestore.instance
+      .collection('invoices')
+      .orderBy('timestampMs', descending: true);
+
+  final controller = PagedListController<Invoice>(
+    pageSize: 100,
+    loadPage: (cursor) async {
+      final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      final (items, next) = await fetchFirestorePage<Invoice>(
+        base: base,
+        after: after,
+        pageSize: 100,
+        map: (d) => Invoice.fromFirestore(d.data(), docId: d.id),
+      );
+      return (items, next);
+    },
+  );
+
+  Future.microtask(controller.resetAndLoad);
+  ref.onDispose(controller.dispose);
+  return controller;
+});

@@ -4,6 +4,9 @@ import '../../core/auth/auth.dart';
 import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse existing providers
 import 'Products/inventory_repository.dart'; // for ProductDoc
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
+import 'package:retail_mvp2/core/firebase/firestore_paging.dart';
+import 'package:retail_mvp2/core/loading/page_loader_overlay.dart';
 
 // Local + Firestore-integrated stock movements screen
 class StockMovementsScreen extends ConsumerStatefulWidget {
@@ -16,10 +19,38 @@ class StockMovementsScreen extends ConsumerStatefulWidget {
 
 class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
   String _filter = '';
+  // Vertical controller for infinite scroll
+  final ScrollController _vScrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _vScrollCtrl.addListener(_maybeLoadMoreOnScroll);
+  }
+
+  @override
+  void dispose() {
+    _vScrollCtrl.removeListener(_maybeLoadMoreOnScroll);
+    _vScrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _maybeLoadMoreOnScroll() {
+    if (!_vScrollCtrl.hasClients) return;
+    final extentAfter = _vScrollCtrl.position.extentAfter;
+    if (extentAfter < 600) {
+      final controller = ref.read(movementsPagedControllerProvider);
+      final s = controller.state;
+      if (!s.loading && !s.endReached) {
+        controller.loadMore();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-  final movementsStream = ref.watch(_movementsProvider);
+    final paged = ref.watch(movementsPagedControllerProvider);
+    final state = paged.state;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(children: [
@@ -44,73 +75,97 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
         ]),
         const SizedBox(height: 12),
         Expanded(
-          child: Card(
-            child: movementsStream.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (all) {
-                final q = _filter.trim().toLowerCase();
-                final filtered = q.isEmpty
-                    ? all
-                    : all.where((m) => m.sku.toLowerCase().contains(q) || m.name.toLowerCase().contains(q) || (m.note?.toLowerCase().contains(q) ?? false) || (m.updatedBy?.toLowerCase().contains(q) ?? false)).toList();
-                if (filtered.isEmpty) {
-                  return const Center(child: Text('No movements recorded.'));
-                }
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTableTheme(
-                    data: DataTableThemeData(
-                      dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                      headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
-                    ),
-                    child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Date')),
-                      DataColumn(label: Text('Type')),
-                      DataColumn(label: Text('SKU')),
-                      DataColumn(label: Text('Name')),
-                      DataColumn(label: Text('Loc')),
-                      DataColumn(label: Text('Δ Qty')),
-                      DataColumn(label: Text('Store After')),
-                      DataColumn(label: Text('WH After')),
-                      DataColumn(label: Text('Total')),
-                      DataColumn(label: Text('Updated Time')),
-                      DataColumn(label: Text('Updated By')),
-                      DataColumn(label: Text('Note')),
-                    ],
-                    rows: [
-                      for (final m in filtered)
-                        DataRow(
-                          onSelectChanged: (selected) {
-                            if (selected == true) {
-                              _openEditMovement(m);
-                            }
-                          },
-                          onLongPress: () => _confirmDeleteMovement(m),
-                          cells: [
-                            DataCell(Text(_fmtDateTime(m.date))),
-                            DataCell(Text(m.type)),
-                            DataCell(Text(m.sku)),
-                            DataCell(Text(m.name)),
-                            DataCell(Text(m.location)),
-                            DataCell(Text(m.deltaQty.toString())),
-                            DataCell(Text(m.storeAfter?.toString() ?? '-')),
-                            DataCell(Text(m.warehouseAfter?.toString() ?? '-')),
-                            DataCell(Text(m.totalAfter?.toString() ?? '-')),
-                            DataCell(Text(m.updatedAt == null ? '-' : _fmtDateTime(m.updatedAt!))),
-                            DataCell(Text(m.updatedBy ?? '-')),
-                            DataCell(SizedBox(width: 180, child: Text(m.note ?? ''))),
-                          ],
-                        ),
-                    ],
-                  ),
-                  ),
-                );
-              },
+          child: PageLoaderOverlay(
+            loading: state.loading && state.items.isEmpty,
+            error: state.error,
+            onRetry: () => ref.read(movementsPagedControllerProvider).resetAndLoad(),
+            child: Card(
+              child: _buildTable(context, state.items.where(_matchesFilter).toList(), state, ref),
             ),
           ),
         ),
       ]),
+    );
+  }
+
+  bool _matchesFilter(MovementRecord m) {
+    final q = _filter.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return m.sku.toLowerCase().contains(q) ||
+        m.name.toLowerCase().contains(q) ||
+        (m.note?.toLowerCase().contains(q) ?? false) ||
+        (m.updatedBy?.toLowerCase().contains(q) ?? false);
+  }
+
+  Widget _buildTable(BuildContext context, List<MovementRecord> rows, PageState<MovementRecord> state, WidgetRef ref) {
+    if (rows.isEmpty && !state.loading) {
+      return const Center(child: Text('No movements recorded.'));
+    }
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTableTheme(
+              data: DataTableThemeData(
+                dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
+              ),
+              child: SingleChildScrollView(
+                controller: _vScrollCtrl,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Date')),
+                    DataColumn(label: Text('Type')),
+                    DataColumn(label: Text('SKU')),
+                    DataColumn(label: Text('Name')),
+                    DataColumn(label: Text('Loc')),
+                    DataColumn(label: Text('Δ Qty')),
+                    DataColumn(label: Text('Store After')),
+                    DataColumn(label: Text('WH After')),
+                    DataColumn(label: Text('Total')),
+                    DataColumn(label: Text('Updated Time')),
+                    DataColumn(label: Text('Updated By')),
+                    DataColumn(label: Text('Note')),
+                  ],
+                  rows: [
+                    for (final m in rows)
+                      DataRow(
+                        onSelectChanged: (selected) { if (selected == true) { _openEditMovement(m); } },
+                        onLongPress: () => _confirmDeleteMovement(m),
+                        cells: [
+                          DataCell(Text(_fmtDateTime(m.date))),
+                          DataCell(Text(m.type)),
+                          DataCell(Text(m.sku)),
+                          DataCell(Text(m.name)),
+                          DataCell(Text(m.location)),
+                          DataCell(Text(m.deltaQty.toString())),
+                          DataCell(Text(m.storeAfter?.toString() ?? '-')),
+                          DataCell(Text(m.warehouseAfter?.toString() ?? '-')),
+                          DataCell(Text(m.totalAfter?.toString() ?? '-')),
+                          DataCell(Text(m.updatedAt == null ? '-' : _fmtDateTime(m.updatedAt!))),
+                          DataCell(Text(m.updatedBy ?? '-')),
+                          DataCell(SizedBox(width: 180, child: Text(m.note ?? ''))),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (!state.endReached)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: state.loading
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                : OutlinedButton.icon(
+                    onPressed: () => ref.read(movementsPagedControllerProvider).loadMore(),
+                    icon: const Icon(Icons.more_horiz),
+                    label: const Text('Load more'),
+                  ),
+          ),
+      ],
     );
   }
 
@@ -313,14 +368,30 @@ class MovementRecord {
 }
 
 // ---------------- Firestore persistence ----------------
-final _movementsProvider = StreamProvider.autoDispose<List<MovementRecord>>((ref) {
-  final firestore = FirebaseFirestore.instance; // Could inject if needed
-  return firestore
+// Paging controller provider for inventory movements
+final movementsPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<MovementRecord>>((ref) {
+  final base = FirebaseFirestore.instance
       .collection('inventory_movements')
-      .orderBy('createdAt', descending: true)
-      .limit(500)
-      .snapshots()
-      .map((snap) => snap.docs.map((d) => _movementFromDoc(d)).toList());
+      .orderBy('createdAt', descending: true);
+
+  final controller = PagedListController<MovementRecord>(
+    pageSize: 50,
+    loadPage: (cursor) async {
+      final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      final (items, next) = await fetchFirestorePage<MovementRecord>(
+        base: base,
+        after: after,
+        pageSize: 50,
+        map: _movementFromDoc,
+      );
+      return (items, next);
+    },
+  );
+
+  // Trigger initial load after provider creation
+  Future.microtask(controller.resetAndLoad);
+  ref.onDispose(controller.dispose);
+  return controller;
 });
 
 MovementRecord _movementFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
@@ -545,7 +616,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
               );
               after = await repo.getProduct(sku);
               final firestore = FirebaseFirestore.instance;
-              await firestore.collection('inventory_movements').add({
+                    await firestore.collection('inventory_movements').add({
                 'createdAt': FieldValue.serverTimestamp(),
                 'type': _type,
                 'sku': sku,
