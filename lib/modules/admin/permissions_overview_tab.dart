@@ -216,10 +216,17 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                       thumbVisibility: true,
                       child: SingleChildScrollView(
                         padding: EdgeInsets.zero,
-                        child: SingleChildScrollView(
+                        child: Scrollbar(
                           controller: _hCtrl,
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          interactive: true,
+                          scrollbarOrientation: ScrollbarOrientation.bottom,
+                          notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                          child: SingleChildScrollView(
+                            controller: _hCtrl,
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
                             width: totalWidth,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,9 +246,16 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                           children: [
                                             Row(
                                               children: [
-                                                Expanded(
-                                                  child: Text(u.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                                                ),
+                                                Expanded(child: Tooltip(
+                                                  message: u.label,
+                                                  waitDuration: const Duration(milliseconds: 300),
+                                                  child: Text(
+                                                    u.label,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                                                  ),
+                                                )),
                                                 IconButton(
                                                   tooltip: 'Edit permissions',
                                                   icon: Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -255,9 +269,27 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                               ],
                                             ),
                                             if (u.role.isNotEmpty)
-                                              Text(u.role, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                              Tooltip(
+                                                message: u.role,
+                                                waitDuration: const Duration(milliseconds: 300),
+                                                child: Text(
+                                                  u.role,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                                ),
+                                              ),
                                             if (u.email.isNotEmpty)
-                                              Text(u.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                              Tooltip(
+                                                message: u.email,
+                                                waitDuration: const Duration(milliseconds: 300),
+                                                child: Text(
+                                                  u.email,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                                ),
+                                              ),
                                           ],
                                         ),
                                       ),
@@ -270,10 +302,11 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                   padding: const EdgeInsets.only(bottom: 8),
                                   child: Card(
                                     elevation: 0,
+                                    margin: EdgeInsets.zero,
                                     clipBehavior: Clip.antiAlias,
                                     color: Theme.of(context).colorScheme.surfaceContainerHighest,
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
@@ -292,6 +325,7 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
                                   ),
                                 ),
                               ],
+                            ),
                             ),
                           ),
                         ),

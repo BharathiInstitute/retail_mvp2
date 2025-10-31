@@ -185,7 +185,11 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
               ]),
             ),
           Expanded(
-            child: SingleChildScrollView(
+            child: Scrollbar(
+              thumbVisibility: true,
+              trackVisibility: true,
+              interactive: true,
+              child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTableTheme(
                 data: DataTableThemeData(
@@ -245,6 +249,7 @@ class _PermissionsTabState extends ConsumerState<PermissionsTab> {
               ),
               ),
             ),
+          ),
           ),
         ]
       ],

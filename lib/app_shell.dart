@@ -38,7 +38,6 @@ import 'core/auth/register_screen.dart';
 import 'core/auth/forgot_password_screen.dart';
 
 // ===== Inlined app state (from previous app_state.dart) =====
-import 'dart:async';
 
 // Use global keys from core/app_keys.dart
 
@@ -291,8 +290,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   // Refresh router when relevant providers change
   ref.listen(authStateProvider, (_, __) => router.refresh());
-  ref.listen(permissionsProvider, (_, __) => router.refresh());
-  ref.listen(ownerProvider, (_, __) => router.refresh());
+  ref.listen(permissionsProvider, (_, __) {
+    if (ref.read(authStateProvider) != null) router.refresh();
+  });
+  ref.listen(ownerProvider, (_, __) {
+    if (ref.read(authStateProvider) != null) router.refresh();
+  });
 
   ref.onDispose(() {
     router.dispose();
@@ -300,6 +303,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return router;
 });
+
+// Track logout progress to prevent double taps and re-entrancy during sign-out
+final logoutInProgressProvider = StateProvider<bool>((ref) => false);
 
 
 // ===== Inlined common widgets (from previous common_widgets.dart) =====
@@ -611,6 +617,7 @@ class _SideMenu extends ConsumerWidget {
       if (user != null)
         Builder(builder: (context) {
           final extended = ref.watch(navRailExtendedProvider);
+          final loggingOut = ref.watch(logoutInProgressProvider);
           final tile = ListTile(
             dense: true,
             visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
@@ -623,13 +630,44 @@ class _SideMenu extends ConsumerWidget {
                     style: context.texts.bodySmall?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700),
                   )
                 : null,
-            onTap: () async {
-              try {
-                final messenger = ScaffoldMessenger.maybeOf(context); messenger?.clearSnackBars();
-                final rootCtx = rootNavigatorKey.currentContext; if (rootCtx != null) { GoRouter.of(rootCtx).go('/login'); }
-                Future.microtask(() => ref.read(authRepositoryProvider).signOut());
-              } catch (_) {}
-            },
+            enabled: !loggingOut,
+            onTap: loggingOut
+                ? null
+                : () async {
+                    // Debounce logout to avoid repeated sign-outs and route churn
+                    ref.read(logoutInProgressProvider.notifier).state = true;
+                    try {
+                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      messenger?.clearSnackBars();
+                      // Ensure no lingering focus from previous routes
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      // Close any open drawers before navigating away to avoid overlay/barrier lingering
+                      await Navigator.of(context).maybePop();
+                      // Sign out first to avoid redirecting back to a protected route while still logged in.
+                      await ref.read(authRepositoryProvider).signOut();
+                      // Give the framework a moment to settle route pops/animations (drawer closing, etc.)
+                      await Future<void>.delayed(const Duration(milliseconds: 50));
+                      // Hard-close any remaining overlays on root navigator to avoid stuck modal barriers
+                      final rootNav = rootNavigatorKey.currentState;
+                      if (rootNav != null) {
+                        while (rootNav.canPop()) {
+                          rootNav.pop();
+                        }
+                      }
+                      // Replace the entire stack with /login on the root router (no back to protected screens)
+                      final rootCtx = rootNavigatorKey.currentContext;
+                      if (rootCtx != null) {
+                        final router = GoRouter.of(rootCtx);
+                        router.replace('/login');
+                        // Optional: force a refresh to ensure redirect guards immediately see logged-out state
+                        router.refresh();
+                      }
+                    } catch (_) {
+                      // no-op
+                    } finally {
+                      ref.read(logoutInProgressProvider.notifier).state = false;
+                    }
+                  },
           );
           return extended ? tile : Tooltip(message: 'Logout', child: tile);
         }),

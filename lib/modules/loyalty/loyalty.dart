@@ -83,39 +83,69 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
       stream: _tierConfig(),
       builder: (context, snap) {
         final tiers = snap.data ?? const <_TierView>[];
+        final narrow = MediaQuery.of(context).size.width < 560;
         return Stack(children:[
           Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(narrow ? 8 : 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Wrap(spacing:12, runSpacing:12, children:[
-              SizedBox(width:260, child: TextField(
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search customers'),
-                onChanged: (v)=>setState(()=>_search=v),
-              )),
-              DropdownButton<LoyaltyFilter>(
-                value: _filter,
-                items: const [
-                  DropdownMenuItem(value: LoyaltyFilter.all, child: Text('All')),
-                  DropdownMenuItem(value: LoyaltyFilter.bronze, child: Text('Bronze')),
-                  DropdownMenuItem(value: LoyaltyFilter.silver, child: Text('Silver')),
-                  DropdownMenuItem(value: LoyaltyFilter.gold, child: Text('Gold')),
-                ],
-                onChanged: (v)=>setState(()=>_filter=v??LoyaltyFilter.all),
-              ),
-              FilledButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LoyaltySettingsScreen()),
-                  );
-                },
-                icon: const Icon(Icons.settings_outlined),
-                label: const Text('Settings'),
-              ),
-            ]),
-            const SizedBox(height:16),
+            LayoutBuilder(builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 560;
+              final searchW = isNarrow ? 220.0 : 260.0;
+              final btnStyle = FilledButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                visualDensity: VisualDensity.compact,
+              );
+              final widgets = <Widget>[
+                SizedBox(
+                  width: searchW,
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search customers',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      floatingLabelBehavior: FloatingLabelBehavior.never,
+                    ),
+                    onChanged: (v)=>setState(()=>_search=v),
+                  ),
+                ),
+                DropdownButton<LoyaltyFilter>(
+                  value: _filter,
+                  items: const [
+                    DropdownMenuItem(value: LoyaltyFilter.all, child: Text('All')),
+                    DropdownMenuItem(value: LoyaltyFilter.bronze, child: Text('Bronze')),
+                    DropdownMenuItem(value: LoyaltyFilter.silver, child: Text('Silver')),
+                    DropdownMenuItem(value: LoyaltyFilter.gold, child: Text('Gold')),
+                  ],
+                  onChanged: (v)=>setState(()=>_filter=v??LoyaltyFilter.all),
+                ),
+                FilledButton.icon(
+                  style: btnStyle,
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const LoyaltySettingsScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Settings'),
+                ),
+              ];
+              if (isNarrow) {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [for (final w in widgets) Padding(padding: const EdgeInsets.only(right: 6), child: w)]),
+                );
+              } else {
+                return Wrap(spacing:12, runSpacing:12, children: widgets);
+              }
+            }),
+            SizedBox(height: narrow ? 8 : 16),
             Expanded(child: _customerList(tiers)),
-            const SizedBox(height:12),
-            _plansSummary(tiers),
+            if (!narrow) ...[
+              const SizedBox(height:12),
+              _plansSummary(tiers),
+            ]
           ]),
         ),
         ]);

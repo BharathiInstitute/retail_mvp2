@@ -260,17 +260,52 @@ class _TotalSummaryCard extends StatelessWidget {
 									final methodsTotal = netByMethod.values.fold(0.0, (a,b)=>a+b);
 									final grandTotal = methodsTotal + stockValue;
 
-									return Wrap(spacing: 12, runSpacing: 12, children: [
-										for (final e in netByMethod.entries)
-											_MetricTile(
-												title: e.key,
-												value: '₹${e.value.toStringAsFixed(0)}',
-												icon: e.key == 'Cash' ? Icons.currency_rupee : (e.key == 'UPI' ? Icons.qr_code_scanner : Icons.credit_card),
-											),
-										_MetricTile(title: 'Stock Value', value: '₹${stockValue.toStringAsFixed(0)}', icon: Icons.inventory_2_outlined),
-										_MetricTile(title: 'Total (Methods)', value: '₹${methodsTotal.toStringAsFixed(0)}', icon: Icons.summarize_outlined),
-										_MetricTile(title: 'Grand Total', value: '₹${grandTotal.toStringAsFixed(0)}', icon: Icons.account_balance_outlined),
-									]);
+																		return LayoutBuilder(
+																			builder: (context, constraints) {
+																				final isNarrow = constraints.maxWidth < 560;
+																				final tiles = <Widget>[
+																					for (final e in netByMethod.entries)
+																						_MetricTile(
+																							title: e.key,
+																							value: '₹${e.value.toStringAsFixed(0)}',
+																							icon: e.key == 'Cash'
+																									? Icons.currency_rupee
+																									: (e.key == 'UPI' ? Icons.qr_code_scanner : Icons.credit_card),
+																						),
+																					_MetricTile(
+																							title: 'Stock Value',
+																							value: '₹${stockValue.toStringAsFixed(0)}',
+																							icon: Icons.inventory_2_outlined),
+																					_MetricTile(
+																							title: 'Total (Methods)',
+																							value: '₹${methodsTotal.toStringAsFixed(0)}',
+																							icon: Icons.summarize_outlined),
+																					_MetricTile(
+																							title: 'Grand Total',
+																							value: '₹${grandTotal.toStringAsFixed(0)}',
+																							icon: Icons.account_balance_outlined),
+																				];
+																														if (isNarrow) {
+																															return Scrollbar(
+																																thumbVisibility: true,
+																																trackVisibility: true,
+																																child: SingleChildScrollView(
+																																	scrollDirection: Axis.horizontal,
+																																	child: Row(
+																																		children: [
+																																			for (int i = 0; i < tiles.length; i++)
+																																				Padding(
+																																					padding: EdgeInsets.only(right: i == tiles.length - 1 ? 0 : 8),
+																																					child: tiles[i],
+																																				),
+																																		],
+																																	),
+																																),
+																															);
+																				}
+																				return Wrap(spacing: 12, runSpacing: 12, children: tiles);
+																			},
+																		);
 								},
 							);
 						},
@@ -312,11 +347,28 @@ class _PnLCard extends StatelessWidget {
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					Text('Profit & Loss', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 					const SizedBox(height: 12),
-					Wrap(spacing: 12, runSpacing: 12, children: [
-						_MetricTile(title: 'Revenue', value: '₹${revenue.toStringAsFixed(0)}', icon: Icons.trending_up),
-						_MetricTile(title: 'Expenses', value: '₹${expenses.toStringAsFixed(0)}', icon: Icons.trending_down),
-						_MetricTile(title: 'Net Profit', value: '₹${netProfit.toStringAsFixed(0)}', icon: Icons.account_balance_wallet_outlined),
-					]),
+															LayoutBuilder(builder: (context, constraints) {
+											final isNarrow = constraints.maxWidth < 560;
+											final tiles = <Widget>[
+												_MetricTile(title: 'Revenue', value: '₹${revenue.toStringAsFixed(0)}', icon: Icons.trending_up),
+												_MetricTile(title: 'Expenses', value: '₹${expenses.toStringAsFixed(0)}', icon: Icons.trending_down),
+												_MetricTile(title: 'Net Profit', value: '₹${netProfit.toStringAsFixed(0)}', icon: Icons.account_balance_wallet_outlined),
+											];
+											if (isNarrow) {
+																	return Scrollbar(
+																		thumbVisibility: true,
+																		trackVisibility: true,
+																		child: SingleChildScrollView(
+																			scrollDirection: Axis.horizontal,
+																			child: Row(children: [
+																				for (int i = 0; i < tiles.length; i++)
+																					Padding(padding: EdgeInsets.only(right: i == tiles.length - 1 ? 0 : 8), child: tiles[i]),
+																			]),
+																		),
+																	);
+											}
+											return Wrap(spacing: 12, runSpacing: 12, children: tiles);
+										}),
 					const SizedBox(height: 12),
 					LayoutBuilder(builder: (context, constraints) {
 						final maxW = constraints.maxWidth;
@@ -346,11 +398,28 @@ class _TaxSummaryCard extends StatelessWidget {
 				child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 					Text('Tax & Liability Summary', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
 					const SizedBox(height: 8),
-					Wrap(spacing: 12, runSpacing: 12, children: [
-						_MetricTile(title: 'GST Payable', value: '₹${summary.gstPayable.toStringAsFixed(0)}', icon: Icons.account_balance_outlined),
-						_MetricTile(title: 'Input Tax Credit', value: '₹${summary.itc.toStringAsFixed(0)}', icon: Icons.credit_score_outlined),
-						_MetricTile(title: 'Net Liability', value: '₹${net.toStringAsFixed(0)}', icon: Icons.scale_outlined),
-					]),
+															LayoutBuilder(builder: (context, constraints) {
+											final isNarrow = constraints.maxWidth < 560;
+											final tiles = <Widget>[
+												_MetricTile(title: 'GST Payable', value: '₹${summary.gstPayable.toStringAsFixed(0)}', icon: Icons.account_balance_outlined),
+												_MetricTile(title: 'Input Tax Credit', value: '₹${summary.itc.toStringAsFixed(0)}', icon: Icons.credit_score_outlined),
+												_MetricTile(title: 'Net Liability', value: '₹${net.toStringAsFixed(0)}', icon: Icons.scale_outlined),
+											];
+											if (isNarrow) {
+																	return Scrollbar(
+																		thumbVisibility: true,
+																		trackVisibility: true,
+																		child: SingleChildScrollView(
+																			scrollDirection: Axis.horizontal,
+																			child: Row(children: [
+																				for (int i = 0; i < tiles.length; i++)
+																					Padding(padding: EdgeInsets.only(right: i == tiles.length - 1 ? 0 : 8), child: tiles[i]),
+																			]),
+																		),
+																	);
+											}
+											return Wrap(spacing: 12, runSpacing: 12, children: tiles);
+										}),
 				]),
 			),
 		);
@@ -399,9 +468,12 @@ class _CashBookCard extends StatelessWidget {
 							if (!snap.hasData) return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
 							final entries = snap.data!;
 							double running = 0;
-														return SingleChildScrollView(
-								scrollDirection: Axis.horizontal,
-																child: DataTableTheme(
+														return Scrollbar(
+															thumbVisibility: true,
+															trackVisibility: true,
+															child: SingleChildScrollView(
+															scrollDirection: Axis.horizontal,
+																		child: DataTableTheme(
 																	data: DataTableThemeData(
 																		headingTextStyle: Theme.of(context).textTheme.labelMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
 																		dataTextStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
@@ -426,9 +498,11 @@ class _CashBookCard extends StatelessWidget {
 																					DataCell(Text('₹${running.toStringAsFixed(0)}')),
 																				]);
 																			}(),
-																	]),
+																	],
 																),
-							);
+															),
+														),
+													);
 						},
 					),
 				]),

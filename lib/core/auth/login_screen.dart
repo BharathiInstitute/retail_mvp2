@@ -14,13 +14,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 	final _formKey = GlobalKey<FormState>();
 	final _emailCtrl = TextEditingController();
 	final _passwordCtrl = TextEditingController();
+	final _emailFocus = FocusNode();
+	final _passwordFocus = FocusNode();
 	bool _loading = false;
 	String? _error;
+
+	@override
+	void initState() {
+		super.initState();
+		// On web/desktop, after navigating from an authenticated shell, a pending rebuild
+		// can steal focus; request focus on the next frame to ensure the email field is ready.
+		WidgetsBinding.instance.addPostFrameCallback((_) {
+			if (mounted) {
+				_emailFocus.requestFocus();
+			}
+		});
+	}
+
+	@override
+	void didChangeDependencies() {
+		super.didChangeDependencies();
+		// Redundant focus request in case previous overlays or route pops stole it.
+		WidgetsBinding.instance.addPostFrameCallback((_) {
+			if (!mounted) return;
+			if (!_emailFocus.hasFocus && !_passwordFocus.hasFocus) {
+				_emailFocus.requestFocus();
+			}
+		});
+	}
 
 	@override
 	void dispose() {
 		_emailCtrl.dispose();
 		_passwordCtrl.dispose();
+		_emailFocus.dispose();
+		_passwordFocus.dispose();
 		super.dispose();
 	}
 
@@ -49,7 +77,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 			body: Center(
 				child: ConstrainedBox(
 					constraints: const BoxConstraints(maxWidth: 420),
-					child: Padding(
+									child: Padding(
 						padding: const EdgeInsets.all(16),
 						child: AutofillGroup(
 							child: Form(
@@ -58,20 +86,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 									mainAxisSize: MainAxisSize.min,
 									crossAxisAlignment: CrossAxisAlignment.stretch,
 									children: [
-										TextFormField(
+																			TextFormField(
+																					focusNode: _emailFocus,
 											controller: _emailCtrl,
 											autofillHints: const [AutofillHints.username, AutofillHints.email],
 											keyboardType: TextInputType.emailAddress,
+																					textInputAction: TextInputAction.next,
+																					autofocus: true,
 											decoration: const InputDecoration(labelText: 'Email'),
 											validator: (v) => (v == null || v.isEmpty || !v.contains('@')) ? 'Enter a valid email' : null,
+																					onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
 										),
 										const SizedBox(height: 12),
-										TextFormField(
+																				TextFormField(
+																					focusNode: _passwordFocus,
 											controller: _passwordCtrl,
 											autofillHints: const [AutofillHints.password],
 											obscureText: true,
+																					textInputAction: TextInputAction.done,
 											decoration: const InputDecoration(labelText: 'Password'),
 											validator: (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
+																					onFieldSubmitted: (_) => _loading ? null : _submit(),
 										),
 										const SizedBox(height: 12),
 										if (_error != null)
