@@ -3,6 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/theme_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../inventory/Products/inventory.dart' show selectedStoreProvider;
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
 import '../../core/app_keys.dart';
 import '../../core/paging/paged_list_controller.dart';
 import '../../core/loading/page_loader_overlay.dart';
@@ -10,14 +13,14 @@ import '../../core/firebase/firestore_paging.dart';
 
 // CRM: List customers from Firestore with search/filter, add, edit, and delete.
 
-class CrmListScreen extends StatefulWidget {
+class CrmListScreen extends ConsumerStatefulWidget {
 	const CrmListScreen({super.key});
 
 	@override
-	State<CrmListScreen> createState() => _CrmListScreenState();
+	ConsumerState<CrmListScreen> createState() => _CrmListScreenState();
 }
 
-class _CrmListScreenState extends State<CrmListScreen> {
+class _CrmListScreenState extends ConsumerState<CrmListScreen> {
 	String query = '';
 	LoyaltyFilter loyaltyFilter = LoyaltyFilter.all;
 	final ScrollController _scrollCtrl = ScrollController();
@@ -30,8 +33,12 @@ class _CrmListScreenState extends State<CrmListScreen> {
 			_pager = PagedListController<CrmCustomer>(
 				pageSize: 50,
 				loadPage: (cursor) async {
-					Query<Map<String, dynamic>> base = FirebaseFirestore.instance
-							.collection('customers')
+					final selStoreId = ref.read(selectedStoreProvider);
+					if (selStoreId == null) {
+						return (<CrmCustomer>[], null);
+					}
+					Query<Map<String, dynamic>> base = StoreRefs.of(selStoreId)
+							.customers()
 							.orderBy('name');
 					final q = query.trim();
 					if (q.length >= 2) {
@@ -104,7 +111,9 @@ class _CrmListScreenState extends State<CrmListScreen> {
 	}
 
 	Future<void> _exportCsv() async {
-		final snap = await FirebaseFirestore.instance.collection('customers').get();
+		final storeId = ref.read(selectedStoreProvider);
+		if (storeId == null) return;
+		final snap = await StoreRefs.of(storeId).customers().get();
 		final list = snap.docs.map((d) => CrmCustomer.fromDoc(d)).toList()
 			..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 		final header = 'Name,Phone,Email,Loyalty,TotalSpend,LastVisit';
@@ -118,12 +127,17 @@ class _CrmListScreenState extends State<CrmListScreen> {
 	Future<void> _quickAddCustomer() async {
 				final messenger = scaffoldMessengerKey.currentState;
 				final bsCtx = rootNavigatorKey.currentContext; if (bsCtx == null) return;
+				final storeId = ref.read(selectedStoreProvider);
+				if (storeId == null) {
+					messenger?.showSnackBar(const SnackBar(content: Text('No store selected')));
+					return;
+				}
 				final newCustomer = await showModalBottomSheet<CrmCustomer>(
 			context: bsCtx,
 			isScrollControlled: true,
 			builder: (dialogCtx) => Padding(
 				padding: EdgeInsets.only(bottom: MediaQuery.of(dialogCtx).viewInsets.bottom),
-				child: const _QuickAddCustomerForm(),
+				child: _QuickAddCustomerForm(storeId: storeId),
 			),
 		);
 			if (newCustomer != null) {
@@ -134,12 +148,17 @@ class _CrmListScreenState extends State<CrmListScreen> {
 	Future<void> _editCustomer(CrmCustomer c) async {
 				final messenger = scaffoldMessengerKey.currentState;
 				final bsCtx2 = rootNavigatorKey.currentContext; if (bsCtx2 == null) return;
+				final storeId = ref.read(selectedStoreProvider);
+				if (storeId == null) {
+					messenger?.showSnackBar(const SnackBar(content: Text('No store selected')));
+					return;
+				}
 				final edited = await showModalBottomSheet<CrmCustomer>(
 			context: bsCtx2,
 			isScrollControlled: true,
 			builder: (dialogCtx) => Padding(
 				padding: EdgeInsets.only(bottom: MediaQuery.of(dialogCtx).viewInsets.bottom),
-				child: _EditCustomerForm(customer: c),
+				child: _EditCustomerForm(customer: c, storeId: storeId),
 			),
 		);
 			if (edited != null) {
@@ -183,7 +202,9 @@ class _CrmListScreenState extends State<CrmListScreen> {
 											final auth = FirebaseAuth.instance;
 											if (auth.currentUser == null) { await auth.signInAnonymously(); }
 											if (c.id.isEmpty) { throw Exception('Missing document id'); }
-																					await FirebaseFirestore.instance.collection('customers').doc(c.id).delete();
+																						final storeId = ref.read(selectedStoreProvider);
+																						if (storeId == null) { throw Exception('No store selected'); }
+																						await StoreRefs.of(storeId).customers().doc(c.id).delete();
 																					rootNavigatorKey.currentState?.pop(true);
 										} catch (e) {
 																					// Use global messenger to avoid using dialog context after awaits
@@ -347,7 +368,8 @@ class _CrmListScreenState extends State<CrmListScreen> {
 
 // Add form
 class _QuickAddCustomerForm extends StatefulWidget {
-	const _QuickAddCustomerForm();
+	final String storeId;
+	const _QuickAddCustomerForm({required this.storeId});
 	@override
 	State<_QuickAddCustomerForm> createState() => _QuickAddCustomerFormState();
 }
@@ -391,7 +413,7 @@ class _QuickAddCustomerFormState extends State<_QuickAddCustomerForm> {
 				'createdAt': FieldValue.serverTimestamp(),
 				'updatedAt': FieldValue.serverTimestamp(),
 			};
-			final doc = await FirebaseFirestore.instance.collection('customers').add(data);
+			final doc = await StoreRefs.of(widget.storeId).customers().add(data);
 
 			final created = CrmCustomer(
 				id: doc.id,
@@ -494,7 +516,8 @@ class _QuickAddCustomerFormState extends State<_QuickAddCustomerForm> {
 // Edit form (upsert)
 class _EditCustomerForm extends StatefulWidget {
 	final CrmCustomer customer;
-	const _EditCustomerForm({required this.customer});
+	final String storeId;
+	const _EditCustomerForm({required this.customer, required this.storeId});
 	@override
 	State<_EditCustomerForm> createState() => _EditCustomerFormState();
 }
@@ -532,7 +555,7 @@ class _EditCustomerFormState extends State<_EditCustomerForm> {
 				await auth.signInAnonymously();
 			}
 
-			final customers = FirebaseFirestore.instance.collection('customers');
+			final customers = StoreRefs.of(widget.storeId).customers();
 			final id = widget.customer.id.isNotEmpty ? widget.customer.id : null;
 			final docRef = id != null ? customers.doc(id) : customers.doc();
 			await docRef.set({
@@ -810,7 +833,7 @@ Widget _loyaltyChip(LoyaltyStatus status) {
 				status.label,
 				style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurface),
 			),
-			backgroundColor: color.withValues(alpha: 0.15),
+			backgroundColor: color.withOpacity(0.15),
 		);
 	});
 }

@@ -7,6 +7,8 @@ import 'permissions_tab.dart' show permissionsEditTargetUserIdProvider;
 import 'package:retail_mvp2/core/theme/app_theme.dart';
 import 'package:retail_mvp2/core/theme/font_controller.dart';
 import '../../core/theme/theme_utils.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class PermissionsOverviewTab extends ConsumerStatefulWidget {
   const PermissionsOverviewTab({super.key});
@@ -167,174 +169,219 @@ class _PermissionsOverviewTabState extends ConsumerState<PermissionsOverviewTab>
           child: Text('Permissions Overview', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
         ),
         Expanded(
-          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance
-                .collection('users')
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
-            builder: (context, usersSnap) {
-              if (usersSnap.hasError) {
-                return Center(child: Text('Error loading users: ${usersSnap.error}'));
-              }
-              if (!usersSnap.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final users = usersSnap.data!.docs;
-              if (users.isEmpty) return const Center(child: Text('No users found'));
+          child: Builder(builder: (context) {
+            final selStoreId = ref.watch(selectedStoreIdProvider);
+            if (selStoreId == null || selStoreId.isEmpty) {
+              return Center(
+                child: Text(
+                  'Select a store to view permissions',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                ),
+              );
+            }
+            // Listen to active members of selected store
+            final membersQ = FirebaseFirestore.instance
+                .collection('store_users')
+                .where('storeId', isEqualTo: selStoreId)
+                .where('status', isEqualTo: 'active');
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: membersQ.snapshots(),
+              builder: (context, mSnap) {
+                if (mSnap.hasError) return Center(child: Text('Error loading members: ${mSnap.error}'));
+                if (!mSnap.hasData) return const Center(child: CircularProgressIndicator());
+                final mdocs = mSnap.data!.docs;
+                if (mdocs.isEmpty) return const Center(child: Text('No users in this store'));
 
-              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance.collection('user_permissions').snapshots(),
-                builder: (context, permsSnap) {
-                  if (permsSnap.hasError) {
-                    return Center(child: Text('Error loading permissions: ${permsSnap.error}'));
+                // Build uid list and role-by-uid map
+                final uidRole = <String, String>{
+                  for (final d in mdocs) ((d.data()['userId'] ?? d.id) as String): ((d.data()['role'] ?? '') as String),
+                };
+                final uids = uidRole.keys.toList();
+
+                Future<Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>> fetchUsers() async {
+                  final fs = FirebaseFirestore.instance;
+                  final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> out = {};
+                  // chunk whereIn (<=10)
+                  for (var i = 0; i < uids.length; i += 10) {
+                    final chunk = uids.sublist(i, i + 10 > uids.length ? uids.length : i + 10);
+                    final snap = await fs.collection('users').where(FieldPath.documentId, whereIn: chunk).get();
+                    for (final d in snap.docs) { out[d.id] = d; }
                   }
-                  final Map<String, Map<String, dynamic>> permsDocs = {
-                    for (final d in (permsSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]))
-                      d.id: d.data(),
-                  };
+                  return out;
+                }
 
-                  // Precompute user headers
-                  final userHeaders = users.map((u) {
-                    final ud = u.data();
-                    final displayName = (ud['displayName'] as String?)?.trim() ?? '';
-                    final email = (ud['email'] as String?)?.trim() ?? '';
-                    final primary = displayName.isNotEmpty ? displayName : (email.isNotEmpty ? email : u.id);
-                    final role = (ud['role'] as String?)?.trim() ?? '';
-                    return _UserHeader(id: u.id, label: primary, role: role, email: email);
-                  }).toList();
+                return FutureBuilder<Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                  future: fetchUsers(),
+                  builder: (context, uSnap) {
+                    if (uSnap.hasError) return Center(child: Text('Error loading profiles: ${uSnap.error}'));
+                    if (!uSnap.hasData) return const Center(child: CircularProgressIndicator());
+                    final usersById = uSnap.data!;
 
-                  // Layout constants (slightly tighter)
-                  const double actionColWidth = 140;
-                  const double userColWidth = 120;
-                  final double totalWidth = actionColWidth + userHeaders.length * userColWidth;
+                    // Precompute user headers from membership + profiles
+                    final userHeaders = <_UserHeader>[];
+                    for (final uid in uids) {
+                      final role = (uidRole[uid] ?? '').trim();
+                      final doc = usersById[uid];
+                      String displayName = '';
+                      String email = '';
+                      if (doc != null) {
+                        final ud = doc.data();
+                        displayName = (ud['displayName'] as String?)?.trim() ?? '';
+                        email = (ud['email'] as String?)?.trim() ?? '';
+                      }
+                      // Fallback to auth display/email when it's me
+                      final me = FirebaseAuth.instance.currentUser;
+                      if (email.isEmpty && me != null && me.uid == uid) {
+                        email = (me.email ?? '').trim();
+                      }
+                      if (displayName.isEmpty && me != null && me.uid == uid) {
+                        displayName = (me.displayName ?? '').trim();
+                      }
+                      final label = displayName.isNotEmpty ? displayName : (email.isNotEmpty ? email : uid);
+                      userHeaders.add(_UserHeader(id: uid, label: label, role: role, email: email));
+                    }
 
-                  // Page-level vertical Scrollbar on right using PrimaryScrollController; shared horizontal controller for header/body
-                  return PrimaryScrollController(
-                    controller: _vCtrl,
-                    child: Scrollbar(
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        padding: EdgeInsets.zero,
-                        child: Scrollbar(
-                          controller: _hCtrl,
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          interactive: true,
-                          scrollbarOrientation: ScrollbarOrientation.bottom,
-                          notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
-                          child: SingleChildScrollView(
-                            controller: _hCtrl,
-                            scrollDirection: Axis.horizontal,
-                            child: SizedBox(
-                            width: totalWidth,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                              // Top user header
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    SizedBox(width: actionColWidth, child: Text('Action', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
-                                    for (final u in userHeaders)
-                                      SizedBox(
-                                        width: userColWidth,
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Expanded(child: Tooltip(
-                                                  message: u.label,
-                                                  waitDuration: const Duration(milliseconds: 300),
-                                                  child: Text(
-                                                    u.label,
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                    // Layout constants
+                    const double actionColWidth = 140;
+                    const double userColWidth = 120;
+                    final double totalWidth = actionColWidth + userHeaders.length * userColWidth;
+
+                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance.collection('user_permissions').snapshots(),
+                      builder: (context, permsSnap) {
+                        if (permsSnap.hasError) {
+                          return Center(child: Text('Error loading permissions: ${permsSnap.error}'));
+                        }
+                        final Map<String, Map<String, dynamic>> permsDocs = {
+                          for (final d in (permsSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]))
+                            d.id: d.data(),
+                        };
+
+                        return PrimaryScrollController(
+                          controller: _vCtrl,
+                          child: Scrollbar(
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                              padding: EdgeInsets.zero,
+                              child: Scrollbar(
+                                controller: _hCtrl,
+                                thumbVisibility: true,
+                                trackVisibility: true,
+                                interactive: true,
+                                scrollbarOrientation: ScrollbarOrientation.bottom,
+                                notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                                child: SingleChildScrollView(
+                                  controller: _hCtrl,
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: totalWidth,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 6),
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              SizedBox(width: actionColWidth, child: Text('Action', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+                                              for (final u in userHeaders)
+                                                SizedBox(
+                                                  width: userColWidth,
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          Expanded(child: Tooltip(
+                                                            message: u.label,
+                                                            waitDuration: const Duration(milliseconds: 300),
+                                                            child: Text(
+                                                              u.label,
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                                                            ),
+                                                          )),
+                                                          IconButton(
+                                                            tooltip: 'Edit permissions',
+                                                            icon: Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                                            onPressed: () {
+                                                              ref.read(permissionsEditTargetUserIdProvider.notifier).state = u.id;
+                                                              GoRouter.of(context).go('/admin/permissions-edit');
+                                                            },
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      if (u.role.isNotEmpty)
+                                                        Tooltip(
+                                                          message: u.role,
+                                                          waitDuration: const Duration(milliseconds: 300),
+                                                          child: Text(
+                                                            u.role,
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                                          ),
+                                                        ),
+                                                      if (u.email.isNotEmpty)
+                                                        Tooltip(
+                                                          message: u.email,
+                                                          waitDuration: const Duration(milliseconds: 300),
+                                                          child: Text(
+                                                            u.email,
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                                          ),
+                                                        ),
+                                                    ],
                                                   ),
-                                                )),
-                                                IconButton(
-                                                  tooltip: 'Edit permissions',
-                                                  icon: Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                                  onPressed: () {
-                                                    // Set target user ID and switch to Edit tab (index 1)
-                                                    ref.read(permissionsEditTargetUserIdProvider.notifier).state = u.id;
-                                                    // Navigate to standalone edit screen
-                                                    GoRouter.of(context).go('/admin/permissions-edit');
-                                                  },
                                                 ),
-                                              ],
-                                            ),
-                                            if (u.role.isNotEmpty)
-                                              Tooltip(
-                                                message: u.role,
-                                                waitDuration: const Duration(milliseconds: 300),
-                                                child: Text(
-                                                  u.role,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                                ),
-                                              ),
-                                            if (u.email.isNotEmpty)
-                                              Tooltip(
-                                                message: u.email,
-                                                waitDuration: const Duration(milliseconds: 300),
-                                                child: Text(
-                                                  u.email,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              // Cards body (no inner vertical scroll)
-                              for (final row in _rows)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Card(
-                                    elevation: 0,
-                                    margin: EdgeInsets.zero,
-                                    clipBehavior: Clip.antiAlias,
-                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(row.label, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
-                                          const SizedBox(height: 6),
-                                          _ModuleMatrix(
-                                            row: row,
-                                            userHeaders: userHeaders,
-                                            permsDocs: permsDocs,
-                                            actionColWidth: actionColWidth,
-                                            userColWidth: userColWidth,
+                                            ],
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                        for (final row in _rows)
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 8),
+                                            child: Card(
+                                              elevation: 0,
+                                              margin: EdgeInsets.zero,
+                                              clipBehavior: Clip.antiAlias,
+                                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(row.label, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface)),
+                                                    const SizedBox(height: 6),
+                                                    _ModuleMatrix(
+                                                      row: row,
+                                                      userHeaders: userHeaders,
+                                                      permsDocs: permsDocs,
+                                                      actionColWidth: actionColWidth,
+                                                      userColWidth: userColWidth,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          }),
         ),
       ],
     );

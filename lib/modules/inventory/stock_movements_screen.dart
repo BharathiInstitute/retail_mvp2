@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
-import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider; // reuse existing providers
+import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider, selectedStoreProvider; // reuse existing providers
 import 'Products/inventory_repository.dart'; // for ProductDoc
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
 import 'package:retail_mvp2/core/firebase/firestore_paging.dart';
 import 'package:retail_mvp2/core/loading/page_loader_overlay.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
 
 // Local + Firestore-integrated stock movements screen
 class StockMovementsScreen extends ConsumerStatefulWidget {
@@ -286,7 +287,14 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
     if (saved != true) return;
     try {
       final int newDelta = parseDelta(type, qtyCtrl.text);
-      await FirebaseFirestore.instance.collection('inventory_movements').doc(m.id).update({
+      final storeId = ref.read(selectedStoreProvider);
+      if (storeId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No store selected')));
+        }
+        return;
+      }
+      await StoreRefs.of(storeId).stockMovements().doc(m.id).update({
         'type': type,
         'location': location,
         'deltaQty': newDelta,
@@ -324,7 +332,14 @@ class _StockMovementsScreenState extends ConsumerState<StockMovementsScreen> {
     );
     if (ok != true) return;
     try {
-      await FirebaseFirestore.instance.collection('inventory_movements').doc(m.id).delete();
+      final storeId = ref.read(selectedStoreProvider);
+      if (storeId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No store selected')));
+        }
+        return;
+      }
+      await StoreRefs.of(storeId).stockMovements().doc(m.id).delete();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movement deleted')));
       }
@@ -368,18 +383,23 @@ class MovementRecord {
 }
 
 // ---------------- Firestore persistence ----------------
-// Paging controller provider for inventory movements
+// Paging controller provider for stock movements (store-scoped)
 final movementsPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<MovementRecord>>((ref) {
-  final base = FirebaseFirestore.instance
-      .collection('inventory_movements')
-      .orderBy('createdAt', descending: true);
+  final selStoreId = ref.watch(selectedStoreProvider);
 
   final controller = PagedListController<MovementRecord>(
     pageSize: 50,
     loadPage: (cursor) async {
       final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      if (selStoreId == null) {
+        // No store selected; return empty page
+        return (<MovementRecord>[], null);
+      }
+      final query = StoreRefs.of(selStoreId)
+          .stockMovements()
+          .orderBy('createdAt', descending: true);
       final (items, next) = await fetchFirestorePage<MovementRecord>(
-        base: base,
+        base: query,
         after: after,
         pageSize: 50,
         map: _movementFromDoc,
@@ -606,7 +626,10 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
             final noteVal = _noteCtrl.text.trim();
             ProductDoc? after;
             try {
+              final storeId = ref.read(selectedStoreProvider);
+              if (storeId == null) throw StateError('No store selected');
               await repo.applyStockMovement(
+                storeId: storeId,
                 sku: sku,
                 location: _location,
                 deltaQty: delta,
@@ -614,9 +637,8 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
                 note: noteVal.isEmpty ? null : noteVal,
                 updatedBy: user?.email,
               );
-              after = await repo.getProduct(sku);
-              final firestore = FirebaseFirestore.instance;
-                    await firestore.collection('inventory_movements').add({
+              after = await repo.getProduct(storeId, sku);
+              await StoreRefs.of(storeId).stockMovements().add({
                 'createdAt': FieldValue.serverTimestamp(),
                 'type': _type,
                 'sku': sku,
@@ -673,7 +695,7 @@ class _MovementDialogState extends ConsumerState<_MovementDialog> {
     return Material(
       elevation: 1,
       borderRadius: BorderRadius.circular(6),
-  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
         child: Column(

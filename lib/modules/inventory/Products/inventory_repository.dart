@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/store_scoped_refs.dart';
 
 /// Clean rebuilt InventoryRepository (single definition) providing CRUD,
 /// audit overwrite and incremental stock movement support.
@@ -11,9 +12,8 @@ class InventoryRepository {
   static const _warehouseLocation = 'Warehouse';
 
   // -------------------- Streams --------------------
-  Stream<List<ProductDoc>> streamProducts({String? tenantId}) {
-    Query<Map<String, dynamic>> q = _db.collection('inventory');
-    if (tenantId != null) q = q.where('tenantId', isEqualTo: tenantId);
+  Stream<List<ProductDoc>> streamProducts({required String storeId}) {
+    Query<Map<String, dynamic>> q = StoreRefs.of(storeId, fs: _db).products();
     return q.snapshots().map((s) {
       final list = s.docs.map(ProductDoc.fromDoc).toList();
       list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -23,7 +23,7 @@ class InventoryRepository {
 
   // -------------------- CRUD --------------------
   Future<void> addProduct({
-    required String tenantId,
+    required String storeId,
     required String sku,
     required String name,
     required double unitPrice,
@@ -38,7 +38,7 @@ class InventoryRepository {
     int warehouseQty = 0,
     List<BatchDoc>? customBatches,
   }) async {
-    final doc = _db.collection('inventory').doc(sku);
+    final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     await _db.runTransaction((tx) async {
       if ((await tx.get(doc)).exists) {
         throw StateError('A product with SKU "$sku" already exists.');
@@ -52,7 +52,7 @@ class InventoryRepository {
         ] else ...customBatches.map((b) => b.toMap()),
       ];
       tx.set(doc, {
-        'tenantId': tenantId,
+        'storeId': storeId,
         'sku': sku,
         'barcode': barcode ?? '',
         'name': name,
@@ -71,6 +71,7 @@ class InventoryRepository {
   }
 
   Future<void> updateProduct({
+    required String storeId,
     required String sku,
     String? name,
     double? unitPrice,
@@ -82,7 +83,7 @@ class InventoryRepository {
     double? costPrice,
     bool? isActive,
   }) async {
-    final doc = _db.collection('inventory').doc(sku);
+    final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     final data = <String, dynamic>{};
     void put(String k, dynamic v) {
       if (v != null) data[k] = v;
@@ -102,19 +103,20 @@ class InventoryRepository {
     if (data.isNotEmpty) await doc.update(data);
   }
 
-  Future<void> deleteProduct({required String sku}) async {
-    await _db.collection('inventory').doc(sku).delete();
+  Future<void> deleteProduct({required String storeId, required String sku}) async {
+    await StoreRefs.of(storeId, fs: _db).products().doc(sku).delete();
   }
 
   // -------------------- Audit Overwrite --------------------
   Future<void> auditUpdateStock({
+    required String storeId,
     required String sku,
     required int storeQty,
     required int warehouseQty,
     String? updatedBy,
     String? note,
   }) async {
-    final doc = _db.collection('inventory').doc(sku);
+    final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     await _db.runTransaction((tx) async {
       final snap = await tx.get(doc);
       if (!snap.exists) throw StateError('Product $sku does not exist');
@@ -143,7 +145,7 @@ class InventoryRepository {
 
   // -------------------- Import / Upsert --------------------
   Future<UpsertOutcome> upsertProductFromImport({
-    required String tenantId,
+    required String storeId,
     required String sku,
     required String name,
     required double unitPrice,
@@ -160,8 +162,8 @@ class InventoryRepository {
     List<BatchDoc>? customBatches,
   }) async {
     if (barcode != null && barcode.trim().isNotEmpty) {
-      final dup = await _db
-          .collection('inventory')
+      final dup = await StoreRefs.of(storeId, fs: _db)
+          .products()
           .where('barcode', isEqualTo: barcode)
           .limit(1)
           .get();
@@ -169,7 +171,7 @@ class InventoryRepository {
         throw StateError('Duplicate barcode: $barcode already used by SKU ${dup.docs.first.id}');
       }
     }
-    final doc = _db.collection('inventory').doc(sku);
+    final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     return _db.runTransaction<UpsertOutcome>((tx) async {
       final snap = await tx.get(doc);
       final batchesNew = <Map<String, dynamic>>[
@@ -198,7 +200,7 @@ class InventoryRepository {
         return UpsertOutcome.updated;
       } else {
         tx.set(doc, {
-          'tenantId': tenantId,
+          'storeId': storeId,
           'sku': sku,
           'barcode': barcode ?? '',
           'name': name,
@@ -219,14 +221,15 @@ class InventoryRepository {
   }
 
   // -------------------- Lookup --------------------
-  Future<ProductDoc?> getProduct(String sku) async {
-    final d = await _db.collection('inventory').doc(sku).get();
+  Future<ProductDoc?> getProduct(String storeId, String sku) async {
+    final d = await StoreRefs.of(storeId, fs: _db).products().doc(sku).get();
     if (!d.exists) return null;
     return ProductDoc.fromDoc(d);
   }
 
   // -------------------- Incremental Movement --------------------
   Future<void> applyStockMovement({
+    required String storeId,
     required String sku,
     required String location,
     required int deltaQty,
@@ -235,7 +238,7 @@ class InventoryRepository {
     String? updatedBy,
   }) async {
     assert(location == _storeLocation || location == _warehouseLocation);
-    final doc = _db.collection('inventory').doc(sku);
+    final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     await _db.runTransaction((tx) async {
       final snap = await tx.get(doc);
       if (!snap.exists) throw StateError('Product $sku does not exist');
@@ -282,6 +285,7 @@ class InventoryRepository {
 
   // -------------------- Stock Transfer (Store <-> Warehouse) --------------------
   Future<void> applyTransfer({
+    required String storeId,
     required String sku,
     required String from,
     required String to,
@@ -294,7 +298,7 @@ class InventoryRepository {
     if (!{store, wh}.contains(from) || !{store, wh}.contains(to) || from == to) {
       throw ArgumentError('Invalid from/to locations');
     }
-    final doc = _db.collection('inventory').doc(sku);
+  final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
     await _db.runTransaction((tx) async {
       final snap = await tx.get(doc);
       if (!snap.exists) throw StateError('Product $sku does not exist');

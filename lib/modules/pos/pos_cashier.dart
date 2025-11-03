@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 import '../../core/auth/auth.dart';
 
 /// Cashier screen with a primary card panel for shift summary and cash drawer actions.
@@ -160,11 +162,16 @@ class _PosCashierScreenState extends ConsumerState<PosCashierScreen> {
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day);
     final end = start.add(const Duration(days: 1));
-    final query = FirebaseFirestore.instance
-        .collection('invoices')
+    final sel = ref.read(selectedStoreIdProvider);
+    _todayCashSub?.cancel();
+    if (sel == null) {
+      setState(() => _cashSales = 0);
+      return;
+    }
+    final query = StoreRefs.of(sel)
+        .invoices()
         .where('timestampMs', isGreaterThanOrEqualTo: start.millisecondsSinceEpoch)
         .where('timestampMs', isLessThan: end.millisecondsSinceEpoch);
-    _todayCashSub?.cancel();
     _todayCashSub = query.snapshots().listen((snap) {
       double total = 0;
       for (final d in snap.docs) {
@@ -435,10 +442,14 @@ class _RecentInvoicesTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final query = FirebaseFirestore.instance
-        .collection('invoices')
-        .orderBy('timestampMs', descending: true)
-        .limit(10);
+  final sel = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+  if (sel == null) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 24.0),
+      child: Center(child: Text('Select a store to view recent invoices')),
+    );
+  }
+  final query = StoreRefs.of(sel).invoices().orderBy('timestampMs', descending: true).limit(10);
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: query.snapshots(),
       builder: (context, snap) {

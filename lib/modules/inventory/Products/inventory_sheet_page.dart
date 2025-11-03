@@ -1,10 +1,10 @@
- import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/auth.dart';
 import '../../../core/app_keys.dart';
 import 'inventory_repository.dart';
-import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider; // reuse providers
+import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider, selectedStoreProvider; // reuse providers
 
 /// Spreadsheet-like inventory management using PlutoGrid.
 /// Features:
@@ -34,9 +34,10 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
     final deleteCol = cols.where((c) => c.field == 'delete').toList();
     final adjustable = cols.where((c) => c.field != 'delete').toList();
     final reserved = (deleteCol.isNotEmpty ? deleteCol.first.width : 70) + 32; // delete col + padding
-    final target = ((totalWidth - reserved) / adjustable.length).clamp(80, 5000);
+  // Compute target column width (double) within sane bounds
+  final double target = ((totalWidth - reserved) / adjustable.length).clamp(80.0, 5000.0);
     for (final col in adjustable) {
-      stateManager!.resizeColumn(col, target - col.width);
+      stateManager!.resizeColumn(col, (target - col.width).toDouble());
     }
   }
 
@@ -157,7 +158,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
     required List<String> deletes,
     required int totalOps,
     required InventoryRepository repo,
-    required String tenantFallback,
+    required String storeId,
     required String? updatedByEmail,
   }) async {
     int processed = 0;
@@ -176,7 +177,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
             for (final c in creates) {
               update('Create ${c.sku}');
               await repo.addProduct(
-                tenantId: tenantFallback,
+                storeId: storeId,
                 sku: c.sku,
                 name: c.name,
                 unitPrice: c.price,
@@ -195,6 +196,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
             for (final u in updates) {
               update('Update ${u.sku}');
               await repo.updateProduct(
+                storeId: storeId,
                 sku: u.sku,
                 name: u.name,
                 unitPrice: u.price,
@@ -211,6 +213,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
             for (final a in adjusts) {
               update('Adjust ${a.sku} (${a.diff > 0 ? '+' : ''}${a.diff})');
               await repo.applyStockMovement(
+                storeId: storeId,
                 sku: a.sku,
                 location: 'Store',
                 deltaQty: a.diff,
@@ -222,7 +225,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
             }
             for (final d in deletes) {
               update('Delete $d');
-              await repo.deleteProduct(sku: d);
+              await repo.deleteProduct(storeId: storeId, sku: d);
               processed++; setDialogState(() {});
             }
           } catch (e) {
@@ -325,7 +328,11 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
       if (!proceed) return;
 
       final repo = ref.read(inventoryRepoProvider);
-      final tenantFallback = existingBySku.values.isEmpty ? user.uid : existingBySku.values.first.tenantId;
+      final storeId = ref.read(selectedStoreProvider);
+      if (storeId == null) {
+        rootMessenger?.showSnackBar(const SnackBar(content: Text('Select a store to upload changes.')));
+        return;
+      }
       final processed = await _showProgressAndRunOps(
         creates: creates,
         updates: updates,
@@ -333,7 +340,7 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
         deletes: deletes,
         totalOps: totalOps,
         repo: repo,
-        tenantFallback: tenantFallback,
+        storeId: storeId,
         updatedByEmail: user.email,
       );
 
@@ -443,10 +450,11 @@ class _InventorySheetPageState extends ConsumerState<InventorySheetPage> {
               iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
               columnTextStyle: (Theme.of(context).textTheme.labelSmall ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
               cellTextStyle: (Theme.of(context).textTheme.bodySmall ?? const TextStyle()).copyWith(color: Theme.of(context).colorScheme.onSurface),
-              activatedColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+              // Use withOpacity for broad Flutter SDK compatibility
+              activatedColor: Theme.of(context).colorScheme.primary.withOpacity(0.10),
               activatedBorderColor: Theme.of(context).colorScheme.primary,
-              evenRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.04),
-              oddRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.08),
+              evenRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.04),
+              oddRowColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.08),
             ),
             columnFilter: PlutoGridColumnFilterConfig(),
           ),

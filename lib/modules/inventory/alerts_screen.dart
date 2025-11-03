@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
 import 'Products/inventory_repository.dart';
+import '../stores/providers.dart';
 
 // Threshold constants
 const int kLowStockThreshold = 5;
@@ -30,7 +31,9 @@ class ProductAlert {
 final _inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRepository());
 final alertsProductsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) {
   final repo = ref.watch(_inventoryRepoProvider);
-  return repo.streamProducts(tenantId: null); // show all
+  final storeId = ref.watch(selectedStoreIdProvider);
+  if (storeId == null) return const Stream<List<ProductDoc>>.empty();
+  return repo.streamProducts(storeId: storeId);
 });
 
 final alertsProvider = Provider.autoDispose<List<ProductAlert>>((ref) {
@@ -145,7 +148,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
               label: Text('Low Stock', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showLowStock,
               onSelected: (v) => setState(() => _showLowStock = v),
-              selectedColor: _flagColor(context, 'Low Stock').withValues(alpha: 0.15),
+              selectedColor: _flagColor(context, 'Low Stock').withOpacity(0.15),
               checkmarkColor: _flagColor(context, 'Low Stock'),
               avatar: Icon(Icons.inventory_2, size: 16, color: _flagColor(context, 'Low Stock')),
             ),
@@ -153,7 +156,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
               label: Text('Expired', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showExpired,
               onSelected: (v) => setState(() => _showExpired = v),
-              selectedColor: _flagColor(context, 'Expired').withValues(alpha: 0.15),
+              selectedColor: _flagColor(context, 'Expired').withOpacity(0.15),
               checkmarkColor: _flagColor(context, 'Expired'),
               avatar: Icon(Icons.warning_amber_rounded, size: 16, color: _flagColor(context, 'Expired')),
             ),
@@ -161,7 +164,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
               label: Text('Expiring Soon', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showSoon,
               onSelected: (v) => setState(() => _showSoon = v),
-              selectedColor: _flagColor(context, 'Expiring Soon').withValues(alpha: 0.15),
+              selectedColor: _flagColor(context, 'Expiring Soon').withOpacity(0.15),
               checkmarkColor: _flagColor(context, 'Expiring Soon'),
               avatar: Icon(Icons.schedule, size: 16, color: _flagColor(context, 'Expiring Soon')),
             ),
@@ -169,7 +172,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
               label: Text('Expiry Warning', style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
               selected: _showWarn,
               onSelected: (v) => setState(() => _showWarn = v),
-              selectedColor: _flagColor(context, 'Expiry Warning').withValues(alpha: 0.15),
+              selectedColor: _flagColor(context, 'Expiry Warning').withOpacity(0.15),
               checkmarkColor: _flagColor(context, 'Expiry Warning'),
               avatar: Icon(Icons.timelapse, size: 16, color: _flagColor(context, 'Expiry Warning')),
             ),
@@ -237,9 +240,9 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                                       ),
                                 ),
                                 visualDensity: VisualDensity.compact,
-                                backgroundColor: _flagColor(context, f).withValues(alpha: 0.12),
+                                backgroundColor: _flagColor(context, f).withOpacity(0.12),
                                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                                side: BorderSide(color: _flagColor(context, f).withValues(alpha: 0.5), width: .6),
+                                side: BorderSide(color: _flagColor(context, f).withOpacity(0.5), width: .6),
                                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                           ])),

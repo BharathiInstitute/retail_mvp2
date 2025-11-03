@@ -5,6 +5,8 @@ service cloud.firestore {
 
     // ===== Helpers =====
     function isSignedIn() { return request.auth != null; }
+    // Gate legacy top-level collections during migration. Flip to 'false' when cutting over.
+    function allowLegacyReads() { return true; }
     // Owner has full permissions everywhere via custom claim: role = 'owner'
     function isOwner() {
       return isSignedIn() && (
@@ -23,6 +25,20 @@ service cloud.firestore {
       return isSignedIn() && _permDoc().modules[screen][action] == true;
     }
 
+    // ===== Multi-store helpers =====
+    function _memberDoc(storeId) {
+      return get(/databases/$(db)/documents/store_users/$(storeId + '_' + request.auth.uid));
+    }
+    function isActiveMember(storeId) {
+      // get() returns a DocumentSnapshot with a data map or null when missing
+      return isSignedIn() && (_memberDoc(storeId).data != null) && _memberDoc(storeId).data.status == 'active';
+    }
+    function isOwnerOrManager(storeId) {
+      return isActiveMember(storeId) && (
+        _memberDoc(storeId).data.role == 'owner' || _memberDoc(storeId).data.role == 'manager'
+      );
+    }
+
     // ===== Admin & permissions management =====
     match /users/{uid} {
       allow get, list: if hasPerm('admin.main','view') || isOwner();
@@ -38,6 +54,29 @@ service cloud.firestore {
       allow create, update, delete: if hasPerm('admin.main','edit') || isOwner();
     }
 
+    // ===== Stores & memberships =====
+    match /stores/{storeId} {
+      // Members of the store can read the store document
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      // Client writes are disallowed; use Cloud Functions (admin SDK) to create/update
+      allow create, update, delete: if false;
+    }
+
+    match /store_users/{docId} {
+      // Users can read their own membership docs (supports "My Stores").
+      allow get, list: if isSignedIn() && resource.data.userId == request.auth.uid || isOwner();
+      // Client writes are disallowed; use callables (createStore/acceptInvite) to manage membership.
+      allow create, update, delete: if false;
+    }
+
+    match /invites/{inviteId} {
+      // A signed-in user can read their own invites by email
+      allow get, list: if isSignedIn() && request.auth.token.email != null &&
+                        (resource.data.email == request.auth.token.email) || isOwner();
+      // Client writes are disallowed; use callables (inviteUserToStore/acceptInvite/declineInvite)
+      allow create, update, delete: if false;
+    }
+
     // Optional: security settings document for recovery (owner can fully manage)
     // POS needs read access to loyalty_config without admin perms. Add a specific rule before the generic catch.
     match /settings/loyalty_config {
@@ -51,46 +90,46 @@ service cloud.firestore {
       allow create, update, delete: if hasPerm('admin.main','edit') || isOwner();
     }
 
-    // ===== Inventory =====
+    // ===== Inventory (top-level legacy) =====
     match /inventory/{doc} {
       // Module-level reads for dashboards and accounting without needing inventory permission explicitly
-      allow get, list: if hasPerm('inventory.products','view') || hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('pos.main','view') || isOwner();
-      allow create: if hasPerm('inventory.products','create') || isOwner();
-      allow update: if hasPerm('inventory.products','edit') || isOwner();
-      allow delete: if hasPerm('inventory.products','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && (hasPerm('inventory.products','view') || hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('pos.main','view'))) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.products','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.products','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.products','delete')) || isOwner();
     }
     match /stock_movements/{doc} {
-      allow get, list: if hasPerm('inventory.stock-movements','view') || isOwner();
-      allow create: if hasPerm('inventory.stock-movements','create') || isOwner();
-      allow update: if hasPerm('inventory.stock-movements','edit') || isOwner();
-      allow delete: if hasPerm('inventory.stock-movements','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && hasPerm('inventory.stock-movements','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.stock-movements','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.stock-movements','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.stock-movements','delete')) || isOwner();
     }
     match /transfers/{doc} {
-      allow get, list: if hasPerm('inventory.transfers','view') || isOwner();
-      allow create: if hasPerm('inventory.transfers','create') || isOwner();
-      allow update: if hasPerm('inventory.transfers','edit') || isOwner();
-      allow delete: if hasPerm('inventory.transfers','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && hasPerm('inventory.transfers','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.transfers','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.transfers','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.transfers','delete')) || isOwner();
     }
     match /suppliers/{doc} {
-      allow get, list: if hasPerm('inventory.suppliers','view') || isOwner();
-      allow create: if hasPerm('inventory.suppliers','create') || isOwner();
-      allow update: if hasPerm('inventory.suppliers','edit') || isOwner();
-      allow delete: if hasPerm('inventory.suppliers','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && hasPerm('inventory.suppliers','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.suppliers','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.suppliers','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.suppliers','delete')) || isOwner();
     }
     match /alerts/{doc} {
-      allow get, list: if hasPerm('inventory.alerts','view') || isOwner();
-      allow create: if hasPerm('inventory.alerts','create') || isOwner();
-      allow update: if hasPerm('inventory.alerts','edit') || isOwner();
-      allow delete: if hasPerm('inventory.alerts','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && hasPerm('inventory.alerts','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.alerts','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.alerts','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.alerts','delete')) || isOwner();
     }
     match /audit/{doc} {
-      allow get, list: if hasPerm('inventory.audit','view') || isOwner();
-      allow create: if hasPerm('inventory.audit','create') || isOwner();
-      allow update: if hasPerm('inventory.audit','edit') || isOwner();
-      allow delete: if hasPerm('inventory.audit','delete') || isOwner();
+      allow get, list: if (allowLegacyReads() && hasPerm('inventory.audit','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('inventory.audit','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('inventory.audit','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('inventory.audit','delete')) || isOwner();
     }
 
-    // ===== Invoices =====
+  // ===== Invoices (top-level legacy) =====
     match /invoices/{invoiceId} {
       function _isSales() {
         return (resource != null && resource.data.type == 'sale') || (request.resource != null && request.resource.data.type == 'sale');
@@ -99,66 +138,147 @@ service cloud.firestore {
         return (resource != null && resource.data.type == 'purchase') || (request.resource != null && request.resource.data.type == 'purchase');
       }
       // Reads are allowed for modules that need them without requiring invoices.*
-      allow get, list: if hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('pos.main','view') ||
+      allow get, list: if (allowLegacyReads() && (hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('pos.main','view') ||
                         (_isSales() && hasPerm('invoices.sales','view')) ||
-                        (_isPurchase() && hasPerm('invoices.purchases','view')) ||
+                        (_isPurchase() && hasPerm('invoices.purchases','view')))) ||
                         isOwner();
       // POS can create sales invoices without requiring invoices.sales permission
+      allow create: if (allowLegacyReads() && (hasPerm('pos.main','create') ||
+                     (_isSales() && hasPerm('invoices.sales','create')) ||
+                     (_isPurchase() && hasPerm('invoices.purchases','create')))) ||
+                     isOwner();
+      // Updates/deletes reserved for Invoices module or Owner
+      allow update: if (allowLegacyReads() && ((_isSales() && hasPerm('invoices.sales','edit')) ||
+                     (_isPurchase() && hasPerm('invoices.purchases','edit')))) ||
+                     isOwner();
+      allow delete: if (allowLegacyReads() && ((_isSales() && hasPerm('invoices.sales','delete')) ||
+                     (_isPurchase() && hasPerm('invoices.purchases','delete')))) ||
+                     isOwner();
+    }
+
+  // Explicit purchase invoices collection used by Accounting/Dashboard (top-level legacy)
+    match /purchase_invoices/{invoiceId} {
+      allow get, list: if (allowLegacyReads() && (hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('invoices.purchases','view'))) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('invoices.purchases','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('invoices.purchases','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('invoices.purchases','delete')) || isOwner();
+    }
+
+  // ===== CRM (top-level legacy) =====
+    match /customers/{doc} {
+      // POS may read customers; also create/update for loyalty and quick-create
+      allow get, list: if (allowLegacyReads() && (hasPerm('crm.main','view') || hasPerm('pos.main','view'))) || isOwner();
+      allow create: if (allowLegacyReads() && (hasPerm('crm.main','create') || hasPerm('pos.main','create'))) || isOwner();
+      allow update: if (allowLegacyReads() && (hasPerm('crm.main','edit') || hasPerm('pos.main','edit'))) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('crm.main','delete')) || isOwner();
+
+      // Nested credit ledger (if present)
+      match /credit_ledger/{entry} {
+        allow get, list: if (allowLegacyReads() && (hasPerm('crm.main','view') || hasPerm('pos.main','view'))) || isOwner();
+        allow create: if (allowLegacyReads() && (hasPerm('crm.main','create') || hasPerm('pos.main','create'))) || isOwner();
+        allow update, delete: if (allowLegacyReads() && (hasPerm('crm.main','edit') || hasPerm('pos.main','edit'))) || isOwner();
+      }
+    }
+
+  // ===== Accounting (view-only, top-level legacy) =====
+    match /accounting/{doc} {
+      allow get, list: if (allowLegacyReads() && hasPerm('accounting.main','view')) || isOwner();
+      allow create, update, delete: if false;
+    }
+
+  // ===== Loyalty (top-level legacy) =====
+    match /loyalty/{doc} {
+      allow get, list: if (allowLegacyReads() && hasPerm('loyalty.main','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('loyalty.main','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('loyalty.main','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('loyalty.main','delete')) || isOwner();
+    }
+    match /loyalty_settings/{doc} {
+      allow get, list: if (allowLegacyReads() && hasPerm('loyalty.settings','view')) || isOwner();
+      allow create: if (allowLegacyReads() && hasPerm('loyalty.settings','create')) || isOwner();
+      allow update: if (allowLegacyReads() && hasPerm('loyalty.settings','edit')) || isOwner();
+      allow delete: if (allowLegacyReads() && hasPerm('loyalty.settings','delete')) || isOwner();
+    }
+
+    // =====================================================================
+    // New store-scoped collections under /stores/{storeId}/...
+    // =====================================================================
+    match /stores/{storeId}/products/{id} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update: if isOwnerOrManager(storeId) || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
+    }
+    match /stores/{storeId}/stock_movements/{id} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update: if isOwnerOrManager(storeId) || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
+    }
+    match /stores/{storeId}/suppliers/{id} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update: if isOwnerOrManager(storeId) || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
+    }
+    match /stores/{storeId}/alerts/{id} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update: if isOwnerOrManager(storeId) || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
+    }
+    match /stores/{storeId}/audit/{id} {
+      allow get, list: if isOwnerOrManager(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update, delete: if false; // append-only
+    }
+    match /stores/{storeId}/customers/{id} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || hasPerm('pos.main','create') || isOwner();
+      allow update: if isOwnerOrManager(storeId) || hasPerm('pos.main','edit') || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
+      match /credit_ledger/{entry} {
+        allow get, list: if isActiveMember(storeId) || isOwner();
+        allow create: if isOwnerOrManager(storeId) || hasPerm('pos.main','create') || isOwner();
+        allow update, delete: if isOwnerOrManager(storeId) || hasPerm('pos.main','edit') || isOwner();
+      }
+    }
+    match /stores/{storeId}/invoices/{id} {
+      function _isSales() {
+        return (resource != null && resource.data.type == 'sale') || (request.resource != null && request.resource.data.type == 'sale');
+      }
+      function _isPurchase() {
+        return (resource != null && resource.data.type == 'purchase') || (request.resource != null && request.resource.data.type == 'purchase');
+      }
+      allow get, list: if isActiveMember(storeId) || isOwner();
       allow create: if hasPerm('pos.main','create') ||
                      (_isSales() && hasPerm('invoices.sales','create')) ||
                      (_isPurchase() && hasPerm('invoices.purchases','create')) ||
                      isOwner();
-      // Updates/deletes reserved for Invoices module or Owner
       allow update: if (_isSales() && hasPerm('invoices.sales','edit')) ||
                      (_isPurchase() && hasPerm('invoices.purchases','edit')) ||
-                     isOwner();
+                     isOwnerOrManager(storeId) || isOwner();
       allow delete: if (_isSales() && hasPerm('invoices.sales','delete')) ||
                      (_isPurchase() && hasPerm('invoices.purchases','delete')) ||
                      isOwner();
     }
-
-    // Explicit purchase invoices collection used by Accounting/Dashboard
-    match /purchase_invoices/{invoiceId} {
-      allow get, list: if hasPerm('dashboard','view') || hasPerm('accounting.main','view') || hasPerm('invoices.purchases','view') || isOwner();
-      allow create: if hasPerm('invoices.purchases','create') || isOwner();
-      allow update: if hasPerm('invoices.purchases','edit') || isOwner();
-      allow delete: if hasPerm('invoices.purchases','delete') || isOwner();
+    match /stores/{storeId}/loyalty/{doc} {
+      allow get, list: if isActiveMember(storeId) || isOwner();
+      allow create: if isOwnerOrManager(storeId) || isOwner();
+      allow update: if isOwnerOrManager(storeId) || isOwner();
+      allow delete: if isOwnerOrManager(storeId) || isOwner();
     }
-
-    // ===== CRM =====
-    match /customers/{doc} {
-      // POS may read customers; also create/update for loyalty and quick-create
-      allow get, list: if hasPerm('crm.main','view') || hasPerm('pos.main','view') || isOwner();
-      allow create: if hasPerm('crm.main','create') || hasPerm('pos.main','create') || isOwner();
-      allow update: if hasPerm('crm.main','edit') || hasPerm('pos.main','edit') || isOwner();
-      allow delete: if hasPerm('crm.main','delete') || isOwner();
-
-      // Nested credit ledger (if present)
-      match /credit_ledger/{entry} {
-        allow get, list: if hasPerm('crm.main','view') || hasPerm('pos.main','view') || isOwner();
-        allow create: if hasPerm('crm.main','create') || hasPerm('pos.main','create') || isOwner();
-        allow update, delete: if hasPerm('crm.main','edit') || hasPerm('pos.main','edit') || isOwner();
-      }
+    match /stores/{storeId}/loyalty_settings/{doc} {
+      allow get, list: if hasPerm('pos.main','view') || hasPerm('loyalty.settings','view') || isActiveMember(storeId) || isOwner();
+      allow create, update, delete: if isOwnerOrManager(storeId) || isOwner();
     }
-
-    // ===== Accounting (view-only) =====
-    match /accounting/{doc} {
-      allow get, list: if hasPerm('accounting.main','view') || isOwner();
-      allow create, update, delete: if false;
+    match /stores/{storeId}/settings/{doc} {
+      allow get, list: if isOwnerOrManager(storeId) || isOwner();
+      allow create, update, delete: if isOwnerOrManager(storeId) || isOwner();
     }
-
-    // ===== Loyalty =====
-    match /loyalty/{doc} {
-      allow get, list: if hasPerm('loyalty.main','view') || isOwner();
-      allow create: if hasPerm('loyalty.main','create') || isOwner();
-      allow update: if hasPerm('loyalty.main','edit') || isOwner();
-      allow delete: if hasPerm('loyalty.main','delete') || isOwner();
-    }
-    match /loyalty_settings/{doc} {
-      allow get, list: if hasPerm('loyalty.settings','view') || isOwner();
-      allow create: if hasPerm('loyalty.settings','create') || isOwner();
-      allow update: if hasPerm('loyalty.settings','edit') || isOwner();
-      allow delete: if hasPerm('loyalty.settings','delete') || isOwner();
+    match /stores/{storeId}/counters/{doc} {
+      allow get, list: if isOwnerOrManager(storeId) || isOwner();
+      allow create, update, delete: if isOwnerOrManager(storeId) || isOwner();
     }
 
     // ===== Catch-all: Owner full access =====

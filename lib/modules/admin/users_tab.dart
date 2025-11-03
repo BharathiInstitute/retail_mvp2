@@ -7,6 +7,7 @@ import 'package:retail_mvp2/core/logging.dart';
 // Removed unused firebase_auth import.
 import 'package:flutter/material.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
 class AdminUsersPage extends StatelessWidget {
   const AdminUsersPage({super.key});
@@ -27,32 +28,72 @@ class UsersTab extends ConsumerWidget {
   const UsersTab({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-  final usersQuery = FirebaseFirestore.instance.collection('users').orderBy('createdAt', descending: true);
+  final selStoreId = ref.watch(selectedStoreIdProvider);
   AppLog.info('admin.users.build', 'Building UsersTab');
-  // Query current owner (0 or 1 doc expected)
+  if (selStoreId == null || selStoreId.isEmpty) {
+    return Center(
+      child: Text(
+        'Select a store to manage users',
+        style: (context.texts.titleMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
+      ),
+    );
+  }
+  // Store-scoped owner membership
   final ownerQuery = FirebaseFirestore.instance
-    .collection('users')
-    .where('role', isEqualTo: 'owner')
-    .limit(1);
+    .collection('store_users')
+    .where('storeId', isEqualTo: selStoreId)
+    .where('status', isEqualTo: 'active')
+    .where('role', isEqualTo: 'owner');
+  // Store-scoped members
+  final membersQuery = FirebaseFirestore.instance
+      .collection('store_users')
+      .where('storeId', isEqualTo: selStoreId)
+      .where('status', isEqualTo: 'active');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Owner status banner
+        // Owner status banner (per selected store)
         StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
           stream: ownerQuery.snapshots().handleError((e,st){ AppLog.error('admin.owner.stream', e, st); }),
           builder: (context, ownerSnap){
             if(ownerSnap.hasError){
               AppLog.error('admin.owner.stream.error', ownerSnap.error!, StackTrace.current);
-              return _OwnerBanner(error: ownerSnap.error.toString());
+              return _OwnerBanner(storeId: selStoreId, error: ownerSnap.error.toString());
             }
             if(!ownerSnap.hasData){
-              return const _OwnerBanner(loading: true);
+              return _OwnerBanner(storeId: selStoreId, loading: true);
             }
-            final hasOwner = ownerSnap.data!.docs.isNotEmpty;
-            final ownerData = hasOwner ? ownerSnap.data!.docs.first.data() : null;
-            final ownerId = hasOwner ? ownerSnap.data!.docs.first.id : null;
-            AppLog.info('admin.owner.stream.data', 'Owner snapshot', data: {'hasOwner': hasOwner, 'ownerId': ownerId});
-            return _OwnerBanner(hasOwner: hasOwner, ownerName: ownerData?['displayName'] ?? ownerData?['email'], ownerId: ownerId);
+            final mdocs = ownerSnap.data!.docs;
+            if (mdocs.isEmpty) {
+              return _OwnerBanner(storeId: selStoreId, hasOwner: false);
+            }
+            // Prefer current user if they are an owner of this store
+            final currentUid = FirebaseAuth.instance.currentUser?.uid;
+            QueryDocumentSnapshot<Map<String, dynamic>> chosen = mdocs.first;
+            if (currentUid != null) {
+              final idx = mdocs.indexWhere((d) => (d.data()['userId'] as String?) == currentUid);
+              if (idx != -1) chosen = mdocs[idx];
+            }
+            final ownerUid = (chosen.data()['userId'] as String?) ?? chosen.id;
+            return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              future: FirebaseFirestore.instance.collection('users').doc(ownerUid).get(),
+              builder: (context, userSnap) {
+                String? name;
+                String? email;
+                if (userSnap.hasData && userSnap.data!.exists) {
+                  final u = userSnap.data!.data() ?? const {};
+                  name = (u['displayName'] as String?)?.trim();
+                  email = (u['email'] as String?)?.trim();
+                }
+                return _OwnerBanner(
+                  storeId: selStoreId,
+                  hasOwner: true,
+                  ownerId: ownerUid,
+                  ownerName: (name?.isNotEmpty ?? false) ? name : null,
+                  ownerEmail: (email?.isNotEmpty ?? false) ? email : null,
+                );
+              },
+            );
           },
         ),
         const SizedBox(height: 8),
@@ -64,33 +105,46 @@ class UsersTab extends ConsumerWidget {
         const SizedBox(height: 16),
         Expanded(
           child: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
-            stream: usersQuery.snapshots().handleError((e,st){ AppLog.error('admin.users.stream', e, st); }),
+            stream: membersQuery.snapshots().handleError((e,st){ AppLog.error('admin.users.members.stream', e, st); }),
             builder: (context, snap){
-              if (snap.hasError){ AppLog.error('admin.users.stream.error', snap.error!, StackTrace.current); return Center(child: Text('Error: ${snap.error}')); }
+              if (snap.hasError){ AppLog.error('admin.users.members.error', snap.error!, StackTrace.current); return Center(child: Text('Error: ${snap.error}')); }
               if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-              final docs = snap.data!.docs;
-              if (docs.isEmpty){ AppLog.info('admin.users.stream.empty', 'Users collection empty'); return const Center(child: Text('No users')); }
-              AppLog.info('admin.users.stream.data', 'Users snapshot', data: {'count': docs.length});
+              final mdocs = snap.data!.docs;
+              if (mdocs.isEmpty){ AppLog.info('admin.users.members.empty', 'No users in this store'); return const Center(child: Text('No users in this store')); }
+              AppLog.info('admin.users.members.data', 'Members snapshot', data: {'count': mdocs.length});
               return ListView.builder(
-                itemCount: docs.length,
+                itemCount: mdocs.length,
                 itemBuilder: (c,i){
                   try {
-                    final d = docs[i];
-                    final data = d.data();
-                    final display = (data['displayName'] ?? data['email'] ?? 'user').toString();
-                    final email = (data['email'] ?? '').toString();
-                    final role = (data['role'] ?? '').toString();
-                    final disabled = data['disabled'] == true;
-                    if(disabled){ AppLog.info('admin.users.item.disabled', 'Disabled user', data: {'uid': d.id}); }
-                    return Card(
-                      child: ListTile(
-                        leading: CircleAvatar(child: Text(display.isNotEmpty? display.substring(0,1).toUpperCase(): '?')),
-                        title: Text(display, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
-                        subtitle: Text('$email • $role${disabled? ' • disabled':''}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
-                        trailing: _UserActions(userId: d.id, currentValues: data),
-                      ),
+                    final m = mdocs[i];
+                    final mv = m.data();
+                    final uid = (mv['userId'] ?? m.id).toString();
+                    final role = (mv['role'] ?? '').toString();
+                    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+                      builder: (context, userSnap) {
+                        final data = userSnap.data?.data() ?? const <String, dynamic>{};
+                        String displayRaw = (data['displayName'] ?? '').toString().trim();
+                        String email = (data['email'] ?? '').toString();
+                        // Fallback to Firebase Auth profile when this row is the signed-in user
+                        final me = FirebaseAuth.instance.currentUser;
+                        if ((displayRaw.isEmpty && email.isEmpty) && me != null && me.uid == uid) {
+                          email = (me.email ?? '').trim();
+                          displayRaw = (me.displayName ?? '').trim();
+                        }
+                        final display = displayRaw.isNotEmpty ? displayRaw : (email.isNotEmpty ? email.split('@').first : '');
+                        final disabled = data['disabled'] == true;
+                        return Card(
+                          child: ListTile(
+                            leading: CircleAvatar(child: Text((display.isNotEmpty ? display : uid).substring(0,1).toUpperCase())),
+                            title: Text(display.isEmpty ? uid : display, style: (context.texts.titleSmall ?? const TextStyle()).copyWith(color: context.colors.onSurface)),
+                            subtitle: Text('${email.isEmpty ? uid : email} • $role${disabled? ' • disabled':''}', style: (context.texts.bodySmall ?? const TextStyle()).copyWith(color: context.colors.onSurfaceVariant)),
+                            trailing: _UserActions(userId: uid, currentValues: {...data, 'role': role}),
+                          ),
+                        );
+                      },
                     );
-                  } catch(e){ AppLog.error('admin.users.item.error', e, StackTrace.current, data: {'index': i});
+                  } catch(e){ AppLog.error('admin.users.members.item.error', e, StackTrace.current, data: {'index': i});
                     return ListTile(title: const Text('Error rendering user'), subtitle: Text('$e'));
                   }
                 },
@@ -104,8 +158,9 @@ class UsersTab extends ConsumerWidget {
 }
 
 class _OwnerBanner extends StatelessWidget {
-  final bool loading; final bool hasOwner; final String? ownerName; final String? ownerId; final String? error;
-  const _OwnerBanner({this.loading=false, this.hasOwner=false, this.ownerName, this.ownerId, this.error});
+  final String storeId;
+  final bool loading; final bool hasOwner; final String? ownerName; final String? ownerEmail; final String? ownerId; final String? error;
+  const _OwnerBanner({required this.storeId, this.loading=false, this.hasOwner=false, this.ownerName, this.ownerEmail, this.ownerId, this.error});
   @override
   Widget build(BuildContext context){
     Widget child;
@@ -120,7 +175,7 @@ class _OwnerBanner extends StatelessWidget {
   Expanded(child: Text('No owner configured. You can promote an existing user to Owner.', style: context.texts.bodyMedium?.copyWith(fontWeight: FontWeight.w500, color: context.colors.onSurface))),
         FilledButton(onPressed: () async {
           final messenger = ScaffoldMessenger.of(context);
-          final selected = await showDialog<String>(context: context, builder: (_)=> const _SelectUserForOwnerDialog());
+          final selected = await showDialog<String>(context: context, builder: (_)=> _SelectUserForOwnerDialog(storeId: storeId));
           if(selected!=null){
             try {
               final cf = FirebaseFunctions.instanceFor(region: 'us-central1');
@@ -142,13 +197,30 @@ class _OwnerBanner extends StatelessWidget {
     } else {
       final currentUid = FirebaseAuth.instance.currentUser?.uid;
       final isOwner = currentUid != null && currentUid == ownerId;
+      final selfEmail = isOwner ? (FirebaseAuth.instance.currentUser?.email?.trim() ?? '') : '';
+      final selfName = isOwner
+          ? ((FirebaseAuth.instance.currentUser?.displayName?.trim().isNotEmpty ?? false)
+              ? FirebaseAuth.instance.currentUser!.displayName!.trim()
+              : (selfEmail.isNotEmpty ? selfEmail.split('@').first : ''))
+          : '';
+      // Compose a friendly label: prefer Name (email) using owner doc; if missing and current user is owner, fall back to auth name/email; else uid
+      final String label = (){
+        final emailPref = (ownerEmail?.trim().isNotEmpty ?? false)
+            ? ownerEmail!.trim()
+            : (selfEmail.isNotEmpty ? selfEmail : null);
+        final namePref = (ownerName?.trim().isNotEmpty ?? false) ? ownerName!.trim() : (selfName.isNotEmpty ? selfName : null);
+        if (namePref != null && emailPref != null) return '$namePref  ($emailPref)';
+        if (namePref != null) return namePref;
+        if (emailPref != null) return emailPref;
+        return ownerId ?? '';
+      }();
       child = Row(children:[
         Icon(Icons.verified_user, color: context.appColors.success),
         const SizedBox(width:8),
-  Expanded(child: Text('Owner: ${ownerName ?? ownerId}', style: context.texts.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.colors.onSurface))),
+        Expanded(child: Text('Owner: $label', style: context.texts.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.colors.onSurface))),
         if(isOwner) FilledButton.tonal(onPressed: () async {
           final messenger = ScaffoldMessenger.of(context);
-          final target = await showDialog<String>(context: context, builder: (_)=> const _SelectUserForOwnerDialog());
+          final target = await showDialog<String>(context: context, builder: (_)=> _SelectUserForOwnerDialog(storeId: storeId));
           if(target!=null){
             try {
               try { await FirebaseAuth.instance.currentUser?.getIdToken(true); } catch(_){ }
@@ -174,35 +246,78 @@ class _OwnerBanner extends StatelessWidget {
 }
 
 class _SelectUserForOwnerDialog extends StatelessWidget {
-  const _SelectUserForOwnerDialog();
+  final String? storeId;
+  const _SelectUserForOwnerDialog({this.storeId});
   @override
   Widget build(BuildContext context){
-    final usersCol = FirebaseFirestore.instance.collection('users');
     AppLog.info('admin.owner.select.dialog', 'Open select user dialog');
     return AlertDialog(
       title: Text('Select User', style: context.texts.titleMedium?.copyWith(color: context.colors.onSurface, fontWeight: FontWeight.w700)),
       content: DefaultTextStyle(
         style: (context.texts.bodyMedium ?? const TextStyle()).copyWith(color: context.colors.onSurface),
-        child: SizedBox(width: 380, height: 360, child: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
-        stream: usersCol.orderBy('createdAt', descending: true).snapshots().handleError((e,st){ AppLog.error('admin.owner.select.stream', e, st); }),
-        builder: (context, snap){
-          if(snap.hasError){ AppLog.error('admin.owner.select.error', snap.error!, StackTrace.current); return Text('Error: ${snap.error}'); }
-            if(!snap.hasData) return const Center(child: CircularProgressIndicator());
-            final docs = snap.data!.docs;
-            if(docs.isEmpty){ AppLog.info('admin.owner.select.empty', 'No users to display'); return const Text('No users'); }
-            AppLog.info('admin.owner.select.data', 'Users loaded', data: {'count': docs.length});
-            return ListView.builder(itemCount: docs.length, itemBuilder: (c,i){
-              final d = docs[i]; final data = d.data();
-              final role = data['role'];
-              return ListTile(
-                title: Text(data['displayName'] ?? data['email'] ?? d.id),
-                subtitle: Text(data['email'] ?? ''),
-                trailing: Text(role ?? ''),
-                onTap: (){ Navigator.pop(context, d.id); },
-              );
-            });
-        },
-      )),
+        child: SizedBox(width: 380, height: 360, child: Builder(builder: (context){
+          // If storeId is provided, show only members of that store; otherwise show all users
+          if (storeId != null && storeId!.isNotEmpty) {
+            final membersQ = FirebaseFirestore.instance
+                .collection('store_users')
+                .where('storeId', isEqualTo: storeId)
+                .where('status', isEqualTo: 'active');
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: membersQ.snapshots().handleError((e, st) { AppLog.error('admin.owner.select.members.stream', e, st); }),
+              builder: (context, mSnap) {
+                if (mSnap.hasError) { AppLog.error('admin.owner.select.members.error', mSnap.error!, StackTrace.current); return Text('Error: ${mSnap.error}'); }
+                if (!mSnap.hasData) return const Center(child: CircularProgressIndicator());
+                final mems = mSnap.data!.docs;
+                if (mems.isEmpty) return const Text('No users in this store');
+                return ListView.builder(
+                  itemCount: mems.length,
+                  itemBuilder: (c, i) {
+                    final mv = mems[i].data();
+                    final uid = (mv['userId'] ?? mems[i].id).toString();
+                    final role = (mv['role'] ?? '').toString();
+                    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+                      builder: (context, uSnap) {
+                        final u = uSnap.data?.data() ?? const <String, dynamic>{};
+                        final display = (u['displayName'] ?? u['email'] ?? uid).toString();
+                        final email = (u['email'] ?? '').toString();
+                        return ListTile(
+                          title: Text(display),
+                          subtitle: Text(email),
+                          trailing: Text(role),
+                          onTap: () => Navigator.pop(context, uid),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          } else {
+            final usersCol = FirebaseFirestore.instance.collection('users');
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: usersCol.orderBy('createdAt', descending: true).snapshots().handleError((e, st) { AppLog.error('admin.owner.select.stream', e, st); }),
+              builder: (context, snap) {
+                if (snap.hasError) { AppLog.error('admin.owner.select.error', snap.error!, StackTrace.current); return Text('Error: ${snap.error}'); }
+                if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                final docs = snap.data!.docs;
+                if (docs.isEmpty) { AppLog.info('admin.owner.select.empty', 'No users to display'); return const Text('No users'); }
+                AppLog.info('admin.owner.select.data', 'Users loaded', data: {'count': docs.length});
+                return ListView.builder(itemCount: docs.length, itemBuilder: (c, i) {
+                  final d = docs[i];
+                  final data = d.data();
+                  final role = data['role'];
+                  return ListTile(
+                    title: Text(data['displayName'] ?? data['email'] ?? d.id),
+                    subtitle: Text(data['email'] ?? ''),
+                    trailing: Text(role ?? ''),
+                    onTap: () { Navigator.pop(context, d.id); },
+                  );
+                });
+              },
+            );
+          }
+        })),
       ),
       actions: [TextButton(onPressed: ()=> Navigator.pop(context), child: const Text('Cancel'))],
     );

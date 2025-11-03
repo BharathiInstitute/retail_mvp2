@@ -3,16 +3,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:csv/csv.dart' as csvpkg;
 import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/auth/auth.dart';
 import 'Products/inventory_repository.dart';
 import '../../core/theme/theme_utils.dart';
+import '../stores/providers.dart';
+import '../../core/store_scoped_refs.dart' as scoped;
 
 /// Unified Products Import screen (CSV/XLSX): pick → preview → import → summary
 class ImportProductsScreen extends ConsumerStatefulWidget {
@@ -681,11 +681,11 @@ class _ImportProductsScreenState extends ConsumerState<ImportProductsScreen> {
     });
 
     final repo = InventoryRepository();
-    final user = ref.read(authStateProvider);
-    final tenantId = user?.uid;
-    if (tenantId == null) {
+  // final user = ref.read(authStateProvider); // not used currently
+    final storeId = ref.read(selectedStoreIdProvider);
+    if (storeId == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in to import.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store to import into.')));
       return;
     }
 
@@ -756,8 +756,8 @@ class _ImportProductsScreenState extends ConsumerState<ImportProductsScreen> {
 
         // Firestore barcode uniqueness check (best-effort)
         if (barcode.isNotEmpty) {
-          final dup = await FirebaseFirestore.instance
-              .collection('inventory')
+          final dup = await scoped.StoreRefs.of(storeId)
+              .products()
               .where('barcode', isEqualTo: barcode)
               .limit(1)
               .get();
@@ -774,7 +774,7 @@ class _ImportProductsScreenState extends ConsumerState<ImportProductsScreen> {
         }
 
         final outcome = await repo.upsertProductFromImport(
-          tenantId: tenantId,
+          storeId: storeId,
           sku: sku,
           name: name,
           unitPrice: unitPrice,
@@ -858,7 +858,7 @@ class _PreviewTable extends StatelessWidget {
                 for (final r in rows)
                   DataRow(
             color: r.status == _RowStatus.invalid
-              ? WidgetStatePropertyAll(theme.colorScheme.error.withValues(alpha: 0.06))
+              ? WidgetStatePropertyAll(theme.colorScheme.error.withOpacity(0.06))
                         : null,
                     cells: [
                       DataCell(r.status == _RowStatus.valid

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 import 'pos.dart';
 import 'pos_search_scan_fav_fixed.dart';
 import 'pos_two_section_tab.dart';
@@ -61,7 +64,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
   }
 
   // Streams
-  Stream<List<Product>> get _productStream => _inventoryRepo.streamProducts().map((docs) {
+  Stream<List<Product>> _productStream(String storeId) => _inventoryRepo.streamProducts(storeId: storeId).map((docs) {
         return docs
             .map((d) => Product(
                   sku: d.sku,
@@ -70,13 +73,13 @@ class _PosMobilePageState extends State<PosMobilePage> {
                   stock: d.totalStock,
                   taxPercent: (d.taxPct ?? 0).toInt(),
                   barcode: d.barcode.isEmpty ? null : d.barcode,
-                  ref: FirebaseFirestore.instance.collection('inventory').doc(d.sku),
+                  ref: StoreRefs.of(storeId).products().doc(d.sku),
                 ))
             .toList();
       });
 
-  Stream<List<Customer>> get _customerStream => FirebaseFirestore.instance
-      .collection('customers')
+  Stream<List<Customer>> _customerStream(String storeId) => StoreRefs.of(storeId)
+      .customers()
       .snapshots()
       .map((s) {
         final list = s.docs.map((d) => Customer.fromDoc(d)).toList();
@@ -86,7 +89,9 @@ class _PosMobilePageState extends State<PosMobilePage> {
 
   Future<void> _loadCustomersOnce() async {
     try {
-      final first = await _customerStream.first;
+      final sel = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+      if (sel == null) return;
+      final first = await _customerStream(sel).first;
       if (!mounted) return;
       setState(() {
         customers = [walkIn, ...first.where((c) => c.id != walkIn.id)];
@@ -245,8 +250,13 @@ class _PosMobilePageState extends State<PosMobilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Product>>(
-      stream: _productStream,
+    return Consumer(builder: (context, ref, _) {
+      final sel = ref.watch(selectedStoreIdProvider);
+      if (sel == null) {
+        return const Center(child: Text('Select a store to start POS'));
+      }
+      return StreamBuilder<List<Product>>(
+      stream: _productStream(sel),
       builder: (context, snap) {
         if (snap.hasError) return Center(child: Text('Error: ${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
@@ -346,7 +356,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                   onHold: _holdCart,
                   onResumeSelect: _pickHeldOrder,
                   onClear: _clearCart,
-                  customersStream: _customerStream,
+                  customersStream: _customerStream(sel),
                   initialCustomers: customers,
                   selectedCustomer: selectedCustomer,
                   onCustomerSelected: (c) { setState(() { selectedCustomer = c ?? walkIn; _availablePoints = (selectedCustomer?.rewardsPoints ?? 0).toDouble(); _customerSearchCtrl.text = selectedCustomer?.name ?? ''; }); },
@@ -369,6 +379,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
         ]);
       },
     );
+    });
   }
 
   // ignore: unused_element
@@ -407,7 +418,14 @@ class _PosMobilePageState extends State<PosMobilePage> {
                         ),
                         const SizedBox(height: 8),
                         StreamBuilder<List<Customer>>(
-                          stream: _customerStream,
+                          stream: () {
+                            final s = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                            if (s == null) {
+                              // Fallback to a single-shot stream of current in-memory customers
+                              return Stream<List<Customer>>.value(customers);
+                            }
+                            return _customerStream(s);
+                          }(),
                           initialData: customers,
                           builder: (ctx, snap) {
                             final all = [walkIn, ...((snap.data ?? const <Customer>[]) .where((x) => x.id.isNotEmpty))];
@@ -528,11 +546,14 @@ class _PosMobilePageState extends State<PosMobilePage> {
             onPressed: () async {
               if (!(formKey.currentState?.validate() ?? false)) return;
               try {
-                final doc = await FirebaseFirestore.instance.collection('customers').add({
+                final sel = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                if (sel == null) throw StateError('No store selected');
+                final doc = await StoreRefs.of(sel).customers().add({
                   'name': nameCtrl.text.trim(),
                   'phone': phoneCtrl.text.trim(),
                   'email': emailCtrl.text.trim(),
                   'loyaltyPoints': 0,
+                  'rewardsPoints': 0,
                   'totalSpend': 0,
                   'status': 'walk-in',
                   'discountPercent': 0,
@@ -599,7 +620,13 @@ class _PosMobilePageState extends State<PosMobilePage> {
                       ),
                       const SizedBox(height: 8),
                       StreamBuilder<List<Customer>>(
-                        stream: _customerStream,
+                        stream: () {
+                          final s = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                          if (s == null) {
+                            return Stream<List<Customer>>.value(customers);
+                          }
+                          return _customerStream(s);
+                        }(),
                         initialData: customers,
                         builder: (ctx, snap) {
                           final all = [walkIn, ...((snap.data ?? const <Customer>[]) .where((x) => x.id.isNotEmpty))];

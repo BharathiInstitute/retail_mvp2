@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +9,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
 
 import '../../../core/auth/auth.dart';
-import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider, tenantIdProvider; // reuse providers
+import 'inventory.dart' show inventoryRepoProvider, productsStreamProvider, selectedStoreProvider; // reuse providers
 import 'inventory_repository.dart' show ProductDoc, InventoryRepository;
 
 class InvoiceAnalysisPage extends ConsumerStatefulWidget {
@@ -228,7 +229,7 @@ class _InvoiceAnalysisPageState extends ConsumerState<InvoiceAnalysisPage> {
                       }
                       final repo = ref.read(inventoryRepoProvider);
                       final user = ref.read(authStateProvider);
-                      final tenantId = ref.read(tenantIdProvider);
+                      final storeId = ref.read(selectedStoreProvider);
                       return _PreviewAndApply(
                         items: items,
                         products: products,
@@ -238,7 +239,7 @@ class _InvoiceAnalysisPageState extends ConsumerState<InvoiceAnalysisPage> {
                         onLocationChanged: (v) => setState(() => _location = v),
                         repo: repo,
                         userEmail: user?.email,
-                        tenantId: tenantId,
+                        storeId: storeId,
                         // autoApply removed
                       );
                     },
@@ -285,7 +286,7 @@ class _NoItemsView extends StatelessWidget {
           const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
-              child: SelectableText(ocrText.isEmpty ? '(empty)' : ocrText.substring(0, ocrText.length.clamp(0, 2000))),
+              child: SelectableText(ocrText.isEmpty ? '(empty)' : ocrText.substring(0, math.min(ocrText.length, 2000))),
             ),
           )
         ]),
@@ -394,7 +395,7 @@ class _PreviewAndApply extends StatefulWidget {
   final ValueChanged<String> onLocationChanged;
   final InventoryRepository repo;
   final String? userEmail;
-  final String? tenantId;
+  final String? storeId;
   const _PreviewAndApply({
     required this.items,
     required this.products,
@@ -404,7 +405,7 @@ class _PreviewAndApply extends StatefulWidget {
     required this.onLocationChanged,
     required this.repo,
     required this.userEmail,
-    required this.tenantId,
+    required this.storeId,
   });
   @override
   State<_PreviewAndApply> createState() => _PreviewAndApplyState();
@@ -626,9 +627,9 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
   }
 
   Future<void> _createProductFromItem(int index) async {
-    final tenantId = widget.tenantId;
-    if (tenantId == null || tenantId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sign in to create products')));
+    final storeId = widget.storeId;
+    if (storeId == null || storeId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store to create products')));
       return;
     }
     final item = widget.items[index];
@@ -663,7 +664,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
     if (sku.length>24) sku = sku.substring(0,24);
     try {
       await widget.repo.addProduct(
-        tenantId: tenantId,
+        storeId: storeId,
         sku: sku,
         name: name,
         unitPrice: price,
@@ -735,8 +736,9 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal:6, vertical:2),
       decoration: BoxDecoration(
-  color: c.withValues(alpha: 0.12),
-  border: Border.all(color: c.withValues(alpha: 0.6)),
+        // Use withOpacity for compatibility with stable Flutter channels
+        color: c.withOpacity(0.12),
+        border: Border.all(color: c.withOpacity(0.6)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -756,7 +758,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(14),
-  border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.6)),
+        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.6)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children:[
         const Icon(Icons.analytics, size:14),
@@ -907,6 +909,7 @@ class _PreviewAndApplyState extends State<_PreviewAndApply> {
           final it = widget.items[i];
           final p = _rows[i]!.match!;
           await repo.applyStockMovement(
+            storeId: widget.storeId!,
             sku: p.sku,
             location: widget.location,
             // Respect override quantity if present

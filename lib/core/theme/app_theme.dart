@@ -261,7 +261,7 @@ class AppTheme {
         side: BorderSide(color: scheme.outline),
         fillColor: WidgetStateProperty.resolveWith<Color?>((states) {
           if (states.contains(WidgetState.selected) && states.contains(WidgetState.disabled)) {
-            return scheme.primary.withValues(alpha: 0.6);
+            return scheme.primary.withOpacity(0.6);
           }
           if (states.contains(WidgetState.selected)) return scheme.primary;
           return Colors.transparent;
@@ -368,7 +368,7 @@ class AppTheme {
         side: BorderSide(color: scheme.outline),
         fillColor: WidgetStateProperty.resolveWith<Color?>((states) {
           if (states.contains(WidgetState.selected) && states.contains(WidgetState.disabled)) {
-            return scheme.primary.withValues(alpha: 0.8);
+            return scheme.primary.withOpacity(0.8);
           }
           if (states.contains(WidgetState.selected)) return scheme.primary;
           return Colors.transparent;

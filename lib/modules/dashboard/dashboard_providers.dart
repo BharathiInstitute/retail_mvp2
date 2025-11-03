@@ -1,12 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
 /// Stream of aggregate sales totals for current day, week, and month.
 /// Uses latest up to 500 invoices ordered by timestamp descending.
 final salesAggregateProvider = StreamProvider<Map<String, double>>((ref) {
-  final col = FirebaseFirestore.instance
-      .collection('invoices')
+  final sel = ref.watch(selectedStoreIdProvider);
+  if (sel == null) return Stream.value({'today': 0.0, 'week': 0.0, 'month': 0.0});
+  final col = StoreRefs.of(sel)
+      .invoices()
       .orderBy('timestampMs', descending: true)
       .limit(500);
   return col.snapshots().map((snap) {
@@ -57,12 +61,10 @@ class _LedgerEntryLite {
 /// Stream of ledger entries combining sales and purchase invoices similar to
 /// accounting screen logic, but simplified for providers.
 final _ledgerEntriesProvider = StreamProvider<List<_LedgerEntryLite>>((ref) {
-  final salesCol = FirebaseFirestore.instance
-      .collection('invoices')
-      .orderBy('timestampMs', descending: false);
-  final purchasesCol = FirebaseFirestore.instance
-      .collection('purchase_invoices')
-      .orderBy('timestampMs', descending: false);
+  final sel = ref.watch(selectedStoreIdProvider);
+  if (sel == null) return Stream.value(const <_LedgerEntryLite>[]);
+  final salesCol = StoreRefs.of(sel).invoices().orderBy('timestampMs', descending: false);
+  final purchasesCol = StoreRefs.of(sel).purchaseInvoices().orderBy('timestampMs', descending: false);
 
   // Merge two streams manually.
   Stream<List<_LedgerEntryLite>> sales$ = salesCol.snapshots().map((snap) {
@@ -143,8 +145,10 @@ final paymentSplitProvider = StreamProvider<Map<String, double>>((ref) {
 /// of maps: [{'name':..., 'units': double, 'revenue': double}, ...] sorted by
 /// revenue desc, limited to top 10.
 final topSellingProductsProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
-  final invoices = FirebaseFirestore.instance
-      .collection('invoices')
+  final sel = ref.watch(selectedStoreIdProvider);
+  if (sel == null) return Stream.value(<Map<String, dynamic>>[]);
+  final invoices = StoreRefs.of(sel)
+      .invoices()
       .orderBy('timestampMs', descending: true)
       .limit(400); // safety cap
   return invoices.snapshots().map((snap) {
@@ -182,7 +186,9 @@ class _ProdAgg { double units = 0; double revenue = 0; }
 /// Returns list of maps: [{'product':..,'sku':..,'stock':int,'expiry':String,'status':String}]
 /// Low stock threshold: < 10; Near expiry: within 7 days.
 final inventoryAlertsProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
-  final inv = FirebaseFirestore.instance.collection('inventory');
+  final sel = ref.watch(selectedStoreIdProvider);
+  if (sel == null) return Stream.value(<Map<String, dynamic>>[]);
+  final inv = StoreRefs.of(sel).products();
   return inv.snapshots().map((snap) {
     final now = DateTime.now();
     final soon = now.add(const Duration(days: 7));

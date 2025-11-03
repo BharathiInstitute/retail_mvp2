@@ -12,14 +12,17 @@ import '../../core/theme/theme_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../crm/crm.dart' show CrmCustomer, LoyaltyStatus, LoyaltyFilter, LoyaltyFilterX; // reuse existing models
 import 'loyalty_settings.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
-class LoyaltyModuleScreen extends StatefulWidget {
+class LoyaltyModuleScreen extends ConsumerStatefulWidget {
   const LoyaltyModuleScreen({super.key});
   @override
-  State<LoyaltyModuleScreen> createState() => _LoyaltyModuleScreenState();
+  ConsumerState<LoyaltyModuleScreen> createState() => _LoyaltyModuleScreenState();
 }
 
-class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
+class _LoyaltyModuleScreenState extends ConsumerState<LoyaltyModuleScreen> {
   String _search = '';
   LoyaltyFilter _filter = LoyaltyFilter.all;
   bool _ready = false;
@@ -37,11 +40,15 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
   }
 
   // -------- Data Streams --------
-  Stream<List<CrmCustomer>> _customers() => FirebaseFirestore.instance.collection('customers').snapshots().map((s){
-    final list = s.docs.map((d)=>CrmCustomer.fromDoc(d)).toList();
-    list.sort((a,b)=>a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return list;
-  });
+  Stream<List<CrmCustomer>> _customers() {
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) return const Stream.empty();
+    return StoreRefs.of(sid).customers().snapshots().map((s){
+      final list = s.docs.map((d)=>CrmCustomer.fromDoc(d)).toList();
+      list.sort((a,b)=>a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return list;
+    });
+  }
 
   List<CrmCustomer> _filtered(List<CrmCustomer> input){
     final q = _search.trim().toLowerCase();
@@ -53,9 +60,12 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
   }
 
   // Read-only global tier info now derived from loyalty_config tiers list.
-  Stream<List<_TierView>> _tierConfig() => FirebaseFirestore.instance
-      .collection('settings')
-      .doc('loyalty_config')
+  Stream<List<_TierView>> _tierConfig() {
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) return const Stream.empty();
+    return StoreRefs.of(sid)
+      .loyaltySettings()
+      .doc('config')
       .snapshots()
       .map((d){
         final data = d.data() ?? {};
@@ -72,6 +82,7 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
         }
         return <_TierView>[];
       });
+  }
 
   // Removed _editPlans and propagation logic.
 
@@ -193,7 +204,9 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
                       final newTier = _findTierForStatus(tiers, newStatus);
                       final newPoints = (c.totalSpend/100.0)*(newTier?.pointsPer100 ?? 1.0);
                       try {
-                        await FirebaseFirestore.instance.collection('customers').doc(c.id).update({
+                        final sid = ref.read(selectedStoreIdProvider);
+                        if (sid == null) throw Exception('No store selected');
+                        await StoreRefs.of(sid).customers().doc(c.id).update({
                           'status': newStatus.name,
                           'loyaltyDiscount': newTier?.discount ?? 0,
                           'loyaltyRate': newTier?.pointsPer100 ?? 1.0,
@@ -222,9 +235,9 @@ class _LoyaltyModuleScreenState extends State<LoyaltyModuleScreen> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: c.withValues(alpha: .07),
+          color: c.withOpacity(.07),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: c.withValues(alpha: .35)),
+          border: Border.all(color: c.withOpacity(.35)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
           Row(children:[Icon(Icons.workspace_premium_outlined, color:c), const SizedBox(width:6), Text(t.name, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: c, fontWeight: FontWeight.w600))]),

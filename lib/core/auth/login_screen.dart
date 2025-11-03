@@ -86,7 +86,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 										data: theme.copyWith(
 											inputDecorationTheme: InputDecorationTheme(
 												filled: true,
-												fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+												fillColor: cs.surfaceContainerHighest.withOpacity(0.18),
 												border: OutlineInputBorder(
 													borderRadius: BorderRadius.circular(12),
 												),
@@ -205,8 +205,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 								begin: Alignment.topLeft,
 								end: Alignment.bottomRight,
 								colors: [
-								  cs.primary.withValues(alpha: 0.14),
-								  cs.secondary.withValues(alpha: 0.10),
+								  cs.primary.withOpacity(0.14),
+								  cs.secondary.withOpacity(0.10),
 								],
 							),
 						),

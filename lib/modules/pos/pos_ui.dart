@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -27,6 +28,8 @@ import '../../core/app_keys.dart';
 import '../../core/paging/paged_list_controller.dart';
 import '../../core/loading/page_loader_overlay.dart';
 import '../../core/firebase/firestore_paging.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
 const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES', defaultValue: false);
@@ -40,14 +43,14 @@ const bool kWebOpenBrowserPrint = bool.fromEnvironment('WEB_OPEN_BROWSER_PRINT',
 // Web strict-silent: when true, never open browser print dialog (no fallback); fail with a message instead
 const bool kWebStrictSilent = bool.fromEnvironment('WEB_STRICT_SILENT', defaultValue: false);
 
-class PosPage extends StatefulWidget {
+class PosPage extends ConsumerStatefulWidget {
   const PosPage({super.key});
 
   @override
-  State<PosPage> createState() => _PosPageState();
+  ConsumerState<PosPage> createState() => _PosPageState();
 }
 
-class _PosPageState extends State<PosPage> {
+class _PosPageState extends ConsumerState<PosPage> {
   // Firestore-backed products cache (for quick lookup by barcode/SKU)
   final List<Product> _cacheProducts = [];
 
@@ -130,8 +133,12 @@ class _PosPageState extends State<PosPage> {
       pageSize: 50,
       loadPage: (cursor) async {
         final qText = searchCtrl.text.trim();
-        Query<Map<String, dynamic>> base = FirebaseFirestore.instance
-            .collection('inventory')
+        final storeId = ref.read(selectedStoreIdProvider);
+        if (storeId == null) {
+          return (<Product>[], null);
+        }
+        Query<Map<String, dynamic>> base = StoreRefs.of(storeId)
+            .products()
             .orderBy('name');
         if (qText.length >= 2) {
           base = base.startAt([qText]).endAt(['$qText\uf8ff']);
@@ -180,19 +187,23 @@ class _PosPageState extends State<PosPage> {
 
   bool get _canUseBackend => _backendBase.isNotEmpty;
 
-  // Live stream of CRM customers from Firestore
-  Stream<List<Customer>> get _customerStream => FirebaseFirestore.instance
-      .collection('customers')
-      .snapshots()
-      .map((s) {
-    final list = s.docs.map((d) => Customer.fromDoc(d)).toList();
-    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return list;
-  });
+  // Live stream of CRM customers from Firestore (store-scoped)
+  Stream<List<Customer>> _customerStream(String? storeId) {
+    if (storeId == null) return Stream.value(const <Customer>[]);
+    return StoreRefs.of(storeId)
+        .customers()
+        .snapshots()
+        .map((s) {
+          final list = s.docs.map((d) => Customer.fromDoc(d)).toList();
+          list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+          return list;
+        });
+  }
 
   Future<void> _loadCustomersOnce() async {
     try {
-      final first = await _customerStream.first;
+      final storeId = ref.read(selectedStoreIdProvider);
+      final first = await _customerStream(storeId).first;
       if (!mounted) return;
       setState(() {
         customers = [walkIn, ...first.where((c) => c.id != walkIn.id)];
@@ -485,7 +496,11 @@ class _PosPageState extends State<PosPage> {
       try {
         final data = invoice.toJson();
         if (kPosVerbose) debugPrint('[POS] writing invoice ${invoice.invoiceNumber}');
-        await FirebaseFirestore.instance.collection('invoices').doc(invoice.invoiceNumber).set({
+        final storeId = ref.read(selectedStoreIdProvider);
+        if (storeId == null) {
+          throw Exception('No store selected');
+        }
+        await StoreRefs.of(storeId).invoices().doc(invoice.invoiceNumber).set({
           ...data,
           'timestampMs': invoice.timestamp.millisecondsSinceEpoch,
           'status': (selectedPaymentMode == PaymentMode.credit && creditAddPortion > 0) ? 'on_credit' : 'Paid',
@@ -513,7 +528,7 @@ class _PosPageState extends State<PosPage> {
         _snack('Select a customer for credit checkout');
       } else {
         try {
-          await CustomerCreditService.ensureCreditField(selectedCustomer!.id);
+          await CustomerCreditService.ensureCreditField(selectedCustomer!.id, storeId: ref.read(selectedStoreIdProvider));
           if (kPosVerbose) {
             debugPrint('[POS][creditMix] attempting adjust add=$creditAddPortion repay=$creditRepayPortion');
           }
@@ -522,6 +537,7 @@ class _PosPageState extends State<PosPage> {
             creditAdd: creditAddPortion,
             creditRepay: creditRepayPortion,
             invoiceNumber: invoice.invoiceNumber,
+            storeId: ref.read(selectedStoreIdProvider),
           );
           setState(() {
             selectedCustomer = Customer(
@@ -719,8 +735,13 @@ class _PosPageState extends State<PosPage> {
         return; // walk-in
       }
       final fs = FirebaseFirestore.instance;
-      final settingsRef = fs.collection('settings').doc('loyalty_config');
-      final customerRef = fs.collection('customers').doc(customerId);
+      final storeId = ref.read(selectedStoreIdProvider);
+      if (storeId == null) {
+        if (kPosVerbose) debugPrint('[LOYALTY] abort: no store selected');
+        return;
+      }
+      final settingsRef = StoreRefs.of(storeId, fs: fs).loyaltySettings().doc('config');
+      final customerRef = StoreRefs.of(storeId, fs: fs).customers().doc(customerId);
       double earned = 0;
       double newPointsTotal = 0;
       if (kPosVerbose) debugPrint('[LOYALTY] start invoice=${invoice.invoiceNumber} grand=${invoice.grandTotal} cust=$customerId');
@@ -877,8 +898,16 @@ class _PosPageState extends State<PosPage> {
     }
     try {
       // Ensure creditBalance field exists (idempotent)
-      await CustomerCreditService.ensureCreditField(chosen.id);
-      final docRef = FirebaseFirestore.instance.collection('customers').doc(chosen.id);
+  await CustomerCreditService.ensureCreditField(chosen.id, storeId: ref.read(selectedStoreIdProvider));
+    final storeId = ref.read(selectedStoreIdProvider);
+    if (storeId == null) {
+      // Store must be selected before fetching a store-scoped customer
+      if (mounted) {
+        _snack('Select a store first');
+      }
+      return;
+    }
+    final docRef = StoreRefs.of(storeId).customers().doc(chosen.id);
       final snap = await docRef.get();
       if (snap.data() != null && mounted) {
         final refreshed = Customer.fromDoc(snap);
@@ -1121,7 +1150,7 @@ class _PosPageState extends State<PosPage> {
         SizedBox(
           width: 300,
           child: CheckoutPanel(
-            customersStream: _customerStream,
+            customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
             initialCustomers: customers,
             selectedCustomer: selectedCustomer,
             walkIn: walkIn,
@@ -1217,7 +1246,7 @@ class _PosPageState extends State<PosPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _CustomersDropdownCard(
-                customersStream: _customerStream,
+                customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
                 initialCustomers: customers,
                 selectedCustomer: selectedCustomer,
                 walkIn: walkIn,
@@ -1255,7 +1284,7 @@ class _PosPageState extends State<PosPage> {
         SizedBox(
           width: 300,
           child: CheckoutPanel(
-            customersStream: _customerStream,
+            customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
             initialCustomers: customers,
             selectedCustomer: selectedCustomer,
             walkIn: walkIn,
@@ -1337,7 +1366,7 @@ class _PosPageState extends State<PosPage> {
         ),
         const SizedBox(height: 8),
         _CustomersDropdownCard(
-          customersStream: _customerStream,
+          customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
           initialCustomers: customers,
           selectedCustomer: selectedCustomer,
           walkIn: walkIn,
@@ -1368,7 +1397,7 @@ class _PosPageState extends State<PosPage> {
         ),
         const SizedBox(height: 8),
         CheckoutPanel(
-          customersStream: _customerStream,
+          customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
           initialCustomers: customers,
           selectedCustomer: selectedCustomer,
           walkIn: walkIn,
@@ -1430,16 +1459,20 @@ class _PosPageState extends State<PosPage> {
     }
     if (found == null) {
       try {
-        final bySku = await FirebaseFirestore.instance
-            .collection('inventory')
+        final storeId = ref.read(selectedStoreIdProvider);
+        if (storeId == null) {
+          throw Exception('No store selected');
+        }
+        final bySku = await StoreRefs.of(storeId)
+            .products()
             .where('sku', isEqualTo: code)
             .limit(1)
             .get();
         if (bySku.docs.isNotEmpty) {
           found = Product.fromDoc(bySku.docs.first);
         } else {
-          final byBarcode = await FirebaseFirestore.instance
-              .collection('inventory')
+          final byBarcode = await StoreRefs.of(storeId)
+              .products()
               .where('barcode', isEqualTo: code)
               .limit(1)
               .get();
@@ -1559,7 +1592,7 @@ class _PosPageState extends State<PosPage> {
       return;
     }
     try {
-      await CustomerCreditService.repayCredit(customerId: cust.id, amount: amount);
+      await CustomerCreditService.repayCredit(customerId: cust.id, amount: amount, storeId: ref.read(selectedStoreIdProvider));
       _snack('Credit payment ₹${amount.toStringAsFixed(2)} recorded');
       // Refresh customer doc to update live balance (stream listener will also update if active)
       setState(() { selectedPaymentMode = PaymentMode.cash; });

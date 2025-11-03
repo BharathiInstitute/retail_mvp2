@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/theme_utils.dart';
+import '../inventory/Products/inventory.dart' show selectedStoreProvider;
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
 // Removed import 'gstr3b_service.dart'; file deleted. Replacing GST summary logic with placeholders.
 
 // Consolidated Accounting module in a single file.
 // This merges prior UI screens and keeps placeholders for models/services.
 
 // ===== Accounting Module (main screen) =====
-class AccountingModuleScreen extends StatefulWidget {
+class AccountingModuleScreen extends ConsumerStatefulWidget {
   const AccountingModuleScreen({super.key});
   @override
-  State<AccountingModuleScreen> createState() => _AccountingModuleScreenState();
+	ConsumerState<AccountingModuleScreen> createState() => _AccountingModuleScreenState();
 }
 
-class _AccountingModuleScreenState extends State<AccountingModuleScreen> {
+class _AccountingModuleScreenState extends ConsumerState<AccountingModuleScreen> {
 
 // Static GST rows removed; replaced with dynamic computation card.
 
@@ -23,18 +25,8 @@ class _AccountingModuleScreenState extends State<AccountingModuleScreen> {
 
 	final _TaxSummary taxSummary = const _TaxSummary(gstPayable: 68000, itc: 42000);
 
-late final Stream<List<_LedgerEntry>> _ledgerStream;
-Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError on hot reload
-
-	@override
-	void initState() {
-		super.initState();
-		_ledgerStream = _buildLedgerStream().asBroadcastStream();
-		_stockValueStream = _buildStockValueStream().asBroadcastStream();
-	}
-
-	Stream<List<_LedgerEntry>> _salesStream() {
-		final col = FirebaseFirestore.instance.collection('invoices').orderBy('timestampMs', descending: false);
+	Stream<List<_LedgerEntry>> _salesStream(String storeId) {
+		final col = StoreRefs.of(storeId).invoices().orderBy('timestampMs', descending: false);
 		return col.snapshots().map((snap) => snap.docs.map((d) {
 			final data = d.data();
 			final tsMs = (data['timestampMs'] is int) ? data['timestampMs'] as int : DateTime.now().millisecondsSinceEpoch;
@@ -62,8 +54,8 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 		}).toList());
 	}
 
-	Stream<List<_LedgerEntry>> _purchaseStream() {
-		final col = FirebaseFirestore.instance.collection('purchase_invoices').orderBy('timestampMs', descending: false);
+	Stream<List<_LedgerEntry>> _purchaseStream(String storeId) {
+		final col = StoreRefs.of(storeId).purchaseInvoices().orderBy('timestampMs', descending: false);
 		return col.snapshots().map((snap) => snap.docs.map((d) {
 			final data = d.data();
 			final tsMs = (data['timestampMs'] is int) ? data['timestampMs'] as int : DateTime.now().millisecondsSinceEpoch;
@@ -84,10 +76,10 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 		}).toList());
 	}
 
-	Stream<List<_LedgerEntry>> _buildLedgerStream() {
+	Stream<List<_LedgerEntry>> _buildLedgerStream(String storeId) {
 		// Replace rxdart combineLatest with manual merge using StreamZip-like behavior.
-		final sales$ = _salesStream();
-		final purchases$ = _purchaseStream();
+		final sales$ = _salesStream(storeId);
+		final purchases$ = _purchaseStream(storeId);
 		List<_LedgerEntry>? latestSales;
 		List<_LedgerEntry>? latestPurchases;
 		StreamController<List<_LedgerEntry>>? controller;
@@ -113,8 +105,8 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 		return controller.stream.asBroadcastStream();
 	}
 
-	Stream<double> _buildStockValueStream() {
-		final col = FirebaseFirestore.instance.collection('inventory');
+	Stream<double> _buildStockValueStream(String storeId) {
+		final col = StoreRefs.of(storeId).products();
 		return col.snapshots().map((snap) {
 			double total = 0;
 			for (final d in snap.docs) {
@@ -151,12 +143,16 @@ Stream<double>? _stockValueStream; // nullable to avoid LateInitializationError 
 		final isWide = MediaQuery.of(context).size.width >= 1000;
 		final netProfit = revenue - expenses;
 
-		final salesCard = _TotalSummaryCard(ledgerStream: _ledgerStream, stockValueStream: _stockValueStream);
+	final selStoreId = ref.watch(selectedStoreProvider);
+	final ledgerStream = selStoreId == null ? const Stream<List<_LedgerEntry>>.empty() : _buildLedgerStream(selStoreId).asBroadcastStream();
+	final stockValueStream = selStoreId == null ? null : _buildStockValueStream(selStoreId).asBroadcastStream();
+
+	final salesCard = _TotalSummaryCard(ledgerStream: ledgerStream, stockValueStream: stockValueStream);
 		final gstrCard = _DynamicGstReportsCard();
 		final pnlCard = _PnLCard(revenue: revenue, expenses: expenses, netProfit: netProfit);
 		final taxCard = _TaxSummaryCard(summary: taxSummary);
 		final exportCard = const _ExportCard();
-		final cashBookCard = _CashBookCard(stream: _ledgerStream);
+	final cashBookCard = _CashBookCard(stream: ledgerStream);
 
 		if (isWide) {
 			return Padding(
@@ -520,7 +516,7 @@ class _MetricTile extends StatelessWidget {
 			padding: const EdgeInsets.all(12),
 			decoration: BoxDecoration(
 				borderRadius: BorderRadius.circular(8),
-				color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+				color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
 			),
 			child: Row(mainAxisSize: MainAxisSize.min, children: [
 				Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant), const SizedBox(width: 8),

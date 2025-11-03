@@ -31,6 +31,10 @@ import 'modules/loyalty/loyalty.dart';
 import 'modules/admin/permissions_overview_tab.dart';
 import 'modules/admin/users_tab.dart';
 import 'modules/admin/permissions_tab.dart';
+import 'modules/admin/migration_tools.dart';
+import 'modules/stores/my_stores_screen.dart';
+import 'modules/stores/create_store_screen.dart';
+import 'modules/stores/providers.dart';
 // Auth screens
 import 'core/auth/login_screen.dart';
 import 'core/auth/register_screen.dart';
@@ -61,8 +65,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation.startsWith('/register') ||
           state.matchedLocation.startsWith('/forgot');
 
-      // Not logged in: allow auth routes, otherwise send to /login
-      if (!isLoggedIn) return loggingIn ? null : '/login';
+  // Not logged in: allow auth routes, otherwise send to /login
+  if (!isLoggedIn) return loggingIn ? null : '/login';
+
+  // If already logged in and currently on an auth route, immediately go to /stores
+  // Do this BEFORE waiting on permissions or owner state to avoid getting stuck on login
+  if (loggingIn) return '/stores';
 
       // If on login while logged in, only leave when we know where to go
       String? computeSafe(UserPermissions perms) {
@@ -79,7 +87,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // Owner bypass: if owner, allow all routes (once value is available)
       final ownerAsync = ref.read(ownerProvider);
-      if (ownerAsync.hasValue && (ownerAsync.value ?? false)) {
+      final isStoreOwner = ref.read(storeOwnerProvider);
+      if ((ownerAsync.hasValue && (ownerAsync.value ?? false)) || isStoreOwner) {
         if (loggingIn) return '/dashboard';
         return null;
       }
@@ -89,11 +98,27 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!permsAsync.hasValue) return null; // do nothing until perms known
       final perms = permsAsync.value ?? UserPermissions.empty;
 
-      // If currently on an auth route and logged in, navigate to the first allowed screen if any
-      if (loggingIn) {
-        final safe = computeSafe(perms);
-        // If no safe destination yet, stay on login to avoid loops
-        return safe; // may be null
+      // No longer on auth route here
+
+      // Enforce store selection for store-scoped areas: if user has no memberships, go to /stores; if multiple and none selected, go to /stores
+      final membershipsAsync = ref.read(myMembershipsProvider);
+      if (membershipsAsync.hasValue) {
+        final memberships = membershipsAsync.value ?? const [];
+        final sel = ref.read(selectedStoreIdProvider);
+        final onStores = state.matchedLocation.startsWith('/stores');
+        if (memberships.isEmpty) {
+          // User has no stores: keep them in /stores to create or request access
+          if (!onStores) return '/stores';
+        } else if (sel == null) {
+          // Auto-select single membership; otherwise, ask user to pick
+          if (memberships.length == 1) {
+            ref.read(selectedStoreIdProvider.notifier).state = memberships.first.storeId;
+            // If we are on the stores page and just auto-selected the only store, go to dashboard
+            if (onStores) return '/dashboard';
+          } else if (!onStores) {
+            return '/stores';
+          }
+        }
       }
 
       // Guard non-auth routes by view permission
@@ -111,6 +136,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return computeSafe(perms) ?? '/login';
     },
   routes: [
+      // Auth-protected, top-level (no shell) Stores routes to appear immediately after login without side menu
+      GoRoute(
+        path: '/stores',
+        name: 'stores',
+        builder: (context, state) => const MyStoresScreen(),
+      ),
+      GoRoute(
+        path: '/stores/new',
+        name: 'stores-new',
+        builder: (context, state) => const CreateStoreScreen(),
+      ),
       // Public auth routes
       GoRoute(
         path: '/login',
@@ -263,6 +299,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
+              path: '/admin/migration',
+              name: 'admin-migration',
+              pageBuilder: (context, state) => const NoTransitionPage(child: MigrationToolsScreen()),
+            ),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
               path: '/admin/permissions-edit',
               name: 'admin-permissions-edit',
               pageBuilder: (context, state) => NoTransitionPage(child: const AdminPermissionsEditPage()),
@@ -346,6 +389,9 @@ class MyApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Initialize store selection persistence
+    // ignore: unused_result
+    ref.watch(selectedStorePersistInitProvider);
     final router = ref.watch(appRouterProvider);
     final fontKey = ref.watch(fontProvider);
     return MaterialApp.router(
@@ -373,17 +419,86 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = MediaQuery.of(context).size.width >= 900;
+    // If we are on the standalone Stores routes, render the child directly (no app bar, no side menu)
+    final currentPath = GoRouterState.of(context).matchedLocation;
+    if (currentPath.startsWith('/stores')) {
+      return navigationShell; // MyStores/CreateStore provide their own Scaffold
+    }
     // Avoid rebuilding AppShell based on providers that don't affect layout
     // Note: Permissions are enforced per screen; the side menu itself shows all entries for discoverability.
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Retail ERP MVP',
-          style: context.texts.titleLarge?.copyWith(
-            color: context.colors.onSurface,
-            fontWeight: FontWeight.w700,
+        title: Row(children: [
+          Text(
+            'Retail ERP MVP',
+            style: context.texts.titleLarge?.copyWith(
+              color: context.colors.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
+          const SizedBox(width: 12),
+          // Current store indicator + quick switch
+          Consumer(builder: (context, ref, _) {
+            final selId = ref.watch(selectedStoreIdProvider);
+            final selDoc = ref.watch(selectedStoreDocProvider);
+            final isLoading = selId != null && selDoc.isLoading;
+            final name = selId == null
+                ? 'No store selected'
+                : (selDoc.asData?.value?.name ?? 'Loading…');
+            return OutlinedButton.icon(
+              onPressed: () => GoRouter.of(context).go('/stores'),
+              icon: Icon(Icons.store_mall_directory_outlined, size: 18, color: context.colors.primary),
+              label: Row(children: [
+                Text(name, overflow: TextOverflow.ellipsis),
+                if (isLoading) ...[
+                  const SizedBox(width: 8),
+                  const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                ],
+              ]),
+              style: OutlinedButton.styleFrom(
+                visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+            );
+          }),
+          const SizedBox(width: 6),
+          // Quick switcher dropdown
+          Consumer(builder: (context, ref, _) {
+            final storesAsync = ref.watch(myStoresProvider);
+            return PopupMenuButton<String>(
+              tooltip: 'Switch store',
+              icon: const Icon(Icons.arrow_drop_down_circle_outlined, size: 20),
+              onSelected: (id) {
+                ref.read(selectedStoreIdProvider.notifier).state = id;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Store switched')));
+                // After switching stores, go to a safe landing
+                _goTo(context, '/dashboard');
+              },
+              itemBuilder: (context) {
+                return storesAsync.when(
+                  data: (items) => items.isEmpty
+                      ? [const PopupMenuItem<String>(enabled: false, child: Text('No stores'))]
+                      : items
+                          .map((e) => PopupMenuItem<String>(
+                                value: e.store.id,
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.store_outlined, size: 16),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(e.store.name, overflow: TextOverflow.ellipsis)),
+                                    const SizedBox(width: 8),
+                                    Text(e.role, style: Theme.of(context).textTheme.labelSmall),
+                                  ],
+                                ),
+                              ))
+                          .toList(),
+                  loading: () => [const PopupMenuItem<String>(enabled: false, child: Text('Loading...'))],
+                  error: (e, _) => [PopupMenuItem<String>(enabled: false, child: Text('Error: $e'))],
+                );
+              },
+            );
+          }),
+        ]),
         actions: [
           IconButton(
             onPressed: () => ref.read(themeModeProvider.notifier).cycle(),
@@ -439,6 +554,7 @@ class _SideMenu extends ConsumerWidget {
   final user = ref.watch(authStateProvider);
   final perms = ref.watch(permissionsProvider).asData?.value ?? UserPermissions.empty;
   final isOwner = ref.watch(ownerProvider).asData?.value ?? false;
+  final isStoreOwner = ref.watch(storeOwnerProvider);
     final currentPath = GoRouterState.of(context).matchedLocation;
 
     final extended = ref.watch(navRailExtendedProvider);
@@ -479,10 +595,12 @@ class _SideMenu extends ConsumerWidget {
       );
     }
 
-    bool canView(String? key) => key == null ? true : (isOwner || perms.can(key, 'view'));
+  bool canView(String? key) => key == null ? true : (isOwner || isStoreOwner || perms.can(key, 'view'));
 
     Widget item(String label, IconData icon, String route, {String? screenKey, int indent = 0}) {
+      final isStoreOwner = ref.watch(storeOwnerProvider);
       final canAccess = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
+      final allowed = canAccess || isStoreOwner; // store owner bypass
       final selected = currentPath == route || (route != '/' && currentPath.startsWith(route));
       final tile = ListTile(
         dense: true,
@@ -496,7 +614,7 @@ class _SideMenu extends ConsumerWidget {
           size: 20,
           color: selected
               ? context.colors.primary
-              : (canAccess ? context.colors.onSurfaceVariant : context.colors.onSurfaceVariant),
+              : (allowed ? context.colors.onSurfaceVariant : context.colors.onSurfaceVariant),
         ),
         title: extended
             ? Text(
@@ -507,12 +625,12 @@ class _SideMenu extends ConsumerWidget {
                 ),
               )
             : null,
-        trailing: extended && !canAccess
+        trailing: extended && !allowed
             ? Icon(Icons.lock_outline, size: 16, color: context.colors.onSurfaceVariant)
             : null,
         selected: selected,
         onTap: () {
-          if (canAccess) {
+          if (allowed) {
             onGo(route);
           } else {
             final m = ScaffoldMessenger.maybeOf(context);
@@ -557,10 +675,11 @@ class _SideMenu extends ConsumerWidget {
 
     List<Widget> children = [
       if (user != null) header(),
+      item('My Stores', Icons.storefront_outlined, '/stores'),
       item('Dashboard', Icons.dashboard_outlined, '/dashboard', screenKey: ScreenKeys.dashboard),
 
       // POS group
-      if (perms != UserPermissions.empty && (canView(ScreenKeys.posMain) || canView(ScreenKeys.posCashier))) ...[
+  if (isOwner || isStoreOwner || (perms != UserPermissions.empty && (canView(ScreenKeys.posMain) || canView(ScreenKeys.posCashier)))) ...[
         groupHeader('POS', Icons.point_of_sale_outlined, posMenuExpandedProvider),
         if (ref.watch(posMenuExpandedProvider)) ...[
           item('POS Main', Icons.store_mall_directory_outlined, '/pos', screenKey: ScreenKeys.posMain, indent: 1),
@@ -571,7 +690,7 @@ class _SideMenu extends ConsumerWidget {
       ],
 
       // Inventory group
-  if (perms != UserPermissions.empty && (canView(ScreenKeys.invProducts) || canView(ScreenKeys.invStockMovements) || canView(ScreenKeys.invSuppliers) || canView(ScreenKeys.invAlerts) || canView(ScreenKeys.invAudit))) ...[
+  if (isOwner || isStoreOwner || (perms != UserPermissions.empty && (canView(ScreenKeys.invProducts) || canView(ScreenKeys.invStockMovements) || canView(ScreenKeys.invSuppliers) || canView(ScreenKeys.invAlerts) || canView(ScreenKeys.invAudit)))) ...[
         groupHeader('Inventory', Icons.inventory_2_outlined, inventoryMenuExpandedProvider),
         if (ref.watch(inventoryMenuExpandedProvider)) ...[
           item('Products', Icons.list_alt_outlined, '/inventory/products', screenKey: ScreenKeys.invProducts, indent: 1),
@@ -583,7 +702,7 @@ class _SideMenu extends ConsumerWidget {
       ],
 
       // Invoices group
-      if (perms != UserPermissions.empty && (isOwner || allowInvoicesView(perms))) ...[
+  if (isOwner || isStoreOwner || (perms != UserPermissions.empty && (isOwner || allowInvoicesView(perms)))) ...[
         groupHeader('Invoices', Icons.receipt_long_outlined, invoicesMenuExpandedProvider),
         if (ref.watch(invoicesMenuExpandedProvider)) ...[
           item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
@@ -602,6 +721,7 @@ class _SideMenu extends ConsumerWidget {
         if (ref.watch(adminMenuExpandedProvider)) ...[
           item('Permissions', Icons.security_outlined, '/admin', screenKey: ScreenKeys.admin, indent: 1),
           item('Users', Icons.group_outlined, '/admin/users', screenKey: ScreenKeys.admin, indent: 1),
+          if (isOwner) item('Migration', Icons.auto_fix_high_outlined, '/admin/migration', screenKey: ScreenKeys.admin, indent: 1),
         ],
       ],
       const Divider(height: 8),

@@ -285,7 +285,7 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
       icon: Icon(icon, color: selected ? Theme.of(context).colorScheme.primary : null),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        backgroundColor: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08) : null,
+  backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
         side: BorderSide(color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor),
       ),
     );
@@ -488,7 +488,7 @@ class _CustomerInfo extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -521,9 +521,9 @@ class _CustomerInfo extends StatelessWidget {
   Widget _miniInfoChip(BuildContext context, IconData icon, String text) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+  color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
       borderRadius: BorderRadius.circular(24),
-  border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+  border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary),
@@ -646,7 +646,7 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
           decoration: BoxDecoration(
             border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(6),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
           ),
           child: Column(children: [
             Padding(

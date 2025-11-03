@@ -34,34 +34,36 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  # State management
+  # State management (pin to v2 to keep StateNotifier/ChangeNotifierProvider APIs)
   flutter_riverpod: ^2.5.1
   # Routing
-  go_router: ^14.3.0
+  go_router: ^16.3.0
   # Firebase (placeholders; initialization TODO)
-  firebase_core: ^3.5.0
-  firebase_auth: ^5.3.0
-  cloud_firestore: ^5.4.4
-  firebase_storage: ^12.3.3
-  cloud_functions: ^5.1.3
-  google_sign_in: ^6.2.1
+  firebase_core: ^4.2.0
+  firebase_auth: ^6.1.1
+  cloud_firestore: ^6.0.3
+  firebase_storage: ^13.0.3
+  cloud_functions: ^6.0.3
+  google_sign_in: ^7.2.0
   # Utils
   intl: ^0.19.0
   # PDF & sharing
   pdf: ^3.11.1
-  share_plus: ^10.0.2
+  share_plus: ^12.0.1
   path_provider: ^2.1.5
   barcode: ^2.2.6
   http: ^1.2.2
   # Import & sheet
-  file_picker: ^8.0.5
+  file_picker: ^10.3.3
   csv: ^6.0.0
-  excel: ^2.1.0
+  excel: ^4.0.6
   pluto_grid: ^8.0.0
   # shared_preferences: ^2.2.2
   shared_preferences: ^2.2.2
   # Global fonts
   google_fonts: ^6.2.1
+  # Utility collections (used in code; add explicitly to fix lint)
+  collection: ^1.18.0
 
 dev_dependencies:
   flutter_test:
@@ -72,7 +74,7 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'Products/inventory.dart' show selectedStoreProvider; // current store id
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
 import '../../core/theme/theme_utils.dart';
 import '../../core/paging/paged_list_controller.dart';
 import '../../core/firebase/firestore_paging.dart';
@@ -24,20 +26,35 @@ class SupplierDoc {
 }
 
 class SupplierRepository {
-  SupplierRepository({FirebaseFirestore? firestore}):_db=firestore??FirebaseFirestore.instance; final FirebaseFirestore _db;
-  CollectionReference<Map<String,dynamic>> get _col=>_db.collection('suppliers');
-  Stream<List<SupplierDoc>> streamSuppliers()=>_col.orderBy('name').snapshots().map((snap)=>snap.docs.map((d)=>SupplierDoc.fromSnap(d)).toList());
-  Future<void> addSupplier({required String name,required String address,required String phone,required String email}) async{
-    await _col.add({'name':name,'address':address,'phone':phone,'email':email,'createdAt':FieldValue.serverTimestamp()});
+  SupplierRepository({FirebaseFirestore? firestore, required String? storeId})
+      : _db = firestore ?? FirebaseFirestore.instance,
+        _storeId = storeId;
+  final FirebaseFirestore _db;
+  final String? _storeId;
+  CollectionReference<Map<String, dynamic>> get _col {
+    final sid = _storeId;
+    if (sid == null) {
+      throw StateError('No store selected');
+    }
+    return StoreRefs.of(sid, fs: _db).suppliers();
   }
-  Future<void> updateSupplier({required String id,required String name,required String address,required String phone,required String email}) async{
-    await _col.doc(id).update({'name':name,'address':address,'phone':phone,'email':email,'updatedAt':FieldValue.serverTimestamp()});
+  Stream<List<SupplierDoc>> streamSuppliers() => _col.orderBy('name').snapshots().map((snap) => snap.docs.map((d) => SupplierDoc.fromSnap(d)).toList());
+  Future<void> addSupplier({required String name, required String address, required String phone, required String email}) async {
+    await _col.add({'name': name, 'address': address, 'phone': phone, 'email': email, 'createdAt': FieldValue.serverTimestamp()});
   }
-  Future<void> deleteSupplier({required String id}) async{ await _col.doc(id).delete(); }
+  Future<void> updateSupplier({required String id, required String name, required String address, required String phone, required String email}) async {
+    await _col.doc(id).update({'name': name, 'address': address, 'phone': phone, 'email': email, 'updatedAt': FieldValue.serverTimestamp()});
+  }
+  Future<void> deleteSupplier({required String id}) async {
+    await _col.doc(id).delete();
+  }
 }
 
 /// Repository provider for suppliers (scoped for reuse if needed elsewhere)
-final supplierRepoProvider = Provider<SupplierRepository>((ref) => SupplierRepository());
+final supplierRepoProvider = Provider<SupplierRepository>((ref) {
+  final storeId = ref.watch(selectedStoreProvider);
+  return SupplierRepository(storeId: storeId);
+});
 
 /// Stream provider kept for any legacy/aux consumers (not used by screen now)
 final supplierStreamProvider = StreamProvider.autoDispose<List<SupplierDoc>>((ref) {
@@ -47,16 +64,18 @@ final supplierStreamProvider = StreamProvider.autoDispose<List<SupplierDoc>>((re
 
 /// Paged controller for suppliers used by the screen
 final suppliersPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<SupplierDoc>>((ref) {
-  final base = FirebaseFirestore.instance
-      .collection('suppliers')
-      .orderBy('name');
+  final storeId = ref.watch(selectedStoreProvider);
 
   final controller = PagedListController<SupplierDoc>(
     pageSize: 50,
     loadPage: (cursor) async {
       final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
+      if (storeId == null) {
+        return (<SupplierDoc>[], null);
+      }
+      final query = StoreRefs.of(storeId).suppliers().orderBy('name');
       final (items, next) = await fetchFirestorePage<SupplierDoc>(
-        base: base,
+        base: query,
         after: after,
         pageSize: 50,
         map: (d) => SupplierDoc.fromSnap(d),

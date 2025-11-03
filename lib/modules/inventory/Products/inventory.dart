@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/store_scoped_refs.dart';
+import '../../stores/providers.dart';
 
 import '../../../core/paging/paged_list_controller.dart';
 import '../../../core/firebase/firestore_paging.dart';
@@ -50,18 +52,27 @@ class ProductsStandaloneScreen extends ConsumerWidget {
 
 // -------------------- Products Providers & Views --------------------
 final inventoryRepoProvider = Provider<InventoryRepository>((ref) => InventoryRepository());
-final tenantIdProvider = Provider<String?>((ref) { final user = ref.watch(authStateProvider); return user?.uid; });
-final productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) { final repo = ref.watch(inventoryRepoProvider); return repo.streamProducts(tenantId: null); });
+final selectedStoreProvider = Provider<String?>((ref) => ref.watch(selectedStoreIdProvider));
+final productsStreamProvider = StreamProvider.autoDispose<List<ProductDoc>>((ref) {
+  final repo = ref.watch(inventoryRepoProvider);
+  final storeId = ref.watch(selectedStoreIdProvider);
+  if (storeId == null) return const Stream<List<ProductDoc>>.empty();
+  return repo.streamProducts(storeId: storeId);
+});
 
 // Paged controller for Products (initial page blocks UI via PageLoaderOverlay)
 final productsPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<ProductDoc>>((ref) {
-  final base = FirebaseFirestore.instance
-      .collection('inventory')
-      .orderBy('name');
+  final selId = ref.watch(selectedStoreIdProvider);
+  // If no store is selected, do not hit Firestore at all; return an empty, end-reached pager.
+  final Query<Map<String, dynamic>>? base =
+      (selId == null) ? null : StoreRefs.of(selId).products().orderBy('name');
 
   final controller = PagedListController<ProductDoc>(
     pageSize: 50,
     loadPage: (cursor) async {
+      if (base == null) {
+        return (<ProductDoc>[], null);
+      }
       final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
       final (items, next) = await fetchFirestorePage<ProductDoc>(
         base: base,
@@ -147,8 +158,9 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   Widget build(BuildContext context) {
     final paged = ref.watch(productsPagedControllerProvider);
     final state = paged.state;
-    final user = ref.watch(authStateProvider);
-    final bool isSignedIn = user != null;
+  final user = ref.watch(authStateProvider);
+  final selStore = ref.watch(selectedStoreIdProvider);
+  final bool isSignedIn = user != null;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -210,7 +222,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
               gstDrop,
               FilledButton.icon(
                 style: compactFilled,
-                onPressed: isSignedIn ? () => _openAddDialog(context) : _requireSignInNotice,
+                onPressed: isSignedIn && selStore != null ? () => _openAddDialog(context) : _requireSignInNotice,
                 icon: const Icon(Icons.add),
                 label: const Text('Add Product'),
               ),
@@ -222,7 +234,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
               ),
               OutlinedButton.icon(
                 style: compactOutlined,
-                onPressed: isSignedIn
+                onPressed: isSignedIn && selStore != null
                     ? () => Navigator.of(context).push(
                           MaterialPageRoute(builder: (_) => const ImportProductsScreen()),
                         )
@@ -393,6 +405,11 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       _requireSignInNotice();
       return;
     }
+    final storeId = ref.read(selectedStoreIdProvider);
+    if (storeId == null) {
+      _requireSignInNotice();
+      return;
+    }
     // Capture messenger early
     final messenger = ScaffoldMessenger.of(context);
     final result = await showDialog<_AddProductResult>(
@@ -402,13 +419,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (result == null) return;
   final repo = ref.read(inventoryRepoProvider);
-  final tenantId = ref.read(tenantIdProvider);
-    if (tenantId == null) {
-      _requireSignInNotice();
-      return;
-    }
     await repo.addProduct(
-      tenantId: tenantId,
+      storeId: storeId,
       sku: result.sku,
       name: result.name,
       unitPrice: result.unitPrice,
@@ -436,7 +448,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (result == null) return;
   final repo = ref.read(inventoryRepoProvider);
+    final storeId = ref.read(selectedStoreIdProvider);
+    if (storeId == null) { _requireSignInNotice(); return; }
     await repo.updateProduct(
+      storeId: storeId,
       sku: p.sku,
       name: result.name,
       unitPrice: result.unitPrice,
@@ -485,7 +500,9 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     );
     if (ok != true) return;
   final repo = ref.read(inventoryRepoProvider);
-    await repo.deleteProduct(sku: p.sku);
+    final storeId = ref.read(selectedStoreIdProvider);
+    if (storeId == null) { _requireSignInNotice(); return; }
+    await repo.deleteProduct(storeId: storeId, sku: p.sku);
     ref.read(productsPagedControllerProvider).resetAndLoad();
     if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Product deleted')));
   }

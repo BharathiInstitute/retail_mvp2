@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
 
 /// Result of a credit mutation.
 class CreditOpResult {
@@ -27,11 +28,14 @@ class CustomerCreditService {
     required String customerId,
     required double amount,
     required String invoiceNumber,
+    String? storeId,
   }) async {
     if (amount <= 0) {
       throw ArgumentError('Amount must be > 0');
     }
-    final custRef = _fs.collection('customers').doc(customerId);
+  final custRef = (storeId == null)
+    ? _fs.collection('customers').doc(customerId)
+    : StoreRefs.of(storeId, fs: _fs).customers().doc(customerId);
     final ledgerRef = custRef.collection('credit_ledger').doc();
     late CreditOpResult result;
     await _fs.runTransaction((tx) async {
@@ -75,11 +79,14 @@ class CustomerCreditService {
   static Future<CreditOpResult> repayCredit({
     required String customerId,
     required double amount,
+    String? storeId,
   }) async {
     if (amount <= 0) {
       throw ArgumentError('Amount must be > 0');
     }
-    final custRef = _fs.collection('customers').doc(customerId);
+  final custRef = (storeId == null)
+    ? _fs.collection('customers').doc(customerId)
+    : StoreRefs.of(storeId, fs: _fs).customers().doc(customerId);
     final ledgerRef = custRef.collection('credit_ledger').doc();
     late CreditOpResult result;
     try {
@@ -164,13 +171,17 @@ class CustomerCreditService {
     required double creditAdd,
     required double creditRepay,
     required String invoiceNumber,
+    String? storeId,
   }) async {
     // Normalize inputs (no negatives)
     final addPortion = creditAdd.isNaN ? 0.0 : creditAdd.clamp(0, double.infinity);
     final repayPortion = creditRepay.isNaN ? 0.0 : creditRepay.clamp(0, double.infinity);
     if (addPortion == 0 && repayPortion == 0) {
       // Nothing to do: fetch current balance to return a result for consistency.
-      final snap = await _fs.collection('customers').doc(customerId).get();
+    final custRef = (storeId == null)
+      ? _fs.collection('customers').doc(customerId)
+      : StoreRefs.of(storeId, fs: _fs).customers().doc(customerId);
+    final snap = await custRef.get();
       final data = snap.data() ?? <String, dynamic>{};
       final prevRaw = data['creditBalance'] ?? data['khathaBalance'] ?? 0;
       double prev = 0;
@@ -189,7 +200,9 @@ class CustomerCreditService {
       );
     }
 
-    final custRef = _fs.collection('customers').doc(customerId);
+  final custRef = (storeId == null)
+    ? _fs.collection('customers').doc(customerId)
+    : StoreRefs.of(storeId, fs: _fs).customers().doc(customerId);
     // Pre-create ledger doc refs (up to two) for deterministic ordering inside transaction
     final ledgerAddRef = addPortion > 0 ? custRef.collection('credit_ledger').doc() : null;
     final ledgerRepayRef = repayPortion > 0 ? custRef.collection('credit_ledger').doc() : null;
@@ -300,8 +313,10 @@ class CustomerCreditService {
   /// Ensures the customer document has a numeric `creditBalance` field.
   /// If the doc exists and lacks both `creditBalance` and legacy `khathaBalance`,
   /// this will set `creditBalance` to 0 (idempotent safe initialization).
-  static Future<void> ensureCreditField(String customerId) async {
-    final ref = _fs.collection('customers').doc(customerId);
+  static Future<void> ensureCreditField(String customerId, {String? storeId}) async {
+    final ref = (storeId == null)
+        ? _fs.collection('customers').doc(customerId)
+        : StoreRefs.of(storeId, fs: _fs).customers().doc(customerId);
     try {
       await _fs.runTransaction((tx) async {
         final snap = await tx.get(ref);

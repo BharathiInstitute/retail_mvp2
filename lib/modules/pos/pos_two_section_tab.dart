@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 import 'pos.dart';
 import 'pos_search_scan_fav_fixed.dart';
 import 'device_class_icon.dart';
@@ -59,7 +62,7 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
   }
 
   // --- Streams & data helpers ---
-  Stream<List<Product>> get _productStream => _inventoryRepo.streamProducts().map((docs) {
+  Stream<List<Product>> _productStream(String storeId) => _inventoryRepo.streamProducts(storeId: storeId).map((docs) {
         return docs
             .map((d) => Product(
                   sku: d.sku,
@@ -68,13 +71,13 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
                   stock: d.totalStock,
                   taxPercent: (d.taxPct ?? 0).toInt(),
                   barcode: d.barcode.isEmpty ? null : d.barcode,
-                  ref: FirebaseFirestore.instance.collection('inventory').doc(d.sku),
+                  ref: StoreRefs.of(storeId).products().doc(d.sku),
                 ))
             .toList();
       });
 
-  Stream<List<Customer>> get _customerStream => FirebaseFirestore.instance
-      .collection('customers')
+  Stream<List<Customer>> _customerStream(String storeId) => StoreRefs.of(storeId)
+      .customers()
       .snapshots()
       .map((s) {
         final list = s.docs.map((d) => Customer.fromDoc(d)).toList();
@@ -84,7 +87,9 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
 
   Future<void> _loadCustomersOnce() async {
     try {
-      final first = await _customerStream.first;
+      final sel = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+      if (sel == null) return;
+      final first = await _customerStream(sel).first;
       if (!mounted) return;
       setState(() {
         customers = [walkIn, ...first.where((c) => c.id != walkIn.id)];
@@ -229,7 +234,12 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
+    return Consumer(builder: (context, ref, _) {
+      final sel = ref.watch(selectedStoreIdProvider);
+      if (sel == null) {
+        return const Center(child: Text('Select a store to start POS'));
+      }
+      return LayoutBuilder(
       builder: (context, constraints) {
         final leftWidth = constraints.maxWidth * 0.52; // left section share
         final rightMin = 320.0;
@@ -240,7 +250,7 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
             SizedBox(
               width: leftWidth.clamp(360.0, 560.0),
               child: StreamBuilder<List<Product>>(
-                stream: _productStream,
+                stream: _productStream(sel),
                 builder: (context, snap) {
                   if (snap.hasError) {
                     return Center(child: Text('Error: ${snap.error}'));
@@ -367,14 +377,14 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
                 alignment: Alignment.topRight,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
-                  child: CombinedCartCheckoutCard(
+                    child: CombinedCartCheckoutCard(
                     minWidth: rightMin,
                     cart: cart,
                     heldOrders: heldOrders,
                     onHold: _holdCart,
                     onResumeSelect: _pickHeldOrder,
                     onClear: _clearCart,
-                    customersStream: _customerStream,
+                    customersStream: _customerStream(sel),
                     initialCustomers: customers,
                     selectedCustomer: selectedCustomer,
                     onCustomerSelected: (c) {
@@ -405,6 +415,7 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
         ]);
       },
     );
+    });
   }
 
   List<Product> _filteredProducts(List<Product> products) {
@@ -478,7 +489,13 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
                           const SizedBox(height: 8),
                           // Live list of customers (tap to select)
                           StreamBuilder<List<Customer>>(
-                            stream: _customerStream,
+                            stream: () {
+                              final s = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                              if (s == null) {
+                                return Stream<List<Customer>>.value(customers);
+                              }
+                              return _customerStream(s);
+                            }(),
                             initialData: customers,
                             builder: (ctx, snap) {
                               final all = [
@@ -613,11 +630,14 @@ class _PosTwoSectionTabPageState extends State<PosTwoSectionTabPage> {
             onPressed: () async {
               if (!(formKey.currentState?.validate() ?? false)) return;
               try {
-                final doc = await FirebaseFirestore.instance.collection('customers').add({
+                final sel = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                if (sel == null) throw StateError('No store selected');
+                final doc = await StoreRefs.of(sel).customers().add({
                   'name': nameCtrl.text.trim(),
                   'phone': phoneCtrl.text.trim(),
                   'email': emailCtrl.text.trim(),
                   'loyaltyPoints': 0,
+                  'rewardsPoints': 0,
                   'totalSpend': 0,
                   'status': 'walk-in',
                   'discountPercent': 0,

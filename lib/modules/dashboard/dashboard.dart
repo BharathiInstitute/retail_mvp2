@@ -159,7 +159,7 @@ class _LinePainter extends CustomPainter {
 	void paint(Canvas canvas, Size size) {
 		if (values.isEmpty) return;
 		final p = Paint()
-			..color = color.withValues(alpha: 0.9)
+			..color = color.withOpacity(0.9)
 			..strokeWidth = 2
 			..style = PaintingStyle.stroke;
 		final path = Path();
@@ -227,7 +227,7 @@ class _Bar extends StatelessWidget {
 					alignment: Alignment.bottomCenter,
 						child: Container(
 							height: 120 * value,
-							decoration: BoxDecoration(color: color.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(8)),
+								decoration: BoxDecoration(color: color.withOpacity(0.85), borderRadius: BorderRadius.circular(8)),
 							child: Center(
 								child: Builder(builder: (ctx) {
 									final cs = Theme.of(ctx).colorScheme;

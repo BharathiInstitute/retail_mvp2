@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth.dart';
 import 'Products/inventory_repository.dart';
 // Removed CSV export/import for Audit screen
-import 'Products/inventory.dart'; // access shared providers
+import 'Products/inventory.dart' show productsStreamProvider, inventoryRepoProvider, selectedStoreProvider; // access shared providers
 import 'Products/inventory_repository.dart' show ProductDoc; // product model
 import '../../core/theme/theme_utils.dart';
 
@@ -295,8 +295,11 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
       }
     });
     try {
-      if (user != null) {
+  if (user != null) {
+    final storeId = ref.read(selectedStoreProvider);
+    if (storeId == null) throw StateError('No store selected');
         await ref.read(inventoryRepoProvider).auditUpdateStock(
+      storeId: storeId,
               sku: p.sku,
               storeQty: result.store,
               warehouseQty: result.warehouse,
@@ -348,7 +351,10 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     });
     try{
       if(user != null){
+        final storeId = ref.read(selectedStoreProvider);
+        if (storeId == null) throw StateError('No store selected');
         await ref.read(inventoryRepoProvider).auditUpdateStock(
+          storeId: storeId,
           sku: p.sku,
           storeQty: result.store,
           warehouseQty: result.warehouse,

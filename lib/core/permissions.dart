@@ -3,6 +3,9 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'auth/auth.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:collection/collection.dart';
+import '../modules/stores/providers.dart';
 
 // Screen keys (final list)
 class ScreenKeys {
@@ -92,8 +95,47 @@ final ownerProvider = StreamProvider<bool>((ref) {
     // When signed out, immediately emit false
     return Stream<bool>.value(false);
   }
-  final doc = FirebaseFirestore.instance.collection('users').doc(auth.uid);
-  return doc.snapshots().map((s) => (s.data()?['role'] ?? '') == 'owner').handleError((_, __) => false);
+
+  // Merge two sources: custom claims and users/{uid}.role field
+  // Emit true if either indicates 'owner'.
+  final controller = StreamController<bool>();
+
+  bool closed = false;
+  void safeAdd(bool v) { if (!closed) controller.add(v); }
+
+  Future<void> recompute() async {
+    bool docOwner = false;
+    try {
+      final snap = await FirebaseFirestore.instance.collection('users').doc(auth.uid).get();
+      docOwner = (snap.data()?['role'] ?? '') == 'owner';
+    } catch (_) {}
+    bool claimOwner = false;
+    try {
+      final u = fb.FirebaseAuth.instance.currentUser;
+      if (u != null) {
+        final token = await u.getIdTokenResult(true);
+        final role = (token.claims?["role"])?.toString();
+        claimOwner = role == 'owner';
+      }
+    } catch (_) {}
+    safeAdd(docOwner || claimOwner);
+  }
+
+  final fsSub = FirebaseFirestore.instance.collection('users').doc(auth.uid).snapshots().listen((_) { recompute(); });
+  final idSub = fb.FirebaseAuth.instance.idTokenChanges().listen((_) { recompute(); });
+
+  // Kick off initial compute
+  // ignore: discarded_futures
+  recompute();
+
+  ref.onDispose(() {
+    closed = true;
+    fsSub.cancel();
+    idSub.cancel();
+    controller.close();
+  });
+
+  return controller.stream.distinct();
 });
 
 class PermissionAware extends ConsumerWidget {
@@ -106,7 +148,8 @@ class PermissionAware extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ownerAsync = ref.watch(ownerProvider);
-    if (ownerAsync.asData?.value == true) return child; // owner bypass
+    final isStoreOwner = ref.watch(storeOwnerProvider);
+    if (ownerAsync.asData?.value == true || isStoreOwner) return child; // owner or store-owner bypass
     final permsAsync = ref.watch(permissionsProvider);
     return permsAsync.when(
       data: (perms) => perms.can(screenKey, action) ? child : (fallback ?? const SizedBox.shrink()),
@@ -138,3 +181,12 @@ String? screenKeyForPath(String path) {
 bool allowInvoicesView(UserPermissions perms) {
   return perms.can(ScreenKeys.invSales, 'view') || perms.can(ScreenKeys.invPurchases, 'view');
 }
+
+// True when the user is the owner for the currently selected store
+final storeOwnerProvider = Provider<bool>((ref) {
+  final selId = ref.watch(selectedStoreIdProvider);
+  if (selId == null) return false;
+  final memberships = ref.watch(myMembershipsProvider).asData?.value ?? const [];
+  final m = memberships.firstWhereOrNull((e) => e.storeId == selId);
+  return (m?.role ?? '') == 'owner' && (m?.status ?? 'active') == 'active';
+});

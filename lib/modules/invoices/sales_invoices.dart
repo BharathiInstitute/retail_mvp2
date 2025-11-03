@@ -4,6 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 import 'package:retail_mvp2/core/theme/theme_utils.dart';
 import 'package:retail_mvp2/modules/pos/device_class_icon.dart';
 import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
@@ -268,9 +270,14 @@ class _InvoicesPageState extends ConsumerState<InvoicesListScreen> {
   }
 
   Stream<Invoice> _singleInvoiceStream(Invoice inv) {
-    final col = FirebaseFirestore.instance.collection('invoices');
+    final selStore = ref.read(selectedStoreIdProvider);
+    if (selStore == null) {
+      // No store selected; return the provided invoice without live updates.
+      return Stream<Invoice>.value(inv);
+    }
+    final col = StoreRefs.of(selStore).invoices();
     if (inv.docId != null) {
-      return col.doc(inv.docId).snapshots().where((d) => d.exists).map((d) {
+      return col.doc(inv.docId!).snapshots().where((d) => d.exists).map((d) {
         final data = d.data() as Map<String, dynamic>;
         return Invoice.fromFirestore(data, docId: d.id);
       });
@@ -292,16 +299,23 @@ class _InvoicesPageState extends ConsumerState<InvoicesListScreen> {
     if (status == 'Credit') c = app.info;
     return Chip(
       label: Text(status, style: context.texts.labelMedium),
-      backgroundColor: c.withValues(alpha: 0.15),
-      side: BorderSide(color: c.withValues(alpha: 0.4)),
+  backgroundColor: c.withOpacity(0.15),
+  side: BorderSide(color: c.withOpacity(0.4)),
     );
   }
 
   Future<void> _deleteInvoice(Invoice inv, BuildContext dialogCtx) async {
     try {
-      final col = FirebaseFirestore.instance.collection('invoices');
+      final selStore = ref.read(selectedStoreIdProvider);
+      if (selStore == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(content: Text('Select a store first')));
+        }
+        return;
+      }
+      final col = StoreRefs.of(selStore).invoices();
       if (inv.docId != null) {
-        await col.doc(inv.docId).delete();
+        await col.doc(inv.docId!).delete();
       } else {
         // Fallback to invoice number
         try {
@@ -649,7 +663,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                 onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
                 decoration: const InputDecoration(labelText: 'Tax Rate'),
                 iconEnabledColor: context.colors.onSurfaceVariant,
-                iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+                iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
               ),
             ),
             const SizedBox(width: 8),
@@ -724,7 +738,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
                   onChanged: (v) => setState(() => r.taxPercent = v ?? r.taxPercent),
                   decoration: const InputDecoration(labelText: 'Tax Rate'),
                   iconEnabledColor: context.colors.onSurfaceVariant,
-                  iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+                  iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
                 ),
               ),
               IconButton(
@@ -809,8 +823,8 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
     if (status == 'Credit') c = app.info;
     return Chip(
       label: Text(status, style: context.texts.labelSmall?.copyWith(color: context.colors.onSurface)),
-      backgroundColor: c.withValues(alpha: 0.15),
-      side: BorderSide(color: c.withValues(alpha: 0.4)),
+  backgroundColor: c.withOpacity(0.15),
+  side: BorderSide(color: c.withOpacity(0.4)),
     );
   }
 
@@ -845,7 +859,7 @@ class _InvoiceDetailsContentState extends State<InvoiceDetailsContent> {
         'lineTotal': total,
       });
     }
-    final ref = await findInvoiceDocRef(widget.invoice.invoiceNo, docId: widget.invoice.docId);
+  final ref = await findInvoiceDocRef(context, widget.invoice.invoiceNo, docId: widget.invoice.docId);
     await ref.update({
       'lines': lines,
       'subtotal': subtotal,
@@ -1020,8 +1034,12 @@ class _SalesItemRow {
   void dispose() { name.dispose(); qty.dispose(); price.dispose(); }
 }
 
-  Future<DocumentReference<Map<String, dynamic>>> findInvoiceDocRef(String invoiceNo, {String? docId}) async {
-  final col = FirebaseFirestore.instance.collection('invoices');
+  Future<DocumentReference<Map<String, dynamic>>> findInvoiceDocRef(BuildContext ctx, String invoiceNo, {String? docId}) async {
+  final selStore = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+  if (selStore == null) {
+    throw StateError('No store selected');
+  }
+  final col = StoreRefs.of(selStore).invoices();
   if (docId != null) return col.doc(docId);
   try {
     final q = await col.where('invoiceNumber', isEqualTo: invoiceNo).limit(1).get();
@@ -1034,13 +1052,15 @@ String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-
 
 // Paged controller provider for Sales Invoices
 final salesInvoicesPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<Invoice>>((ref) {
-  final base = FirebaseFirestore.instance
-      .collection('invoices')
-      .orderBy('timestampMs', descending: true);
+  final selStore = ref.watch(selectedStoreIdProvider);
+  final Query<Map<String, dynamic>>? base = (selStore == null)
+      ? null
+      : StoreRefs.of(selStore).invoices().orderBy('timestampMs', descending: true);
 
   final controller = PagedListController<Invoice>(
     pageSize: 100,
     loadPage: (cursor) async {
+      if (base == null) return (<Invoice>[], null);
       final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
       final (items, next) = await fetchFirestorePage<Invoice>(
         base: base,

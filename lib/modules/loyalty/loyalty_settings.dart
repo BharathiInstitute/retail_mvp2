@@ -14,6 +14,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
 // ------------------ Data Models ------------------
 
@@ -100,10 +103,8 @@ class LoyaltySettings {
 // ------------------ Repository ------------------
 
 class LoyaltySettingsRepository {
-  final FirebaseFirestore _fs;
-  LoyaltySettingsRepository(this._fs);
-
-  DocumentReference<Map<String, dynamic>> get _doc => _fs.collection('settings').doc('loyalty_config');
+  final DocumentReference<Map<String, dynamic>> _doc;
+  LoyaltySettingsRepository(this._doc);
 
   Future<LoyaltySettings> fetch() async {
     final snap = await _doc.get();
@@ -123,14 +124,14 @@ class LoyaltySettingsRepository {
 
 // ------------------ Screen ------------------
 
-class LoyaltySettingsScreen extends StatefulWidget {
+class LoyaltySettingsScreen extends ConsumerStatefulWidget {
   const LoyaltySettingsScreen({super.key});
   @override
-  State<LoyaltySettingsScreen> createState() => _LoyaltySettingsScreenState();
+  ConsumerState<LoyaltySettingsScreen> createState() => _LoyaltySettingsScreenState();
 }
 
-class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
-  final _repo = LoyaltySettingsRepository(FirebaseFirestore.instance);
+class _LoyaltySettingsScreenState extends ConsumerState<LoyaltySettingsScreen> {
+  LoyaltySettingsRepository? _repo;
 
   bool _loading = true;
   String? _error;
@@ -150,13 +151,27 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    // Defer load until we can read storeId from provider in didChangeDependencies
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_repo == null) {
+      final sid = ref.read(selectedStoreIdProvider);
+      if (sid != null) {
+        final doc = StoreRefs.of(sid).loyaltySettings().doc('config');
+        _repo = LoyaltySettingsRepository(doc);
+        _load();
+      }
+    }
   }
 
   Future<void> _load() async {
     setState(()=> _loading = true);
     try {
-      final s = await _repo.fetch();
+      if (_repo == null) throw Exception('No store selected');
+      final s = await _repo!.fetch();
       _original = s;
       _current = s;
       _bindControllers(s);
@@ -233,7 +248,8 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
     if(!_dirty) return;
     setState(()=> _saving = true);
     try {
-      await _repo.save(_current!);
+      if (_repo == null) throw Exception('No store selected');
+      await _repo!.save(_current!);
       _original = _current; // snapshot baseline
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Loyalty settings updated')));
     } catch(e){
@@ -513,7 +529,7 @@ class _LoyaltySettingsScreenState extends State<LoyaltySettingsScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.05),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.05),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children:[
         Text(

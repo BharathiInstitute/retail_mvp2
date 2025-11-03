@@ -6,6 +6,8 @@ import 'package:retail_mvp2/core/theme/theme_utils.dart';
 import 'package:retail_mvp2/core/paging/paged_list_controller.dart';
 import 'package:retail_mvp2/core/firebase/firestore_paging.dart';
 import 'package:retail_mvp2/core/loading/page_loader_overlay.dart';
+import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/modules/stores/providers.dart';
 
 /// Purchase types supported in the dialog
 enum PurchaseType { noBill, gst, import, creditNote, debitNote }
@@ -34,16 +36,16 @@ Future<void> showEditPurchaseInvoiceDialog(BuildContext context, String docId, M
   );
 }
 
-class PurchaseInvoiceDialog extends StatefulWidget {
+class PurchaseInvoiceDialog extends ConsumerStatefulWidget {
   final String? existingId;
   final Map<String, dynamic>? existingData;
   const PurchaseInvoiceDialog({super.key, this.existingId, this.existingData});
 
   @override
-  State<PurchaseInvoiceDialog> createState() => _PurchaseInvoiceDialogState();
+  ConsumerState<PurchaseInvoiceDialog> createState() => _PurchaseInvoiceDialogState();
 }
 
-class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
+class _PurchaseInvoiceDialogState extends ConsumerState<PurchaseInvoiceDialog> {
   // Core state
   PurchaseType type = PurchaseType.noBill;
   final TextEditingController supplierCtrl = TextEditingController();
@@ -108,7 +110,11 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       customsCtrl.text = '${summary['customs'] ?? 0}';
     }
     // Load inventory products stream and keep a handle so we can cancel on dispose
-    _invSub = FirebaseFirestore.instance.collection('inventory').snapshots().listen((snap) {
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) {
+      if (mounted) setState(() => _products = const <_ProductLite>[]);
+    } else {
+      _invSub = StoreRefs.of(sid).products().snapshots().listen((snap) {
       final prods = snap.docs.map((d) {
         final m = d.data();
         double toD(v) => v is int ? v.toDouble() : (v is double ? v : double.tryParse(v?.toString() ?? '') ?? 0);
@@ -121,9 +127,10 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       }).where((p) => p.name.isNotEmpty).toList();
       prods.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (mounted) setState(() => _products = prods);
-    }, onError: (_) {
-      // Ignore transient errors (e.g., during logout teardown on web)
-    });
+      }, onError: (_) {
+        // Ignore transient errors (e.g., during logout teardown on web)
+      });
+    }
   }
 
   // Summary fields
@@ -384,14 +391,18 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   Future<void> _deleteInvoice() async {
     final id = widget.existingId;
     if (id == null || id.isEmpty) return;
-    final col = FirebaseFirestore.instance.collection('purchase_invoices');
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) throw Exception('No store selected');
+    final col = StoreRefs.of(sid).purchaseInvoices();
     await col.doc(id).delete();
     // Note: We are not auto-reversing inventory stock here to avoid unintended side effects.
     // If required later, implement a safe reversal flow with audit and proper confirmation.
   }
 
   Future<void> _saveToFirestore(Map<String, dynamic> data) async {
-    final col = FirebaseFirestore.instance.collection('purchase_invoices');
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) throw Exception('No store selected');
+    final col = StoreRefs.of(sid).purchaseInvoices();
     if (widget.existingId != null) {
       final doc = col.doc(widget.existingId);
       data['id'] = widget.existingId;
@@ -425,14 +436,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       skuQty.update(sku, (v) => v + qty.round(), ifAbsent: () => qty.round());
     }
     if (skuQty.isEmpty) return;
-    final db = FirebaseFirestore.instance;
+  final db = FirebaseFirestore.instance;
+  final sid = ref.read(selectedStoreIdProvider);
+  if (sid == null) return; // cannot adjust without store context
     const warehouseLoc = 'Warehouse';
     const storeLoc = 'Store'; // preserved if present
     // Run sequential transactions (could be parallel but Firestore limits 500 ops anyway)
     for (final entry in skuQty.entries) {
       final sku = entry.key;
       final addQty = entry.value;
-      final docRef = db.collection('inventory').doc(sku);
+      final docRef = StoreRefs.of(sid, fs: db).products().doc(sku);
       await db.runTransaction((txn) async {
         final snap = await txn.get(docRef);
         if (!snap.exists) return; // silently skip unknown sku
@@ -465,7 +478,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
 
   Future<String> _generateInvoiceNo() async {
     // Use a single counters document with per-type fields.
-    final countersRef = FirebaseFirestore.instance.collection('meta').doc('purchase_counters');
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null) throw Exception('No store selected');
+    final countersRef = FirebaseFirestore.instance.collection('stores').doc(sid).collection('meta').doc('purchase_counters');
     return FirebaseFirestore.instance.runTransaction((txn) async {
       final snap = await txn.get(countersRef);
       final typeKey = _purchaseTypeLabel(type).replaceAll(' ', '_').toLowerCase();
@@ -503,6 +518,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       );
 
   Widget _buildHeader() {
+    final sid = ref.watch(selectedStoreIdProvider);
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -519,12 +535,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             onChanged: (v) => setState(() => type = v ?? type),
             decoration: const InputDecoration(labelText: 'Purchase Type'),
             iconEnabledColor: context.colors.onSurfaceVariant,
-            iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+            iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
           ),
         ),
         SizedBox(
           width: 240,
-          child: _SupplierDropdown(controller: supplierCtrl, autofocus: true),
+          child: sid == null
+              ? TextFormField(
+                  controller: supplierCtrl,
+                  decoration: const InputDecoration(labelText: 'Supplier (select store)'))
+              : _SupplierDropdown(controller: supplierCtrl, storeId: sid, autofocus: true),
         ),
         SizedBox(
           width: 180,
@@ -556,7 +576,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
             onChanged: (v) => setState(() => paymentMode = v ?? paymentMode),
             decoration: const InputDecoration(labelText: 'Payment Mode'),
             iconEnabledColor: context.colors.onSurfaceVariant,
-            iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+            iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
           ),
         ),
       ],
@@ -648,7 +668,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 onChanged: (v) => setState(() => r.gstRate = v ?? r.gstRate),
                 decoration: const InputDecoration(labelText: 'Tax Rate'),
                 iconEnabledColor: context.colors.onSurfaceVariant,
-                iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+                iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
               ),
             ),
           const SizedBox(width: 8),
@@ -730,7 +750,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               onChanged: (v) => setState(() => r.gstRate = v ?? r.gstRate),
               decoration: const InputDecoration(labelText: 'Tax Rate'),
               iconEnabledColor: context.colors.onSurfaceVariant,
-              iconDisabledColor: context.colors.onSurface.withValues(alpha: 0.38),
+              iconDisabledColor: context.colors.onSurface.withOpacity(0.38),
             ),
           const SizedBox(height: 8),
           Row(
@@ -843,7 +863,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -925,7 +945,8 @@ String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-
 class _SupplierDropdown extends StatefulWidget {
   final TextEditingController controller;
   final bool autofocus;
-  const _SupplierDropdown({required this.controller, this.autofocus = false});
+  final String storeId;
+  const _SupplierDropdown({required this.controller, required this.storeId, this.autofocus = false});
   @override
   State<_SupplierDropdown> createState() => _SupplierDropdownState();
 }
@@ -934,7 +955,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('suppliers').orderBy('name').snapshots(),
+      stream: StoreRefs.of(widget.storeId).suppliers().orderBy('name').snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
           return TextFormField(
@@ -964,7 +985,7 @@ class _SupplierDropdownState extends State<_SupplierDropdown> {
             decoration: const InputDecoration(labelText: 'Supplier Name'),
             hint: const Text('Select supplier'),
             iconEnabledColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            iconDisabledColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
+            iconDisabledColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
           );
       },
     );
@@ -1002,6 +1023,7 @@ class PurchasesInvoicesScreen extends ConsumerWidget {
   const PurchasesInvoicesScreen({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final sid = ref.watch(selectedStoreIdProvider);
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(12.0),
@@ -1019,7 +1041,11 @@ class PurchasesInvoicesScreen extends ConsumerWidget {
               ),
             ]),
             const SizedBox(height: 12),
-            const Expanded(child: _PurchasesList()),
+            Expanded(
+              child: sid == null
+                  ? const Center(child: Text('Select a store to view purchase invoices'))
+                  : const _PurchasesList(),
+            ),
           ],
         ),
       ),
@@ -1280,13 +1306,15 @@ class PurchaseListItem {
 }
 
 final purchaseInvoicesPagedControllerProvider = ChangeNotifierProvider.autoDispose<PagedListController<PurchaseListItem>>((ref) {
-  final base = FirebaseFirestore.instance
-      .collection('purchase_invoices')
-      .orderBy('timestampMs', descending: true);
+  final sid = ref.watch(selectedStoreIdProvider);
+  final Query<Map<String, dynamic>>? base = (sid == null)
+      ? null
+      : StoreRefs.of(sid).purchaseInvoices().orderBy('timestampMs', descending: true);
 
   final controller = PagedListController<PurchaseListItem>(
     pageSize: 100,
     loadPage: (cursor) async {
+      if (base == null) return (<PurchaseListItem>[], null);
       final after = cursor as DocumentSnapshot<Map<String, dynamic>>?;
       final (items, next) = await fetchFirestorePage<PurchaseListItem>(
         base: base,

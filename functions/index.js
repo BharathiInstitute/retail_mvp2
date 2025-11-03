@@ -8,8 +8,12 @@ try { vision = require('@google-cloud/vision'); } catch(e){ console.warn('vision
 try { ({ VertexAI } = require('@google-cloud/vertexai')); } catch(e){ console.warn('vertexai module unavailable (optional):', e.message); }
 
 admin.initializeApp();
-// Load additional simple invoice workflow functions (added separately)
-try { require('./invoice_simple'); } catch (e) { console.warn('invoice_simple not loaded', e?.message || e); }
+// Load and re-export additional modules so their triggers are visible to the Functions deploy scanner
+try { Object.assign(exports, require('./invoice_simple')); } catch (e) { console.warn('invoice_simple not loaded', e?.message || e); }
+// Stores module callables
+try { Object.assign(exports, require('./stores')); } catch (e) { console.warn('stores module not loaded', e?.message || e); }
+// Migration utilities (owner-only callables)
+try { Object.assign(exports, require('./migration')); } catch (e) { console.warn('migration module not loaded', e?.message || e); }
 
 /* Environment config options:
  * Generic SMTP:
