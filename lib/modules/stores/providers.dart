@@ -77,7 +77,13 @@ final selectedStorePersistInitProvider = Provider<void>((ref) {
   // Load on first use
   Future<void>(() async {
     final prefs = await SharedPreferences.getInstance();
-  final projectId = Firebase.apps.isNotEmpty ? Firebase.app().options.projectId : 'default';
+  String projectId;
+  try {
+    // Avoid accessing Firebase.apps which can cause web interop issues.
+    projectId = Firebase.app().options.projectId;
+  } catch (_) {
+    projectId = 'default';
+  }
     final newKey = user == null ? 'selectedStoreId_${projectId}_anonymous' : 'selectedStoreId_${projectId}_${user.uid}';
     // Migration: read legacy key once and move it under project-scoped key
     final legacyKey = user == null ? 'selectedStoreId_anonymous' : 'selectedStoreId_${user.uid}';
@@ -96,7 +102,13 @@ final selectedStorePersistInitProvider = Provider<void>((ref) {
   // Persist on change
   ref.listen<String?>(selectedStoreIdProvider, (prev, next) async {
     final prefs = await SharedPreferences.getInstance();
-  final projectId = Firebase.apps.isNotEmpty ? Firebase.app().options.projectId : 'default';
+  String projectId;
+  try {
+    // Avoid accessing Firebase.apps which can cause web interop issues.
+    projectId = Firebase.app().options.projectId;
+  } catch (_) {
+    projectId = 'default';
+  }
     final key = user == null ? 'selectedStoreId_${projectId}_anonymous' : 'selectedStoreId_${projectId}_${user.uid}';
     if (next == null) {
       await prefs.remove(key);

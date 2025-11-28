@@ -1,0 +1,17 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Product images
+    match /stores/{storeId}/products/{sku}/{imageFile} {
+      allow read: if true; // Public read (adjust if needed)
+      allow write: if request.auth != null
+        && request.resource.size < 5 * 1024 * 1024 // <5MB
+        && request.resource.contentType.matches(/^image\/(jpeg|png|gif|webp)$/)
+        && imageFile.matches(/^image_\d+\.(jpg|jpeg|png|gif|webp)$/);
+    }
+    // Default: only allow reads elsewhere
+    match /{allPaths=**} {
+      allow read: if true;
+    }
+  }
+}

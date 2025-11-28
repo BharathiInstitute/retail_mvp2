@@ -31,8 +31,18 @@ class InventoryRepository {
     String? barcode,
     String? description,
     List<String>? variants,
+    List<String>? imageUrls,
     double? mrpPrice,
     double? costPrice,
+    num? discountPct,
+    String? category,
+    String? subCategory,
+    String? quantityPerUnit,
+    double? height,
+    double? width,
+    double? weight,
+    double? volumeMl,
+    int? minStock,
     bool isActive = true,
     int storeQty = 0,
     int warehouseQty = 0,
@@ -61,7 +71,17 @@ class InventoryRepository {
         'mrpPrice': mrpPrice,
         'costPrice': costPrice,
         'taxPct': taxPct,
+        'discountPct': discountPct,
         'variants': (variants ?? const <String>[]).where((v) => v.trim().isNotEmpty).toList(),
+        'imageUrls': (imageUrls ?? const <String>[]).where((u) => u.trim().isNotEmpty).toList(),
+        'height': height,
+        'width': width,
+        'weight': weight,
+        'volumeMl': volumeMl,
+        'minStock': minStock,
+        'category': category,
+        'subCategory': subCategory,
+        'quantityPerUnit': quantityPerUnit,
         'categoryId': null,
         'supplierId': null,
         'isActive': isActive,
@@ -79,8 +99,18 @@ class InventoryRepository {
     String? barcode,
     String? description,
     List<String>? variants,
+    List<String>? imageUrls,
     double? mrpPrice,
     double? costPrice,
+    num? discountPct,
+    String? category,
+    String? subCategory,
+    String? quantityPerUnit,
+    double? height,
+    double? width,
+    double? weight,
+    double? volumeMl,
+    int? minStock,
     bool? isActive,
   }) async {
     final doc = StoreRefs.of(storeId, fs: _db).products().doc(sku);
@@ -96,9 +126,21 @@ class InventoryRepository {
     put('description', description);
     put('mrpPrice', mrpPrice);
     put('costPrice', costPrice);
+    put('discountPct', discountPct);
+    put('height', height);
+    put('width', width);
+    put('weight', weight);
+    put('volumeMl', volumeMl);
+    put('minStock', minStock);
+    put('category', category);
+    put('subCategory', subCategory);
+    put('quantityPerUnit', quantityPerUnit);
     put('isActive', isActive);
     if (variants != null) {
       data['variants'] = variants.where((v) => v.trim().isNotEmpty).toList();
+    }
+    if (imageUrls != null) {
+      data['imageUrls'] = imageUrls.where((u) => u.trim().isNotEmpty).toList();
     }
     if (data.isNotEmpty) await doc.update(data);
   }
@@ -355,7 +397,17 @@ class ProductDoc {
   final double? mrpPrice;
   final double? costPrice;
   final num? taxPct;
+  final num? discountPct;
+  final String? category;
+  final String? subCategory;
+  final String? quantityPerUnit;
+  final int? minStock;
   final List<String> variants;
+  final double? height;
+  final double? width;
+  final double? weight;
+  final double? volumeMl;
+  final List<String> imageUrls;
   final String? categoryId;
   final String? supplierId;
   final bool isActive;
@@ -375,7 +427,17 @@ class ProductDoc {
     this.mrpPrice,
     this.costPrice,
     this.taxPct,
+    this.discountPct,
+    this.category,
+    this.subCategory,
+    this.quantityPerUnit,
+    this.minStock,
     required this.variants,
+    this.height,
+    this.width,
+    this.weight,
+    this.volumeMl,
+    required this.imageUrls,
     this.categoryId,
     this.supplierId,
     required this.isActive,
@@ -414,7 +476,19 @@ class ProductDoc {
       mrpPrice: m['mrpPrice'] == null ? null : toDoubleLocal(m['mrpPrice']),
       costPrice: m['costPrice'] == null ? null : toDoubleLocal(m['costPrice']),
       taxPct: m['taxPct'] as num?,
+      discountPct: m['discountPct'] as num?,
+      category: m['category'] as String?,
+      subCategory: m['subCategory'] as String?,
+      quantityPerUnit: m['quantityPerUnit'] as String?,
+      minStock: (m['minStock'] is int)
+          ? m['minStock'] as int
+          : (m['minStock'] is num ? (m['minStock'] as num).toInt() : null),
       variants: (m['variants'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[],
+      height: m['height'] == null ? null : toDoubleLocal(m['height']),
+      width: m['width'] == null ? null : toDoubleLocal(m['width']),
+      weight: m['weight'] == null ? null : toDoubleLocal(m['weight']),
+      volumeMl: m['volumeMl'] == null ? null : toDoubleLocal(m['volumeMl']),
+      imageUrls: (m['imageUrls'] as List?)?.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList() ?? const <String>[],
       categoryId: m['categoryId'] as String?,
       supplierId: m['supplierId'] as String?,
       isActive: (m['isActive'] ?? true) as bool,

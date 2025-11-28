@@ -38,6 +38,7 @@ dependencies:
   flutter_riverpod: ^2.5.1
   # Routing
   go_router: ^16.3.0
+  image_picker: ^1.0.7
   # Firebase (placeholders; initialization TODO)
   firebase_core: ^4.2.0
   firebase_auth: ^6.1.1

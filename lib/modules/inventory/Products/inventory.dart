@@ -1,8 +1,9 @@
 // ignore_for_file: use_build_context_synchronously
 // Rebuilt Inventory module root screen (clean version)
-
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart';
+import '../web_image_picker_stub.dart' if (dart.library.html) '../web_image_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/store_scoped_refs.dart';
@@ -21,6 +22,8 @@ import 'barcodes_pdf.dart';
 import '../import_products_screen.dart' show ImportProductsScreen;
 import 'inventory_sheet_page.dart';
 import 'invoice_analysis_page.dart';
+import '../category_screen.dart';
+import 'product_image_uploader.dart';
 
 // -------------------- Inventory Root Screen (Tabs) --------------------
 class InventoryScreen extends ConsumerWidget {
@@ -262,6 +265,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
               OutlinedButton.icon(
                 style: compactOutlined,
                 onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CategoryScreen()),
+                ),
+                icon: const Icon(Icons.category_outlined),
+                label: const Text('Categories'),
+              ),
+              OutlinedButton.icon(
+                style: compactOutlined,
+                onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const InvoiceAnalysisPage()),
                 ),
                 icon: const Icon(Icons.analytics_outlined),
@@ -424,12 +435,21 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       sku: result.sku,
       name: result.name,
       unitPrice: result.unitPrice,
-      taxPct: result.taxPct,
+      costPrice: result.costPrice,
+      discountPct: result.discountPct,
+      category: result.category,
+      subCategory: result.subCategory,
+      quantityPerUnit: result.quantityPerUnit,
       barcode: result.barcode,
       description: result.description,
       variants: result.variants,
+        imageUrls: result.imageUrls,
       mrpPrice: result.mrpPrice,
-      costPrice: result.costPrice,
+      height: result.height,
+      width: result.width,
+      weight: result.weight,
+      volumeMl: result.volumeMl,
+      minStock: result.minStock,
       isActive: result.isActive,
       storeQty: result.storeQty,
       warehouseQty: result.warehouseQty,
@@ -461,6 +481,10 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       variants: result.variants,
       mrpPrice: result.mrpPrice,
       costPrice: result.costPrice,
+      height: result.height,
+      width: result.width,
+      weight: result.weight,
+      volumeMl: result.volumeMl,
       isActive: result.isActive,
     );
     ref.read(productsPagedControllerProvider).resetAndLoad();
@@ -642,29 +666,49 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
 class _AddProductResult {
   final String sku;
   final String name;
-  final double unitPrice;
-  final num? taxPct;
+  // Pricing
+  final double unitPrice; // selling price
+  final double? costPrice; // buying price
+  final num? discountPct;
+  // Classification
+  final String? category;
+  final String? subCategory;
+  final String? quantityPerUnit;
   final String? barcode;
   final String? description;
   final List<String> variants;
   final double? mrpPrice;
-  final double? costPrice;
+  final double? height;
+  final double? width;
+  final double? weight;
+    final double? volumeMl;
+  final int? minStock;
   final bool isActive;
   final int storeQty;
   final int warehouseQty;
+  final List<String> imageUrls;
   _AddProductResult({
     required this.sku,
     required this.name,
     required this.unitPrice,
-    this.taxPct,
+    this.costPrice,
+    this.discountPct,
+    this.category,
+    this.subCategory,
+    this.quantityPerUnit,
     this.barcode,
     this.description,
     required this.variants,
     this.mrpPrice,
-    this.costPrice,
+    this.height,
+    this.width,
+    this.weight,
+      this.volumeMl,
+    this.minStock,
     required this.isActive,
     required this.storeQty,
     required this.warehouseQty,
+    required this.imageUrls,
   });
 }
 
@@ -674,25 +718,364 @@ class _AddProductDialog extends StatefulWidget {
   State<_AddProductDialog> createState() => _AddProductDialogState();
 }
 
+class _PickedImage {
+  final String name;
+  final Uint8List bytes;
+  _PickedImage({required this.name, required this.bytes});
+}
+
 class _AddProductDialogState extends State<_AddProductDialog> {
   final _formKey = GlobalKey<FormState>();
   final _sku = TextEditingController();
   final _name = TextEditingController();
-  final _unitPrice = TextEditingController(text: '0');
-  final _taxPct = TextEditingController();
+  // New fields per request
+  final _buyingPrice = TextEditingController();
+  final _sellingPrice = TextEditingController();
+  final _discountPct = TextEditingController();
+  final _category = TextEditingController();
+  final _subCategory = TextEditingController();
+  final _quantityPerUnit = TextEditingController();
+  final _minStock = TextEditingController();
   final _barcode = TextEditingController();
   final _description = TextEditingController();
+  // Legacy controllers kept for compatibility but not shown
+  final _unitPrice = TextEditingController(text: '0');
+  final _taxPct = TextEditingController();
   final _variants = TextEditingController();
   final _mrpPrice = TextEditingController();
   final _costPrice = TextEditingController();
+  final _height = TextEditingController();
+  final _width = TextEditingController();
+  final _weight = TextEditingController();
+  final _volumeMl = TextEditingController();
+  final _quantity = TextEditingController();
   final _storeQty = TextEditingController(text: '0');
   final _warehouseQty = TextEditingController(text: '0');
   bool _isActive = true;
+  final List<_PickedImage?> _pickedImages = List<_PickedImage?>.filled(3, null);
+  final ImagePicker _picker = ImagePicker();
+  bool _uploading = false;
+  // Upload error message (read in UI for inline display)
+  // ignore: unused_field
+  String? _uploadError;
+  List<double> _progress = [0,0,0];
+
+  int _firstEmptySlot() {
+    for (int i = 0; i < 3; i++) {
+      if (_pickedImages[i] == null) return i;
+    }
+    return 0;
+  }
+
+  void _removeImage(int index) async {
+    if (_pickedImages[index] == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text('Remove Image', style: Theme.of(ctx).textTheme.titleMedium?.copyWith(color: Theme.of(ctx).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (Theme.of(ctx).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(ctx).colorScheme.onSurface),
+          child: const Text('Do you want to remove this image?'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      setState(() => _pickedImages[index] = null);
+    }
+  }
+
+  void _showImagePreview(int index) {
+    final data = _pickedImages[index];
+    if (data == null) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: Text(data.name, style: Theme.of(ctx).textTheme.titleMedium?.copyWith(color: Theme.of(ctx).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        content: DefaultTextStyle(
+          style: (Theme.of(ctx).textTheme.bodyMedium ?? const TextStyle()).copyWith(color: Theme.of(ctx).colorScheme.onSurface),
+          child: SizedBox(
+            width: 400,
+            child: Image.memory(data.bytes, fit: BoxFit.contain),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _removeImage(index);
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _promptText(BuildContext context, String title, {String? initial}) async {
+    final ctrl = TextEditingController(text: initial ?? '');
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Enter text'),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  CollectionReference<Map<String, dynamic>> _catsCol(String storeId) =>
+      FirebaseFirestore.instance.collection('stores').doc(storeId).collection('categories');
+
+  Future<void> _scanBarcode() async {
+    // Placeholder for future barcode scanning implementation
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Scan Barcode: coming soon')),
+    );
+  }
+
+  String _skuPrefixFromCategory(String category) {
+    final letters = category.replaceAll(RegExp('[^A-Za-z]'), '').toUpperCase();
+    final padded = ('${letters}XXXX');
+    return padded.substring(0, 4);
+  }
+
+  Future<void> _generateSku() async {
+    final cat = _category.text.trim();
+    if (cat.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter or select a Category first')),
+      );
+      return;
+    }
+    final sid = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+    if (sid == null || sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a store first')),
+      );
+      return;
+    }
+    try {
+      final col = _catsCol(sid);
+      DocumentReference<Map<String, dynamic>> docRef;
+      final existing = await col.where('name', isEqualTo: cat).limit(1).get();
+      if (existing.docs.isEmpty) {
+        docRef = await col.add({'name': cat, 'subcategories': <String>[], 'counter': 0});
+      } else {
+        docRef = existing.docs.first.reference;
+      }
+      final nextNum = await FirebaseFirestore.instance.runTransaction<int>((txn) async {
+        final snap = await txn.get(docRef);
+        final current = (snap.data()?['counter'] as int?) ?? 0;
+        final next = current + 1;
+        txn.update(docRef, {'counter': next});
+        return next;
+      });
+      final prefix = _skuPrefixFromCategory(cat);
+      final serial = nextNum.toString().padLeft(4, '0');
+      setState(() => _sku.text = '$prefix$serial');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to generate SKU: $e')));
+    }
+  }
+
+  void _generateBarcodeFromSku() {
+    final s = _sku.text.trim();
+    if (s.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter or generate SKU first')));
+      return;
+    }
+    final ean = _ean13FromSku(s);
+    setState(() => _barcode.text = ean);
+  }
+
+  String _ean13FromSku(String sku) {
+    // Build 12-digit payload: 4 letters -> 8 digits (A=01..Z=26), plus 4-digit serial from trailing digits
+    final lettersOnly = sku.replaceAll(RegExp('[^A-Za-z]'), '').toUpperCase();
+    final fourLetters = ('${lettersOnly}AAAA').substring(0, 4);
+    final letterDigits = fourLetters
+        .split('')
+        .map((ch) {
+          final code = ch.codeUnitAt(0) - 64; // A->1
+          final safe = (code >= 1 && code <= 26) ? code : 0;
+          return safe.toString().padLeft(2, '0');
+        })
+        .join();
+    final serialMatch = RegExp(r'(\d+)$').firstMatch(sku);
+    final serial4 = (serialMatch?.group(1) ?? '0001');
+    final serial = serial4.length >= 4 ? serial4.substring(serial4.length - 4) : serial4.padLeft(4, '0');
+    final payload = '$letterDigits$serial'; // 12 digits
+    final check = _ean13CheckDigit(payload);
+    return '$payload$check';
+  }
+
+  int _ean13CheckDigit(String twelveDigits) {
+    if (twelveDigits.length != 12) {
+      // Fallback: pad or trim to 12 digits
+      final digitsOnly = twelveDigits.replaceAll(RegExp('[^0-9]'), '');
+      final padded = ('${digitsOnly}000000000000').substring(0, 12);
+      twelveDigits = padded;
+    }
+    int sum = 0;
+    for (int i = 0; i < 12; i++) {
+      final d = int.parse(twelveDigits[i]);
+      // positions are 1-indexed; even positions (i%2==1) weighted by 3
+      sum += (i % 2 == 1) ? (3 * d) : d;
+    }
+    final mod = sum % 10;
+    return (10 - mod) % 10;
+  }
+
+  Future<void> _quickAddCategory() async {
+    final text = await _promptText(context, 'Add category', initial: _category.text.trim().isEmpty ? null : _category.text.trim());
+    if (text == null || text.trim().isEmpty) return;
+    final sid = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+    if (sid == null || sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store first')));
+      return;
+    }
+    final name = text.trim();
+    try {
+      final existing = await _catsCol(sid).where('name', isEqualTo: name).limit(1).get();
+      if (existing.docs.isEmpty) {
+        await _catsCol(sid).add({'name': name, 'subcategories': <String>[]});
+      }
+      setState(() => _category.text = name);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add category: $e')));
+    }
+  }
+
+  Future<void> _quickAddSubCategory() async {
+    if (_category.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter or add a Category first')),
+      );
+      return;
+    }
+    final text = await _promptText(context, 'Add sub category', initial: _subCategory.text.trim().isEmpty ? null : _subCategory.text.trim());
+    if (text == null || text.trim().isEmpty) return;
+    final sid = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+    if (sid == null || sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store first')));
+      return;
+    }
+    final name = text.trim();
+    try {
+      final q = await _catsCol(sid).where('name', isEqualTo: _category.text.trim()).limit(1).get();
+      if (q.docs.isEmpty) {
+        // If category not found, create it first
+        final doc = await _catsCol(sid).add({'name': _category.text.trim(), 'subcategories': <String>[]});
+        await _catsCol(sid).doc(doc.id).update({'subcategories': FieldValue.arrayUnion([name])});
+      } else {
+        await _catsCol(sid).doc(q.docs.first.id).update({'subcategories': FieldValue.arrayUnion([name])});
+      }
+      setState(() => _subCategory.text = name);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add subcategory: $e')));
+    }
+  }
+
+  
+
+  Future<void> _pickImageShowOptions([int? slot]) async {
+    final index = slot ?? _firstEmptySlot();
+    if (!kIsWeb) {
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Camera'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open),
+                title: const Text('Browse Files'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (source == null) return;
+      final XFile? img = await _picker.pickImage(source: source);
+      if (!mounted) return;
+      if (img != null) {
+        final bytes = await img.readAsBytes();
+        setState(() => _pickedImages[index] = _PickedImage(name: img.name, bytes: bytes));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image selected: ${img.name}')),
+        );
+      }
+    } else {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Camera'),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open),
+                title: const Text('Browse Files'),
+                onTap: () => Navigator.pop(ctx, 'files'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (choice == null) return;
+      WebPickedImage? webImg = choice == 'camera' ? await pickImageFromCameraWeb() : await pickImageFromFilesWeb();
+      if (!mounted) return;
+      if (webImg != null) {
+        setState(() => _pickedImages[index] = _PickedImage(name: webImg.name, bytes: webImg.bytes));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image selected: ${webImg.name}')),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
     _sku.dispose();
     _name.dispose();
+    _buyingPrice.dispose();
+    _sellingPrice.dispose();
+    _discountPct.dispose();
+    _category.dispose();
+    _subCategory.dispose();
+    _quantityPerUnit.dispose();
+    _minStock.dispose();
     _unitPrice.dispose();
     _taxPct.dispose();
     _barcode.dispose();
@@ -700,6 +1083,11 @@ class _AddProductDialogState extends State<_AddProductDialog> {
     _variants.dispose();
     _mrpPrice.dispose();
     _costPrice.dispose();
+    _height.dispose();
+    _width.dispose();
+    _weight.dispose();
+    _volumeMl.dispose();
+    _quantity.dispose();
     _storeQty.dispose();
     _warehouseQty.dispose();
     super.dispose();
@@ -708,12 +1096,125 @@ class _AddProductDialogState extends State<_AddProductDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(
-        'Add Product',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Add Product',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              TextButton(onPressed: _pickImageShowOptions, child: const Text('Upload Image')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Preview strip directly below title
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(3, (i) {
+                final data = _pickedImages[i];
+                final uploadingThis = _uploading && data != null && _progress[i] < 1.0;
+                final failed = _uploadError != null;
+                return Padding(
+                  padding: EdgeInsets.only(right: i < 2 ? 8.0 : 0.0),
+                  child: InkWell(
+                    onTap: () => (_uploading) ? null : (data == null ? _pickImageShowOptions(i) : _showImagePreview(i)),
+                    child: Stack(
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          ),
+                          child: data == null
+                              ? Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Icon(Icons.add_a_photo, size: 20),
+                                    SizedBox(height: 4),
+                                    Text('Image', style: TextStyle(fontSize: 11)),
+                                  ],
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(data.bytes, fit: BoxFit.cover, width: 80, height: 80),
+                                ),
+                        ),
+                        if (data != null && !_uploading)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minHeight: 24, minWidth: 24),
+                                icon: const Icon(Icons.close, size: 16, color: Colors.white),
+                                onPressed: () => _removeImage(i),
+                                tooltip: 'Remove',
+                              ),
+                            ),
+                          ),
+                        if (uploadingThis)
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black38,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 42,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const CircularProgressIndicator(strokeWidth: 3),
+                                      const SizedBox(height: 6),
+                                      Text('${(_progress[i]*100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: Colors.white)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (data != null && _uploading && _progress[i] >= 1.0 && _uploadError == null)
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            child: Icon(Icons.check_circle, color: Colors.green.shade400, size: 20),
+                          ),
+                        if (data != null && failed)
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            child: const Icon(Icons.error, color: Colors.redAccent, size: 20),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
             ),
+          ),
+          if (_uploadError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6.0),
+              child: Text('Upload failed: $_uploadError', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+            ),
+        ],
       ),
       content: DefaultTextStyle(
         style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
@@ -726,21 +1227,173 @@ class _AddProductDialogState extends State<_AddProductDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _sku, decoration: const InputDecoration(labelText: 'SKU'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                      controller: _sku,
+                      decoration: InputDecoration(
+                        labelText: 'SKU',
+                        suffixIcon: IconButton(
+                          tooltip: 'Generate SKU',
+                          icon: const Icon(Icons.auto_awesome),
+                          onPressed: _generateSku,
+                        ),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                      controller: _barcode,
+                      decoration: InputDecoration(
+                        labelText: 'Barcode',
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Generate from SKU',
+                              icon: const Icon(Icons.auto_awesome),
+                              onPressed: _generateBarcodeFromSku,
+                            ),
+                            IconButton(
+                              tooltip: 'Scan Barcode',
+                              icon: const Icon(Icons.qr_code_scanner_outlined),
+                              onPressed: _scanBarcode,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ]),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
+                Builder(builder: (ctx) {
+                  final storeId = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
+                  if (storeId == null || storeId.isEmpty) {
+                    // Fallback to simple inputs if no store is selected
+                    return Row(children: [
+                      Expanded(
+                        child: TextFormField(
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                          controller: _category,
+                          decoration: InputDecoration(
+                            labelText: 'Category',
+                            suffixIcon: IconButton(
+                              tooltip: 'Add Category',
+                              icon: const Icon(Icons.add_circle_outline),
+                              onPressed: _quickAddCategory,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                          controller: _subCategory,
+                          decoration: InputDecoration(
+                            labelText: 'Sub Category',
+                            suffixIcon: IconButton(
+                              tooltip: 'Add Sub Category',
+                              icon: const Icon(Icons.add_circle_outline),
+                              onPressed: _quickAddSubCategory,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ]);
+                  }
+                  final stream = FirebaseFirestore.instance
+                      .collection('stores')
+                      .doc(storeId)
+                      .collection('categories')
+                      .orderBy('name')
+                      .snapshots();
+                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: stream,
+                    builder: (ctx, snap) {
+                      final cats = <String>[];
+                      final subsByCat = <String, List<String>>{};
+                      if (snap.hasData) {
+                        for (final d in snap.data!.docs) {
+                          final data = d.data();
+                          final name = (data['name'] ?? '') as String;
+                          cats.add(name);
+                          subsByCat[name] = List<String>.from((data['subcategories'] ?? const <dynamic>[]) as List<dynamic>);
+                        }
+                      }
+                      final selCat = _category.text.trim().isEmpty ? null : _category.text.trim();
+                      final subs = selCat == null ? const <String>[] : (subsByCat[selCat] ?? const <String>[]);
+                      return Row(children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: 'Category',
+                              suffixIcon: IconButton(
+                                tooltip: 'Add Category',
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: _quickAddCategory,
+                              ),
+                            ),
+                            value: (selCat != null && cats.contains(selCat)) ? selCat : null,
+                            items: cats.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                            onChanged: (v) => setState(() {
+                              _category.text = v ?? '';
+                              _subCategory.clear();
+                            }),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: 'Sub Category',
+                              suffixIcon: IconButton(
+                                tooltip: 'Add Sub Category',
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: _quickAddSubCategory,
+                              ),
+                            ),
+                            value: _subCategory.text.trim().isEmpty ? null : _subCategory.text.trim(),
+                            items: subs.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                            onChanged: subs.isEmpty
+                                ? null
+                                : (v) => setState(() {
+                                      _subCategory.text = v ?? '';
+                                    }),
+                          ),
+                        ),
+                      ]);
+                    },
+                  );
+                }),
                 Row(children: [
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _buyingPrice, decoration: const InputDecoration(labelText: 'Buying Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _sellingPrice, decoration: const InputDecoration(labelText: 'Selling Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                 ]),
                 Row(children: [
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _discountPct, decoration: const InputDecoration(labelText: 'Discount %'), keyboardType: const TextInputType.numberWithOptions(decimal: true)) ),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _quantityPerUnit, decoration: const InputDecoration(labelText: 'Unit / Count'))),
                 ]),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
+                Row(children: [
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _height, decoration: const InputDecoration(labelText: 'Height (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _width, decoration: const InputDecoration(labelText: 'Width (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _weight, decoration: const InputDecoration(labelText: 'Weight (g)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _volumeMl, decoration: const InputDecoration(labelText: 'Volume (ml)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                ]),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _minStock, decoration: const InputDecoration(labelText: 'Min Stock'), keyboardType: TextInputType.number),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
+                // Removed single-file indicator; use image boxes above
                 const SizedBox(height: 8),
                 CheckboxListTile(value: _isActive, onChanged: (v) => setState(() => _isActive = v ?? true), title: const Text('Active')),
                 Row(children: [
@@ -756,26 +1409,82 @@ class _AddProductDialogState extends State<_AddProductDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        // Upload button moved to title
         FilledButton(
-          onPressed: () {
+          onPressed: _uploading ? null : () async {
             if (!(_formKey.currentState?.validate() ?? false)) return;
+            if (_sku.text.trim().isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SKU required before saving')));
+              return;
+            }
+            setState(() { _uploadError = null; });
+            final parsedQty = int.tryParse(_quantity.text.trim());
+            int storeQty = int.tryParse(_storeQty.text.trim()) ?? 0;
+            int warehouseQty = int.tryParse(_warehouseQty.text.trim()) ?? 0;
+            if ((storeQty == 0 && warehouseQty == 0) && (parsedQty != null && parsedQty > 0)) {
+              storeQty = parsedQty;
+            }
+            final buyingPrice = double.tryParse(_buyingPrice.text.trim());
+            final sellingPrice = double.tryParse(_sellingPrice.text.trim()) ?? 0;
+            final discountPct = _discountPct.text.trim().isEmpty ? null : num.tryParse(_discountPct.text.trim());
+            final minStock = _minStock.text.trim().isEmpty ? null : int.tryParse(_minStock.text.trim());
+            final parsedHeight = _height.text.trim().isEmpty ? null : double.tryParse(_height.text.trim());
+            final parsedWidth = _width.text.trim().isEmpty ? null : double.tryParse(_width.text.trim());
+            // Prepare images
+            final imageBytes = _pickedImages.whereType<_PickedImage>().map((e) => e.bytes).toList();
+            List<String> imageUrls = const [];
+            if (imageBytes.isNotEmpty) {
+              final storeId = ProviderScope.containerOf(context).read(selectedStoreIdProvider);
+              if (storeId == null || storeId.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select store before uploading images')));
+                return;
+              }
+              setState(() { _uploading = true; _progress = [0,0,0]; });
+              try {
+                imageUrls = await uploadProductImages(
+                  storeId: storeId,
+                  sku: _sku.text.trim(),
+                  images: imageBytes,
+                  onProgress: (index, prog) { setState(() { _progress[index] = prog; }); },
+                );
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Uploaded ${imageUrls.length} image(s) successfully')));
+              } catch (e) {
+                setState(() { _uploadError = e.toString(); _uploading = false; });
+                final msg = e.toString();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Image upload failed. Tap to view details'), duration: const Duration(seconds: 4), action: SnackBarAction(label: 'Details', onPressed: () {
+                  showDialog(context: context, builder: (_) => AlertDialog(title: const Text('Upload Errors'), content: SingleChildScrollView(child: Text(msg)), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]));
+                })));
+                return; // abort save product to allow user to retry
+              } finally {
+                setState(() { _uploading = false; });
+              }
+            }
             final result = _AddProductResult(
               sku: _sku.text.trim(),
               name: _name.text.trim(),
-              unitPrice: double.tryParse(_unitPrice.text.trim()) ?? 0,
-              taxPct: _taxPct.text.trim().isEmpty ? null : num.tryParse(_taxPct.text.trim()),
+              unitPrice: sellingPrice,
+              costPrice: buyingPrice,
+              discountPct: discountPct,
+              category: _category.text.trim().isEmpty ? null : _category.text.trim(),
+              subCategory: _subCategory.text.trim().isEmpty ? null : _subCategory.text.trim(),
+              quantityPerUnit: _quantityPerUnit.text.trim().isEmpty ? null : _quantityPerUnit.text.trim(),
               barcode: _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
               description: _description.text.trim().isEmpty ? null : _description.text.trim(),
-              variants: _variants.text.split(';').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
-              mrpPrice: _mrpPrice.text.trim().isEmpty ? null : double.tryParse(_mrpPrice.text.trim()),
-              costPrice: _costPrice.text.trim().isEmpty ? null : double.tryParse(_costPrice.text.trim()),
+              variants: const <String>[],
+              mrpPrice: null,
+              height: parsedHeight,
+              width: parsedWidth,
+              weight: _weight.text.trim().isEmpty ? null : double.tryParse(_weight.text.trim()),
+              volumeMl: _volumeMl.text.trim().isEmpty ? null : double.tryParse(_volumeMl.text.trim()),
+              minStock: minStock,
               isActive: _isActive,
-              storeQty: int.tryParse(_storeQty.text.trim()) ?? 0,
-              warehouseQty: int.tryParse(_warehouseQty.text.trim()) ?? 0,
+              storeQty: storeQty,
+              warehouseQty: warehouseQty,
+              imageUrls: imageUrls,
             );
             Navigator.pop(context, result);
           },
-          child: const Text('Save'),
+          child: _uploading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
         ),
       ],
     );
@@ -791,6 +1500,10 @@ class _EditProductResult {
   final List<String>? variants;
   final double? mrpPrice;
   final double? costPrice;
+  final double? height;
+  final double? width;
+  final double? weight;
+  final double? volumeMl;
   final bool? isActive;
   _EditProductResult({
     this.name,
@@ -801,6 +1514,10 @@ class _EditProductResult {
     this.variants,
     this.mrpPrice,
     this.costPrice,
+    this.height,
+    this.width,
+    this.weight,
+    this.volumeMl,
     this.isActive,
   });
 }
@@ -822,6 +1539,10 @@ class _EditProductDialogState extends State<_EditProductDialog> {
   late final TextEditingController _variants;
   late final TextEditingController _mrpPrice;
   late final TextEditingController _costPrice;
+  late final TextEditingController _height;
+  late final TextEditingController _width;
+  late final TextEditingController _weight;
+  late final TextEditingController _volumeMl;
   late bool _isActive;
 
   @override
@@ -836,6 +1557,10 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     _variants = TextEditingController(text: p.variants.join(';'));
     _mrpPrice = TextEditingController(text: p.mrpPrice?.toString() ?? '');
     _costPrice = TextEditingController(text: p.costPrice?.toString() ?? '');
+    _height = TextEditingController(text: p.height?.toString() ?? '');
+    _width = TextEditingController(text: p.width?.toString() ?? '');
+    _weight = TextEditingController(text: p.weight?.toString() ?? '');
+    _volumeMl = TextEditingController(text: p.volumeMl?.toString() ?? '');
     _isActive = p.isActive;
   }
 
@@ -849,6 +1574,10 @@ class _EditProductDialogState extends State<_EditProductDialog> {
     _variants.dispose();
     _mrpPrice.dispose();
     _costPrice.dispose();
+    _height.dispose();
+    _width.dispose();
+    _weight.dispose();
+    _volumeMl.dispose();
     super.dispose();
   }
 
@@ -885,6 +1614,15 @@ class _EditProductDialogState extends State<_EditProductDialog> {
                   const SizedBox(width: 12),
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
                 ]),
+                Row(children: [
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _height, decoration: const InputDecoration(labelText: 'Height (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _width, decoration: const InputDecoration(labelText: 'Width (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _weight, decoration: const InputDecoration(labelText: 'Weight (g)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _volumeMl, decoration: const InputDecoration(labelText: 'Volume (ml)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                ]),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
                 const SizedBox(height: 8),
@@ -908,6 +1646,10 @@ class _EditProductDialogState extends State<_EditProductDialog> {
               variants: _variants.text.trim().isEmpty ? null : _variants.text.split(';').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
               mrpPrice: _mrpPrice.text.trim().isEmpty ? null : double.tryParse(_mrpPrice.text.trim()),
               costPrice: _costPrice.text.trim().isEmpty ? null : double.tryParse(_costPrice.text.trim()),
+              height: _height.text.trim().isEmpty ? null : double.tryParse(_height.text.trim()),
+              width: _width.text.trim().isEmpty ? null : double.tryParse(_width.text.trim()),
+              weight: _weight.text.trim().isEmpty ? null : double.tryParse(_weight.text.trim()),
+              volumeMl: _volumeMl.text.trim().isEmpty ? null : double.tryParse(_volumeMl.text.trim()),
               isActive: _isActive,
             );
             Navigator.pop(context, result);
