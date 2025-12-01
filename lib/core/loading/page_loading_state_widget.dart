@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/theme_utils.dart';
 
 /// Global blocking overlay for initial page loads.
 ///
@@ -34,7 +35,7 @@ class PageLoaderOverlay extends StatelessWidget {
             children: [
               const CircularProgressIndicator(),
               if (message != null) ...[
-                const SizedBox(height: 12),
+                context.gapVMd,
                 Text(message!, style: Theme.of(context).textTheme.bodyMedium),
               ],
             ],
@@ -48,9 +49,9 @@ class PageLoaderOverlay extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.error_outline),
-            const SizedBox(height: 8),
+            context.gapVSm,
             Text('$error'),
-            const SizedBox(height: 8),
+            context.gapVSm,
             if (onRetry != null)
               FilledButton(onPressed: onRetry, child: const Text('Retry')),
           ],
