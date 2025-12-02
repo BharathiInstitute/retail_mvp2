@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'data_layout.dart';
+import 'database_migration_mode.dart';
 
 /// Centralized helpers for store-scoped collection references.
 /// During migration with DataLayout.dual, prefer subcollections and allow callers

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/theme_utils.dart';
+import '../theme/theme_extension_helpers.dart';
 
 /// Shimmer effect for skeleton loaders
 class ShimmerEffect extends StatefulWidget {

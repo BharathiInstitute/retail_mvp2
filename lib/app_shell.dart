@@ -2,43 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 // Auth providers
-import 'core/auth/auth.dart';
+import 'core/auth/auth_repository_and_provider.dart';
 // Permissions
-import 'core/permissions.dart';
-import 'core/app_keys.dart';
-import 'core/theme/app_theme.dart';
-import 'core/theme/theme_utils.dart';
-import 'core/theme/font_controller.dart';
+import 'core/user_permissions_provider.dart';
+import 'core/global_navigator_keys.dart';
+import 'core/theme/theme_config_and_providers.dart';
+import 'core/theme/theme_extension_helpers.dart';
+import 'core/theme/font_preference_controller.dart';
+import 'core/widgets/display_settings_dialog.dart';
+import 'core/loading/fullscreen_loading_overlay.dart';
 
 // Module screens used by the router
-import 'modules/dashboard/dashboard.dart';
+import 'modules/dashboard/dashboard_screen.dart';
 import 'modules/pos/pos_ui.dart';
-import 'modules/pos/pos_two_section_tab.dart';
+import 'modules/pos/pos_desktop_split_layout.dart';
 import 'modules/pos/pos_cashier.dart';
-import 'modules/pos/pos_mobile.dart';
+import 'modules/pos/pos_mobile_layout.dart';
 import 'modules/inventory/Products/inventory.dart';
-import 'modules/inventory/stock_movements_screen.dart';
-import 'modules/inventory/suppliers_screen.dart';
-import 'modules/inventory/alerts_screen.dart';
-import 'modules/inventory/audit_screen.dart';
-import 'modules/invoices/sales_invoices.dart';
-import 'modules/sales/sales_tab.dart';
-import 'modules/invoices/purchse_invoice.dart';
+import 'modules/inventory/stock_transfer_screen.dart';
+import 'modules/inventory/supplier_management_screen.dart';
+import 'modules/inventory/inventory_alerts_screen.dart';
+import 'modules/inventory/inventory_audit_screen.dart';
+import 'modules/invoices/sales_invoices_screen.dart';
+// import 'modules/sales/sales_tab.dart'; // Commented out - file deleted
+import 'modules/invoices/purchase_invoices_screen.dart';
 // Removed legacy invoices tabs; using standalone screens
-import 'modules/crm/crm.dart';
-import 'modules/accounting/accounting.dart';
-import 'modules/loyalty/loyalty.dart';
-import 'modules/admin/permissions_overview_tab.dart';
-import 'modules/admin/users_tab.dart';
-import 'modules/admin/permissions_tab.dart';
-import 'modules/admin/migration_tools.dart';
-import 'modules/stores/my_stores_screen.dart';
-import 'modules/stores/create_store_screen.dart';
+import 'modules/crm/crm_screen.dart';
+import 'modules/accounting/accounting_screen.dart';
+import 'modules/loyalty/loyalty_screen.dart';
+import 'modules/admin/admin_permissions_overview_screen.dart';
+import 'modules/admin/admin_users_screen.dart';
+import 'modules/admin/admin_permissions_screen.dart';
+import 'modules/admin/admin_migration_tools_screen.dart';
+import 'modules/pos/printing/receipt_format_screen.dart';
+import 'modules/stores/store_selector_screen.dart';
+import 'modules/stores/store_create_screen.dart';
 import 'modules/stores/providers.dart';
 // Auth screens
-import 'core/auth/login_screen.dart';
-import 'core/auth/register_screen.dart';
-import 'core/auth/forgot_password_screen.dart';
+import 'core/auth/login_page.dart';
+import 'core/auth/register_page.dart';
+import 'core/auth/forgot_password_page.dart';
 
 // ===== Inlined app state (from previous app_state.dart) =====
 
@@ -258,7 +261,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/invoices/sales-tab',
               name: 'invoices-sales-tab',
-              pageBuilder: (context, state) => const NoTransitionPage(child: SalesTabPage()),
+              pageBuilder: (context, state) => const NoTransitionPage(child: SalesInvoicesScreen()), // Changed from SalesTabPage
             ),
           ]),
           
@@ -318,6 +321,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               pageBuilder: (context, state) => const NoTransitionPage(child: AdminUsersPage()),
             ),
           ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/admin/print-settings',
+              name: 'admin-print-settings',
+              pageBuilder: (context, state) => NoTransitionPage(child: ReceiptSettingsScreen()),
+            ),
+          ]),
         ],
       ),
     ],
@@ -354,7 +364,7 @@ class LoadingView extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const CircularProgressIndicator(),
-            const SizedBox(height: 12),
+            context.gapVMd,
             Text(message),
           ],
         ),
@@ -371,11 +381,11 @@ class ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, size: 36),
-            const SizedBox(height: 8),
+            Icon(Icons.error_outline, size: context.sizes.iconXl),
+            context.gapVSm,
             Text(message),
             if (onRetry != null) ...[
-              const SizedBox(height: 8),
+              context.gapVSm,
               FilledButton(onPressed: onRetry, child: const Text('Retry')),
             ]
           ],
@@ -394,14 +404,16 @@ class MyApp extends ConsumerWidget {
     ref.watch(selectedStorePersistInitProvider);
     final router = ref.watch(appRouterProvider);
     final fontKey = ref.watch(fontProvider);
+    final density = ref.watch(uiDensityProvider);
     return MaterialApp.router(
       title: 'Retail ERP MVP',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: scaffoldMessengerKey,
       themeMode: ref.watch(themeModeProvider),
-      theme: AppTheme.light(context, fontKey: fontKey),
-      darkTheme: AppTheme.dark(context, fontKey: fontKey),
+      theme: AppTheme.light(context, fontKey: fontKey, density: density),
+      darkTheme: AppTheme.dark(context, fontKey: fontKey, density: density),
       routerConfig: router,
+      builder: (context, child) => GlobalLoadingOverlay(child: child ?? const SizedBox.shrink()),
     );
   }
 }
@@ -436,7 +448,7 @@ class AppShell extends ConsumerWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(width: 12),
+          context.gapHMd,
           // Current store indicator + quick switch
           Consumer(builder: (context, ref, _) {
             final selId = ref.watch(selectedStoreIdProvider);
@@ -447,11 +459,11 @@ class AppShell extends ConsumerWidget {
                 : (selDoc.asData?.value?.name ?? 'Loading…');
             return OutlinedButton.icon(
               onPressed: () => GoRouter.of(context).go('/stores'),
-              icon: Icon(Icons.store_mall_directory_outlined, size: 18, color: context.colors.primary),
+              icon: Icon(Icons.store_mall_directory_outlined, size: context.sizes.iconSm, color: context.colors.primary),
               label: Row(children: [
                 Text(name, overflow: TextOverflow.ellipsis),
                 if (isLoading) ...[
-                  const SizedBox(width: 8),
+                  context.gapHSm,
                   const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
                 ],
               ]),
@@ -467,7 +479,7 @@ class AppShell extends ConsumerWidget {
             final storesAsync = ref.watch(myStoresProvider);
             return PopupMenuButton<String>(
               tooltip: 'Switch store',
-              icon: const Icon(Icons.arrow_drop_down_circle_outlined, size: 20),
+              icon: Icon(Icons.arrow_drop_down_circle_outlined, size: context.sizes.iconMd),
               onSelected: (id) {
                 ref.read(selectedStoreIdProvider.notifier).state = id;
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Store switched')));
@@ -483,10 +495,10 @@ class AppShell extends ConsumerWidget {
                                 value: e.store.id,
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.store_outlined, size: 16),
-                                    const SizedBox(width: 8),
+                                    Icon(Icons.store_outlined, size: context.sizes.iconSm),
+                                    context.gapHSm,
                                     Expanded(child: Text(e.store.name, overflow: TextOverflow.ellipsis)),
-                                    const SizedBox(width: 8),
+                                    context.gapHSm,
                                     Text(e.role, style: Theme.of(context).textTheme.labelSmall),
                                   ],
                                 ),
@@ -500,10 +512,34 @@ class AppShell extends ConsumerWidget {
           }),
         ]),
         actions: [
+          // Density quick toggle
+          Consumer(builder: (context, ref, _) {
+            final density = ref.watch(uiDensityProvider);
+            return IconButton(
+              onPressed: () {
+                // Cycle through densities
+                final next = switch (density) {
+                  UIDensity.compact => UIDensity.normal,
+                  UIDensity.normal => UIDensity.comfortable,
+                  UIDensity.comfortable => UIDensity.compact,
+                };
+                ref.read(uiDensityProvider.notifier).set(next);
+              },
+              icon: Icon(density.icon),
+              tooltip: 'UI Density: ${density.label}',
+            );
+          }),
+          // Theme toggle
           IconButton(
             onPressed: () => ref.read(themeModeProvider.notifier).cycle(),
             icon: const Icon(Icons.brightness_6),
             tooltip: 'Toggle theme',
+          ),
+          // Full settings dialog
+          IconButton(
+            onPressed: () => SettingsDialog.show(context),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Display Settings',
           ),
         ],
       ),
@@ -602,6 +638,7 @@ class _SideMenu extends ConsumerWidget {
       final canAccess = screenKey == null ? true : (isOwner || perms.can(screenKey, 'view') || route.startsWith('/invoices') && allowInvoicesView(perms));
       final allowed = canAccess || isStoreOwner; // store owner bypass
       final selected = currentPath == route || (route != '/' && currentPath.startsWith(route));
+      final sizes = context.sizes;
       final tile = ListTile(
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
@@ -611,7 +648,7 @@ class _SideMenu extends ConsumerWidget {
             : const EdgeInsets.symmetric(horizontal: 8),
         leading: Icon(
           icon,
-          size: 20,
+          size: sizes.iconMd,
           color: selected
               ? context.colors.primary
               : (allowed ? context.colors.onSurfaceVariant : context.colors.onSurfaceVariant),
@@ -626,7 +663,7 @@ class _SideMenu extends ConsumerWidget {
               )
             : null,
         trailing: extended && !allowed
-            ? Icon(Icons.lock_outline, size: 16, color: context.colors.onSurfaceVariant)
+            ? Icon(Icons.lock_outline, size: sizes.iconSm, color: context.colors.onSurfaceVariant)
             : null,
         selected: selected,
         onTap: () {
@@ -643,13 +680,14 @@ class _SideMenu extends ConsumerWidget {
 
     Widget groupHeader(String label, IconData icon, StateProvider<bool> expandState, {bool disabled = false}) {
       final expanded = ref.watch(expandState);
+      final sizes = context.sizes;
       final tile = ListTile(
         dense: true,
         visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
         contentPadding: extended ? const EdgeInsets.symmetric(horizontal: 12) : const EdgeInsets.symmetric(horizontal: 8),
         leading: Icon(
           icon,
-          size: 20,
+          size: sizes.iconMd,
           color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
         ),
         title: extended
@@ -664,7 +702,7 @@ class _SideMenu extends ConsumerWidget {
         trailing: extended
             ? Icon(
                 expanded ? Icons.expand_less : Icons.expand_more,
-                size: 18,
+                size: sizes.iconSm,
                 color: disabled ? context.colors.onSurfaceVariant : context.colors.onSurface,
               )
             : null,
@@ -672,6 +710,12 @@ class _SideMenu extends ConsumerWidget {
       );
       return extended ? tile : Tooltip(message: label, child: tile);
     }
+
+    // Determine screen type for responsive menu items
+    final screenType = Breakpoints.of(context);
+    final isDesktop = screenType == ScreenType.desktop;
+    final isTablet = screenType == ScreenType.tablet;
+    final isMobile = screenType == ScreenType.mobile;
 
     List<Widget> children = [
       if (user != null) header(),
@@ -682,10 +726,13 @@ class _SideMenu extends ConsumerWidget {
   if (isOwner || isStoreOwner || (perms != UserPermissions.empty && (canView(ScreenKeys.posMain) || canView(ScreenKeys.posCashier)))) ...[
         groupHeader('POS', Icons.point_of_sale_outlined, posMenuExpandedProvider),
         if (ref.watch(posMenuExpandedProvider)) ...[
-          item('POS Main', Icons.store_mall_directory_outlined, '/pos', screenKey: ScreenKeys.posMain, indent: 1),
-          item('POS Tab', Icons.tablet_mac_outlined, '/pos-tab', screenKey: ScreenKeys.posMain, indent: 1),
-          item('POS Mobile', Icons.phone_iphone_outlined, '/pos-mobile', screenKey: ScreenKeys.posMain, indent: 1),
-          item('POS Cashier', Icons.account_circle_outlined, '/pos-cashier', screenKey: ScreenKeys.posCashier, indent: 1),
+          // Desktop: show POS Main & Cashier
+          if (isDesktop) item('POS Main', Icons.store_mall_directory_outlined, '/pos', screenKey: ScreenKeys.posMain, indent: 1),
+          if (isDesktop) item('POS Cashier', Icons.account_circle_outlined, '/pos-cashier', screenKey: ScreenKeys.posCashier, indent: 1),
+          // Tablet: show POS Tab only
+          if (isTablet) item('POS Tab', Icons.tablet_mac_outlined, '/pos-tab', screenKey: ScreenKeys.posMain, indent: 1),
+          // Mobile: show POS Mobile only
+          if (isMobile) item('POS Mobile', Icons.phone_iphone_outlined, '/pos-mobile', screenKey: ScreenKeys.posMain, indent: 1),
         ],
       ],
 
@@ -705,8 +752,13 @@ class _SideMenu extends ConsumerWidget {
   if (isOwner || isStoreOwner || (perms != UserPermissions.empty && (isOwner || allowInvoicesView(perms)))) ...[
         groupHeader('Invoices', Icons.receipt_long_outlined, invoicesMenuExpandedProvider),
         if (ref.watch(invoicesMenuExpandedProvider)) ...[
-          item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
-          item('Sales (Tab)', Icons.tablet_mac_outlined, '/invoices/sales-tab', screenKey: ScreenKeys.invSales, indent: 1),
+          // Desktop: show Sales (desktop version)
+          if (isDesktop) item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
+          // Tablet: show Sales Tab
+          if (isTablet) item('Sales', Icons.tablet_mac_outlined, '/invoices/sales-tab', screenKey: ScreenKeys.invSales, indent: 1),
+          // Mobile: show Sales (mobile-friendly version)
+          if (isMobile) item('Sales', Icons.trending_up_outlined, '/invoices/sales', screenKey: ScreenKeys.invSales, indent: 1),
+          // Purchases shown on all screen sizes
           item('Purchases', Icons.shopping_cart_outlined, '/invoices/purchases', screenKey: ScreenKeys.invPurchases, indent: 1),
         ],
       ],
@@ -721,6 +773,7 @@ class _SideMenu extends ConsumerWidget {
         if (ref.watch(adminMenuExpandedProvider)) ...[
           item('Permissions', Icons.security_outlined, '/admin', screenKey: ScreenKeys.admin, indent: 1),
           item('Users', Icons.group_outlined, '/admin/users', screenKey: ScreenKeys.admin, indent: 1),
+          item('Receipt Settings', Icons.receipt_long_outlined, '/admin/print-settings', screenKey: ScreenKeys.admin, indent: 1),
           if (isOwner) item('Migration', Icons.auto_fix_high_outlined, '/admin/migration', screenKey: ScreenKeys.admin, indent: 1),
         ],
       ],
@@ -734,7 +787,7 @@ class _SideMenu extends ConsumerWidget {
             visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
             minLeadingWidth: 0,
             contentPadding: extended ? const EdgeInsets.symmetric(horizontal: 12) : const EdgeInsets.symmetric(horizontal: 8),
-            leading: Icon(Icons.logout, size: 20, color: context.colors.onSurface),
+            leading: Icon(Icons.logout, size: context.sizes.iconMd, color: context.colors.onSurface),
             title: extended
                 ? Text(
                     'Logout',

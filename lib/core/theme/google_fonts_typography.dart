@@ -9,6 +9,14 @@ import 'package:google_fonts/google_fonts.dart';
 class AppTypography {
   AppTypography._();
 
+  /// Supported fonts map (key -> display name)
+  static const Map<String, String> supportedFonts = {
+    'inter': 'Inter',
+    'roboto': 'Roboto',
+    'poppins': 'Poppins',
+    'montserrat': 'Montserrat',
+  };
+
   /// Build the base text theme using Google Fonts.
   ///
   /// Defaults to Inter, but you can switch to any supported

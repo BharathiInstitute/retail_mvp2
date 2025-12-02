@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/core/firestore_store_collections.dart';
 
 /// Result of a credit mutation.
 class CreditOpResult {

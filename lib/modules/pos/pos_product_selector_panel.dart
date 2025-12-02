@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import '../../core/theme/theme_extension_helpers.dart';
 import 'pos.dart';
 
 // Clean, compilable replacement for POS search + scan card and related widgets
@@ -39,10 +39,22 @@ class PosSearchAndScanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final cs = Theme.of(context).colorScheme;
+    return Container(
       margin: EdgeInsets.zero,
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: context.radiusLg,
+        boxShadow: [
+          BoxShadow(
+            color: cs.shadow.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        padding: const EdgeInsets.all(16.0),
         child: Align(
           alignment: Alignment.centerLeft,
           child: ConstrainedBox(
@@ -55,23 +67,19 @@ class PosSearchAndScanCard extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: customerSearchController,
-                          decoration: const InputDecoration(
-                            hintText: 'Search customer',
-                            prefixIcon: Icon(Icons.person_search_outlined),
-                            isDense: true,
-                            floatingLabelBehavior: FloatingLabelBehavior.never,
-                          ),
+                        child: _ModernSearchField(
+                          controller: customerSearchController!,
+                          hint: 'Search customer',
+                          icon: Icons.person_search_rounded,
                           onChanged: (_) => onCustomerQueryChanged?.call(),
                         ),
                       ),
                       if (customerSelector != null) ...[
-                        const SizedBox(width: 8),
-                        Flexible(flex: 0, child: customerSelector!),
+                        context.gapHMd,
+                        customerSelector!,
                       ],
-                      const SizedBox(width: 8),
-                      _ScannerToggle(
+                      context.gapHMd,
+                      _ModernScannerToggle(
                         active: scannerActive,
                         connected: scannerConnected,
                         onChanged: onScannerToggle,
@@ -83,57 +91,60 @@ class PosSearchAndScanCard extends StatelessWidget {
                       ((customerSearchController?.text.trim() ?? '').length >= 2) &&
                       ((customerSearchController?.text.trim() ?? '') != (selectedCustomerName ?? '').trim()))
                     Container(
-                      margin: const EdgeInsets.only(top: 6.0, bottom: 6.0),
+                      margin: const EdgeInsets.only(top: 8.0, bottom: 8.0),
                       constraints: const BoxConstraints(maxHeight: 180),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Theme.of(context).dividerColor),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Theme.of(context).colorScheme.surface,
+                        border: Border.all(color: cs.outlineVariant),
+                        borderRadius: context.radiusMd,
+                        color: cs.surface,
                       ),
-                      child: ListView.builder(
-                        itemCount: customerSuggestions!.length,
-                        itemBuilder: (_, i) {
-                          final c = customerSuggestions![i];
-                          return ListTile(
-                            leading: const Icon(Icons.person_outline),
-                            dense: true,
-                            title: Text(c.name, overflow: TextOverflow.ellipsis),
-                            onTap: () {
-                              customerSearchController!.text = c.name;
-                              onCustomerSelected?.call(c);
-                              FocusScope.of(context).unfocus();
-                            },
-                          );
-                        },
+                      child: ClipRRect(
+                        borderRadius: context.radiusMd,
+                        child: ListView.builder(
+                          itemCount: customerSuggestions!.length,
+                          itemBuilder: (_, i) {
+                            final c = customerSuggestions![i];
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: cs.primaryContainer,
+                                child: Icon(Icons.person_rounded, color: cs.onPrimaryContainer, size: 20),
+                              ),
+                              dense: true,
+                              title: Text(c.name, overflow: TextOverflow.ellipsis),
+                              onTap: () {
+                                customerSearchController!.text = c.name;
+                                onCustomerSelected?.call(c);
+                                FocusScope.of(context).unfocus();
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
+                  context.gapVMd,
                 ],
                 Row(
                   children: [
                     if (barcodeTrailing != null) ...[
-                      Flexible(flex: 0, child: barcodeTrailing!),
-                      const SizedBox(width: 8),
+                      barcodeTrailing!,
+                      context.gapHMd,
                     ],
                     Expanded(
-                      child: TextField(
+                      child: _ModernSearchField(
                         controller: searchController,
-                        decoration: const InputDecoration(
-                          hintText: 'Barcode / SKU or Search',
-                          prefixIcon: Icon(Icons.qr_code_scanner),
-                          isDense: true,
-                          floatingLabelBehavior: FloatingLabelBehavior.never,
-                        ),
+                        hint: 'Barcode / SKU or Search',
+                        icon: Icons.qr_code_scanner_rounded,
                         onSubmitted: (_) => onBarcodeSubmitted(),
                         onChanged: (_) => onSearchChanged(),
                       ),
                     ),
                     if (customerSearchController == null && customerSelector != null) ...[
-                      const SizedBox(width: 8),
-                      Flexible(flex: 0, child: customerSelector!),
+                      context.gapHMd,
+                      customerSelector!,
                     ],
                     if (customerSearchController == null) ...[
-                      const SizedBox(width: 8),
-                      _ScannerToggle(
+                      context.gapHMd,
+                      _ModernScannerToggle(
                         active: scannerActive,
                         connected: scannerConnected,
                         onChanged: onScannerToggle,
@@ -141,19 +152,107 @@ class PosSearchAndScanCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                if (scannerActive)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6.0),
-                    child: Text(
-                      'Physical scanner active – scan a code',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                    ),
-                  ),
+                // Scanner status shown below the toggle icon
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Modern search field with rounded corners
+class _ModernSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final IconData icon;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
+
+  const _ModernSearchField({
+    required this.controller,
+    required this.hint,
+    required this.icon,
+    this.onChanged,
+    this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, color: cs.onSurfaceVariant),
+        filled: true,
+        fillColor: cs.surfaceContainerHighest.withOpacity(0.5),
+        border: OutlineInputBorder(
+          borderRadius: context.radiusMd,
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: context.radiusMd,
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: context.radiusMd,
+          borderSide: BorderSide(color: cs.primary, width: 2),
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+      onSubmitted: onSubmitted,
+      onChanged: onChanged,
+    );
+  }
+}
+
+// Compact scanner toggle
+class _ModernScannerToggle extends StatelessWidget {
+  final bool active;
+  final bool connected;
+  final ValueChanged<bool> onChanged;
+
+  const _ModernScannerToggle({
+    required this.active,
+    required this.connected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => onChanged(!active),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: context.padSm,
+        decoration: BoxDecoration(
+          color: active ? cs.primary : cs.surfaceContainerHighest,
+          borderRadius: context.radiusSm,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.settings_input_antenna_rounded,
+              size: 16,
+              color: active ? cs.onPrimary : cs.onSurfaceVariant,
+            ),
+            if (active) ...[
+              context.gapHXs,
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: connected ? context.appColors.success : context.appColors.warning,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -176,61 +275,110 @@ class PosProductGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (products.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.inventory_2_outlined, size: 64, color: Theme.of(context).colorScheme.outline),
+            context.gapVLg,
+            Text('No products found', style: Theme.of(context).textTheme.titleMedium),
+            context.gapVSm,
+            Text('Add products in Inventory → Products', style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      );
+    }
     final width = MediaQuery.of(context).size.width;
-    final cols = (width ~/ 160).clamp(2, 4);
+    final cols = (width ~/ 180).clamp(2, 5); // Increased from 160 to 180
     return Card(
       child: GridView.builder(
-        padding: const EdgeInsets.all(8),
+        padding: context.padSm,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
           crossAxisSpacing: 8,
           mainAxisSpacing: 8,
-          childAspectRatio: 1.0,
+          childAspectRatio: 0.75, // Changed for taller cards to fit image
         ),
         itemCount: products.length,
         itemBuilder: (_, i) {
           final p = products[i];
           final isFav = favoriteSkus.contains(p.sku);
+          final scheme = Theme.of(context).colorScheme;
           return InkWell(
             onTap: () => onAdd(p),
+            borderRadius: context.radiusSm,
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                borderRadius: context.radiusSm,
+                border: Border.all(color: scheme.outlineVariant),
               ),
-              padding: const EdgeInsets.all(8),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    p.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium,
+                  // Product Image
+                  Expanded(
+                    flex: 3,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                      ),
+                      child: p.imageUrls.isNotEmpty
+                          ? ClipRRect(
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                              child: Image.network(
+                                p.imageUrls.first,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Center(child: CircularProgressIndicator(strokeWidth: 2));
+                                },
+                                errorBuilder: (_, __, ___) => Icon(Icons.inventory_2_outlined, size: 32, color: scheme.outline),
+                              ),
+                            )
+                          : Center(child: Icon(Icons.inventory_2_outlined, size: 32, color: scheme.outline)),
+                    ),
                   ),
-                  const Spacer(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '₹${p.price.toStringAsFixed(2)}',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                  // Product Info
+                  Expanded(
+                    flex: 2,
+                    child: Padding(
+                      padding: context.padSm,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500, color: scheme.onSurface),
+                          ),
+                          const Spacer(),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  '₹${p.price.toStringAsFixed(2)}',
+                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.primary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () => onToggleFavorite(p),
+                                child: Icon(
+                                  isFav ? Icons.star : Icons.star_border,
+                                  size: 20,
+                                  color: isFav ? scheme.tertiary : scheme.outline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        tooltip: isFav ? 'Unfavorite' : 'Mark favorite',
-                        icon: Icon(
-                          isFav ? Icons.star : Icons.star_border,
-                          color: isFav ? Theme.of(context).colorScheme.tertiary : null,
-                        ),
-                        onPressed: () => onToggleFavorite(p),
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -242,7 +390,7 @@ class PosProductGrid extends StatelessWidget {
   }
 }
 
-class PosProductList extends StatelessWidget {
+class PosProductList extends StatefulWidget {
   final List<Product> products;
   final Set<String> favoriteSkus;
   final ValueChanged<Product> onAdd;
@@ -259,27 +407,265 @@ class PosProductList extends StatelessWidget {
   });
 
   @override
+  State<PosProductList> createState() => _PosProductListState();
+}
+
+class _PosProductListState extends State<PosProductList> {
+  bool _isGridView = false;
+
+  @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      controller: scrollController,
-      padding: const EdgeInsets.all(8),
-      itemCount: products.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) {
-        final p = products[i];
-        final isFav = favoriteSkus.contains(p.sku);
-        return ListTile(
-          onTap: () => onAdd(p),
-          title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text('₹${p.price.toStringAsFixed(2)}'),
-          trailing: IconButton(
-            tooltip: isFav ? 'Unfavorite' : 'Mark favorite',
-            icon: Icon(
-              isFav ? Icons.star : Icons.star_border,
-              color: isFav ? Theme.of(context).colorScheme.tertiary : null,
+    final cs = Theme.of(context).colorScheme;
+    if (widget.products.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: context.padLg,
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.inventory_2_rounded, size: 36, color: cs.outline),
             ),
-            onPressed: () => onToggleFavorite(p),
-            visualDensity: VisualDensity.compact,
+            context.gapVMd,
+            Text('No products found', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
+            context.gapVXs,
+            Text('Add products in Inventory → Products', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.outline, fontSize: context.sizes.fontSm)),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: [
+        // View toggle header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              Text(
+                '${widget.products.length} products',
+                style: TextStyle(fontSize: context.sizes.fontSm, color: cs.onSurfaceVariant),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => setState(() => _isGridView = !_isGridView),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withOpacity(0.5),
+                    borderRadius: context.radiusSm,
+                  ),
+                  child: Icon(
+                    _isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                    size: 16,
+                    color: cs.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Product list or grid
+        Expanded(
+          child: _isGridView ? _buildGrid(cs) : _buildList(cs),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildList(ColorScheme cs) {
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      itemCount: widget.products.length,
+      itemBuilder: (_, i) {
+        final p = widget.products[i];
+        final isFav = widget.favoriteSkus.contains(p.sku);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          child: Material(
+            color: cs.surface,
+            borderRadius: context.radiusSm,
+            child: InkWell(
+              onTap: () => widget.onAdd(p),
+              borderRadius: context.radiusSm,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: context.radiusSm,
+                  border: Border.all(color: cs.outlineVariant.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    // Product image
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest,
+                        borderRadius: context.radiusSm,
+                      ),
+                      child: p.imageUrls.isNotEmpty
+                          ? ClipRRect(
+                              borderRadius: context.radiusSm,
+                              child: Image.network(
+                                p.imageUrls.first,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(Icons.inventory_2_rounded, color: cs.outline, size: 18),
+                              ),
+                            )
+                          : Icon(Icons.inventory_2_rounded, color: cs.outline, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    // Product info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            p.name,
+                            style: TextStyle(fontWeight: FontWeight.w500, fontSize: context.sizes.fontMd, color: cs.onSurface),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '₹${p.price.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: context.sizes.fontSm,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Favorite button
+                    GestureDetector(
+                      onTap: () => widget.onToggleFavorite(p),
+                      child: Icon(
+                        isFav ? Icons.star_rounded : Icons.star_border_rounded,
+                        size: 18,
+                        color: isFav ? cs.tertiary : cs.outline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGrid(ColorScheme cs) {
+    return GridView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 1.1,
+      ),
+      itemCount: widget.products.length,
+      itemBuilder: (_, i) {
+        final p = widget.products[i];
+        final isFav = widget.favoriteSkus.contains(p.sku);
+        return Material(
+          color: cs.surface,
+          borderRadius: context.radiusSm,
+          child: InkWell(
+            onTap: () => widget.onAdd(p),
+            borderRadius: context.radiusSm,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: context.radiusSm,
+                border: Border.all(color: cs.outlineVariant.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Product image
+                  Expanded(
+                    flex: 3,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                      ),
+                      child: Stack(
+                        children: [
+                          p.imageUrls.isNotEmpty
+                              ? ClipRRect(
+                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                                  child: Image.network(
+                                    p.imageUrls.first,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    errorBuilder: (_, __, ___) => Center(
+                                      child: Icon(Icons.inventory_2_rounded, color: cs.outline, size: 28),
+                                    ),
+                                  ),
+                                )
+                              : Center(child: Icon(Icons.inventory_2_rounded, color: cs.outline, size: 28)),
+                          // Favorite button
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: GestureDetector(
+                              onTap: () => widget.onToggleFavorite(p),
+                              child: Container(
+                                padding: context.padXs,
+                                decoration: BoxDecoration(
+                                  color: cs.surface.withOpacity(0.9),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  isFav ? Icons.star_rounded : Icons.star_border_rounded,
+                                  size: 14,
+                                  color: isFav ? cs.tertiary : cs.outline,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Product info - compact
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          p.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w500, fontSize: context.sizes.fontSm, color: cs.onSurface),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '₹${p.price.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            color: cs.primary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: context.sizes.fontSm,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -301,43 +687,61 @@ class PosPopularItemsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final popular = allProducts.where((p) => favoriteSkus.contains(p.sku)).toList();
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: context.radiusMd,
+        boxShadow: [
+          BoxShadow(
+            color: cs.shadow.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(10.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Popular Items',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            if (popular.isEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.all(8.0),
-                child: Text('Mark items as favorite to see them here.'),
-              ),
-            ] else ...[
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: popular.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                  childAspectRatio: 3,
+            Row(
+              children: [
+                Icon(Icons.star_rounded, color: cs.tertiary, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'Favorites',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface),
                 ),
-                itemBuilder: (_, i) {
-                  final p = popular[i];
-                  return ElevatedButton(
-                    onPressed: () => onAdd(p),
-                    child: Text('${p.name} • ₹${p.price.toStringAsFixed(2)}', overflow: TextOverflow.ellipsis),
-                  );
-                },
+                if (popular.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: cs.tertiaryContainer,
+                      borderRadius: context.radiusSm,
+                    ),
+                    child: Text(
+                      '${popular.length}',
+                      style: TextStyle(color: cs.onTertiaryContainer, fontSize: context.sizes.fontXs, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            context.gapVSm,
+            if (popular.isEmpty)
+              Text(
+                'Tap ★ on products to add favorites',
+                style: TextStyle(color: cs.outline, fontSize: context.sizes.fontSm),
+              )
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: popular.map((p) => _FavoriteChip(product: p, onTap: () => onAdd(p))).toList(),
               ),
-            ],
           ],
         ),
       ),
@@ -345,45 +749,59 @@ class PosPopularItemsGrid extends StatelessWidget {
   }
 }
 
-class _ScannerToggle extends StatelessWidget {
-  final bool active;
-  final bool connected;
-  final ValueChanged<bool> onChanged;
-  const _ScannerToggle({required this.active, required this.connected, required this.onChanged});
+// Favorite product chip
+class _FavoriteChip extends StatelessWidget {
+  final Product product;
+  final VoidCallback onTap;
 
-  Color _statusColor(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (!active) return scheme.outline;
-    return connected ? scheme.primary : scheme.error;
-  }
+  const _FavoriteChip({required this.product, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Switch(
-              value: active,
-              onChanged: (v) => onChanged(v),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _statusColor(context),
-                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.primaryContainer.withOpacity(0.4),
+      borderRadius: context.radiusSm,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: context.radiusSm,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (product.imageUrls.isNotEmpty)
+                Container(
+                  width: 20,
+                  height: 20,
+                  margin: const EdgeInsets.only(right: 6),
+                  child: ClipRRect(
+                    borderRadius: context.radiusXs,
+                    child: Image.network(
+                      product.imageUrls.first,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(Icons.inventory_2_rounded, size: 12, color: cs.onPrimaryContainer),
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(Icons.inventory_2_rounded, size: 14, color: cs.onPrimaryContainer),
+                ),
+              Text(
+                product.name,
+                style: TextStyle(fontSize: context.sizes.fontSm, fontWeight: FontWeight.w500, color: cs.onPrimaryContainer),
               ),
-            ),
-          ],
+              context.gapHXs,
+              Text(
+                '₹${product.price.toStringAsFixed(0)}',
+                style: TextStyle(fontSize: context.sizes.fontXs, color: cs.primary, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
         ),
-        // Removed label below the switch to save vertical space on mobile
-      ],
+      ),
     );
   }
 }
@@ -410,125 +828,260 @@ class CartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: context.radiusMd,
+        boxShadow: [
+          BoxShadow(
+            color: cs.shadow.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.3))),
+            ),
+            child: Row(
               children: [
+                Icon(Icons.shopping_cart_rounded, color: cs.primary, size: 18),
+                context.gapHSm,
                 Text(
                   'Cart',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: onHold,
-                            icon: const Icon(Icons.pause_circle),
-                            label: const Text('Hold'),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: heldOrders.isEmpty
-                                ? null
-                                : () async {
-                                    final sel = await onResumeSelect(context);
-                                    if (sel != null) {
-                                      // Parent handles resume using the returned held order
-                                    }
-                                  },
-                            icon: const Icon(Icons.play_circle),
-                            label: const Text('Resume'),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: cart.isEmpty ? null : onClear,
-                            icon: const Icon(Icons.delete_sweep),
-                            label: const Text('Clear'),
-                          ),
-                        ],
-                      ),
+                if (cart.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      borderRadius: context.radiusSm,
+                    ),
+                    child: Text(
+                      '${cart.length}',
+                      style: TextStyle(color: cs.onPrimary, fontSize: context.sizes.fontXs, fontWeight: FontWeight.w600),
                     ),
                   ),
+                ],
+                const Spacer(),
+                // Action buttons (icons only)
+                _CartIconButton(icon: Icons.pause_rounded, tooltip: 'Hold', onTap: onHold, color: cs.tertiary),
+                _CartIconButton(
+                  icon: Icons.play_arrow_rounded,
+                  tooltip: 'Resume',
+                  onTap: heldOrders.isEmpty ? null : () async => await onResumeSelect(context),
+                  color: cs.secondary,
+                  badge: heldOrders.isNotEmpty ? heldOrders.length.toString() : null,
+                ),
+                _CartIconButton(icon: Icons.delete_outline_rounded, tooltip: 'Clear', onTap: cart.isEmpty ? null : onClear, color: cs.error),
+              ],
+            ),
+          ),
+          // Cart items
+          Expanded(
+            child: cart.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.shopping_cart_outlined, size: 32, color: cs.outlineVariant),
+                        context.gapVSm,
+                        Text('Empty cart', style: TextStyle(color: cs.outline, fontSize: context.sizes.fontSm)),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: cart.length,
+                    itemBuilder: (_, i) {
+                      final item = cart.values.elementAt(i);
+                      final line = item.product.price * item.qty;
+                      return _ModernCartItem(
+                        item: item,
+                        lineTotal: line,
+                        onDecrease: () => onChangeQty(item.product.sku, -1),
+                        onIncrease: () => onChangeQty(item.product.sku, 1),
+                        onRemove: () => onRemove(item.product.sku),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Compact cart icon button
+class _CartIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final Color color;
+  final String? badge;
+
+  const _CartIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    required this.color,
+    this.badge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDisabled = onTap == null;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: context.radiusSm,
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          margin: const EdgeInsets.only(left: 4),
+          child: badge != null
+              ? Badge(
+                  label: Text(badge!, style: TextStyle(fontSize: context.sizes.fontXs)),
+                  child: Icon(icon, size: 16, color: isDisabled ? cs.outline : color),
+                )
+              : Icon(icon, size: 16, color: isDisabled ? cs.outline : color),
+        ),
+      ),
+    );
+  }
+}
+
+// Compact cart item row
+class _ModernCartItem extends StatelessWidget {
+  final CartItem item;
+  final double lineTotal;
+  final VoidCallback onDecrease;
+  final VoidCallback onIncrease;
+  final VoidCallback onRemove;
+
+  const _ModernCartItem({
+    required this.item,
+    required this.lineTotal,
+    required this.onDecrease,
+    required this.onIncrease,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withOpacity(0.2),
+        borderRadius: context.radiusSm,
+      ),
+      child: Row(
+        children: [
+          // Product image
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withOpacity(0.4),
+              borderRadius: context.radiusSm,
+            ),
+            child: item.product.imageUrls.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: context.radiusSm,
+                    child: Image.network(
+                      item.product.imageUrls.first,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(Icons.inventory_2_rounded, color: cs.onPrimaryContainer, size: 14),
+                    ),
+                  )
+                : Icon(Icons.inventory_2_rounded, color: cs.onPrimaryContainer, size: 14),
+          ),
+          context.gapHSm,
+          // Product info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.product.name,
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: context.sizes.fontSm, color: cs.onSurface),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '₹${item.product.price.toStringAsFixed(0)} × ${item.qty}',
+                  style: TextStyle(fontSize: context.sizes.fontXs, color: cs.onSurfaceVariant),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Expanded(
-              child: cart.isEmpty
-                  ? const Center(child: Text('Cart is empty'))
-                  : ListView.separated(
-                      itemCount: cart.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final item = cart.values.elementAt(i);
-                        final line = item.product.price * item.qty;
-                        return ListTile(
-                          title: Text(
-                            item.product.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: null,
-                          leading: null,
-                          trailing: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 180),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.remove),
-                                  onPressed: () => onChangeQty(item.product.sku, -1),
-                                  padding: EdgeInsets.zero,
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                                const SizedBox(width: 2),
-                                Text(item.qty.toString()),
-                                const SizedBox(width: 2),
-                                IconButton(
-                                  icon: const Icon(Icons.add),
-                                  onPressed: () => onChangeQty(item.product.sku, 1),
-                                  padding: EdgeInsets.zero,
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    '₹${line.toStringAsFixed(2)}',
-                                    overflow: TextOverflow.ellipsis,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: const Icon(Icons.close),
-                                  onPressed: () => onRemove(item.product.sku),
-                                  padding: EdgeInsets.zero,
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+          ),
+          // Quantity controls
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: context.radiusSm,
+              border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
             ),
-          ],
-        ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _QtyButton(icon: Icons.remove, onTap: onDecrease),
+                Container(
+                  constraints: const BoxConstraints(minWidth: 24),
+                  alignment: Alignment.center,
+                  child: Text('${item.qty}', style: TextStyle(fontWeight: FontWeight.w600, fontSize: context.sizes.fontSm, color: cs.onSurface)),
+                ),
+                _QtyButton(icon: Icons.add, onTap: onIncrease),
+              ],
+            ),
+          ),
+          context.gapHSm,
+          // Line total
+          Text(
+            '₹${lineTotal.toStringAsFixed(0)}',
+            style: TextStyle(fontWeight: FontWeight.w600, color: cs.primary, fontSize: context.sizes.fontSm),
+          ),
+          // Remove button
+          GestureDetector(
+            onTap: onRemove,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Icon(Icons.close, size: 16, color: cs.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Quantity button
+class _QtyButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _QtyButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: context.radiusXs,
+      child: Padding(
+        padding: context.padXs,
+        child: Icon(icon, size: 14),
       ),
     );
   }

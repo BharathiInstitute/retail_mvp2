@@ -2,11 +2,11 @@
 /// 
 /// Import this file to access all loading widgets and providers:
 /// ```dart
-/// import 'package:retail_mvp2/core/loading/loading.dart';
+/// import 'package:retail_mvp2/core/loading/loading_exports.dart';
 /// ```
 library;
 
-export 'page_loader_overlay.dart';
-export 'global_loading_overlay.dart';
-export 'skeleton_loaders.dart';
-export 'async_action.dart';
+export 'page_loading_state_widget.dart';
+export 'fullscreen_loading_overlay.dart';
+export 'shimmer_skeleton_widgets.dart';
+export 'async_action_runner.dart';

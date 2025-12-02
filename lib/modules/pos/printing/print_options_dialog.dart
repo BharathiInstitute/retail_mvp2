@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'print_settings.dart';
+import '../../../core/theme/theme_extension_helpers.dart';
 
 /// Session (in‑memory) preference: whether to show print settings automatically before web printing.
 /// Defaults to true so users see the configuration the first time.
@@ -45,7 +46,7 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Text('Paper:'), const SizedBox(width: 8),
+                      const Text('Paper:'), context.gapHSm,
                       DropdownButton<PaperSize>(
                         value: tempSize,
                         items: const [
@@ -55,9 +56,9 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         onChanged: (v) { if (v != null) setLocal(() => tempSize = v); },
                       ),
                     ]),
-                    const SizedBox(height: 8),
+                    context.gapVSm,
                     Row(children: [
-                      const Text('Orientation:'), const SizedBox(width: 8),
+                      const Text('Orientation:'), context.gapHSm,
                       DropdownButton<PageOrientation>(
                         value: tempOrientation,
                         items: const [
@@ -67,10 +68,10 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         onChanged: tempSize == PaperSize.receipt ? null : (v) { if (v != null) setLocal(() => tempOrientation = v); },
                       ),
                     ]),
-                    if (tempSize == PaperSize.receipt) ...[
-                      const SizedBox(height: 8),
+                    if (tempSize == PaperSize.receipt) ...[  
+                      context.gapVSm,
                       Row(children: [
-                        const Text('Width (mm):'), const SizedBox(width: 8),
+                        const Text('Width (mm):'), context.gapHSm,
                         DropdownButton<int>(
                           value: tempPaperMm,
                           items: const [
@@ -82,16 +83,16 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         ),
                       ]),
                     ],
-                    const SizedBox(height: 8),
+                    context.gapVSm,
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Auto scale to paper width'),
                       value: tempScale,
                       onChanged: (v) => setLocal(() => tempScale = v),
                     ),
-                    const SizedBox(height: 8),
+                    context.gapVSm,
                     Row(children: [
-                      const Text('Font size:'), const SizedBox(width: 8),
+                      const Text('Font size:'), context.gapHSm,
                       Expanded(
                         child: Slider(
                           min: 6,
@@ -111,8 +112,8 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         ),
                       ),
                     ]),
-                    if (tempSize == PaperSize.receipt) ...[
-                      const SizedBox(height: 8),
+                    if (tempSize == PaperSize.receipt) ...[  
+                      context.gapVSm,
                       const Text('Receipt Character Width'),
                       Slider(
                         min: 20,
@@ -123,7 +124,7 @@ Future<bool> showPrintSettingsDialog(BuildContext context, {bool showPrintButton
                         onChanged: (v) => setLocal(() => tempWidth = v.round()),
                       ),
                     ],
-                    const SizedBox(height: 4),
+                    context.gapVXs,
                     Text(
                       'Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),

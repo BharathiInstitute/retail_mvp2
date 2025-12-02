@@ -12,56 +12,74 @@ class WebPickedImage {
 }
 
 Future<WebPickedImage?> pickImageFromCameraWeb() async {
-  final input = html.FileUploadInputElement();
-  input.accept = 'image/*';
-  // Hint to use rear camera on mobile browsers supporting it.
-  // Not all browsers honor this attribute.
-  (input as dynamic).capture = 'environment';
-  input.multiple = false;
   final completer = Completer<WebPickedImage?>();
-  input.onChange.first.then((_) async {
+  final input = html.FileUploadInputElement()
+    ..accept = 'image/*'
+    ..multiple = false;
+  
+  // Set capture attribute for camera
+  input.setAttribute('capture', 'environment');
+  
+  input.onChange.listen((event) async {
     final files = input.files;
-    if (files == null || files.isEmpty) {
+    if (files != null && files.isNotEmpty) {
+      final file = files.first;
+      final reader = html.FileReader();
+      reader.onLoadEnd.listen((e) {
+        if (reader.readyState == html.FileReader.DONE) {
+          final result = reader.result;
+          if (result is ByteBuffer) {
+            completer.complete(WebPickedImage(
+              bytes: Uint8List.view(result),
+              name: file.name,
+              mimeType: file.type,
+            ));
+          } else {
+            completer.complete(null);
+          }
+        }
+      });
+      reader.readAsArrayBuffer(file);
+    } else {
       completer.complete(null);
-      return;
     }
-    final file = files.first;
-    final reader = html.FileReader();
-    reader.readAsArrayBuffer(file);
-    await reader.onLoad.first;
-    final data = reader.result as ByteBuffer;
-    completer.complete(WebPickedImage(
-      bytes: Uint8List.view(data),
-      name: file.name,
-      mimeType: file.type,
-    ));
   });
+  
   input.click();
   return completer.future;
 }
 
 Future<WebPickedImage?> pickImageFromFilesWeb() async {
-  final input = html.FileUploadInputElement();
-  input.accept = 'image/*';
-  input.multiple = false;
   final completer = Completer<WebPickedImage?>();
-  input.onChange.first.then((_) async {
+  final input = html.FileUploadInputElement()
+    ..accept = 'image/*'
+    ..multiple = false;
+  
+  input.onChange.listen((event) async {
     final files = input.files;
-    if (files == null || files.isEmpty) {
+    if (files != null && files.isNotEmpty) {
+      final file = files.first;
+      final reader = html.FileReader();
+      reader.onLoadEnd.listen((e) {
+        if (reader.readyState == html.FileReader.DONE) {
+          final result = reader.result;
+          if (result is ByteBuffer) {
+            completer.complete(WebPickedImage(
+              bytes: Uint8List.view(result),
+              name: file.name,
+              mimeType: file.type,
+            ));
+          } else {
+            completer.complete(null);
+          }
+        }
+      });
+      reader.readAsArrayBuffer(file);
+    } else {
       completer.complete(null);
-      return;
     }
-    final file = files.first;
-    final reader = html.FileReader();
-    reader.readAsArrayBuffer(file);
-    await reader.onLoad.first;
-    final data = reader.result as ByteBuffer;
-    completer.complete(WebPickedImage(
-      bytes: Uint8List.view(data),
-      name: file.name,
-      mimeType: file.type,
-    ));
   });
+  
   input.click();
   return completer.future;
 }

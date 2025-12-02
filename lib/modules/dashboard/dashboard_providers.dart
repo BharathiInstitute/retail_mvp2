@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/core/firestore_store_collections.dart';
 import 'package:retail_mvp2/modules/stores/providers.dart';
 
 /// Stream of aggregate sales totals for current day, week, and month.

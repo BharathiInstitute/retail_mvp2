@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../theme/theme_utils.dart';
+import '../theme/theme_extension_helpers.dart';
 
 /// Global loading state
 class GlobalLoadingState {

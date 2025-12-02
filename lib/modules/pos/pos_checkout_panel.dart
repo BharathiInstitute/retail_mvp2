@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'pos.dart';
-import 'printing/print_settings.dart';
+import '../../core/theme/theme_extension_helpers.dart';
 
 class CheckoutPanel extends StatefulWidget {
   final Stream<List<Customer>> customersStream;
@@ -89,7 +89,7 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
     final content = SingleChildScrollView(
       controller: _scrollCtrl,
       primary: false,
-      padding: const EdgeInsets.all(10),
+      padding: context.padSm,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _CustomerDropdown(
           customersStream: widget.customersStream,
@@ -98,23 +98,21 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
           onSelected: widget.onCustomerSelected,
           walkIn: widget.walkIn,
         ),
-        const SizedBox(height: 6),
+        SizedBox(height: context.sizes.gapXs),
         _CustomerInfo(
           selected: selectedCustomer,
           creditActive: widget.selectedPaymentMode == PaymentMode.credit,
         ),
-        const SizedBox(height: 8),
-        _kv('Subtotal', widget.subtotal),
-        _kv('Discount', -widget.discountValue),
-        if (widget.redeemValue > 0) _kv('Redeemed (Pts)', -widget.redeemValue),
-        const SizedBox(height: 6),
-        Builder(builder: (context) => Text('GST Breakdown', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700))),
-        ...taxesByRate.entries.map((e) => _kv('GST ${e.key}%', e.value)),
-        const Divider(),
-        _kv('Grand Total', widget.grandTotal),
-        if (widget.redeemValue > 0) _kv('Redeem Applied', -widget.redeemValue),
-        _kv('Payable', widget.payableTotal, bold: true),
-        const SizedBox(height: 10),
+        SizedBox(height: context.sizes.gapSm),
+        _BillingSummary(
+          subtotal: widget.subtotal,
+          discountValue: widget.discountValue,
+          redeemValue: widget.redeemValue,
+          grandTotal: widget.grandTotal,
+          payableTotal: widget.payableTotal,
+          taxesByRate: taxesByRate,
+        ),
+        SizedBox(height: context.sizes.gapSm),
         _RedeemSection(
           controller: widget.redeemPointsController,
           availablePoints: widget.getAvailablePoints(),
@@ -123,36 +121,9 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
           onMax: widget.onRedeemMax,
           redeemedPoints: widget.getRedeemedPoints(),
         ),
-        const SizedBox(height: 10),
-  _paymentModesSection(buildButton: (mode, label, icon) => _payModeButton(context, mode, label, icon)),
-        if (widget.selectedPaymentMode == PaymentMode.credit) ...[
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: TextField(
-                controller: _creditAmountCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Amount Paid Now (₹)',
-                  prefixIcon: Icon(Icons.receipt_long),
-                  border: OutlineInputBorder(),
-                  helperText: 'Leave blank = 0. Less than payable → rest becomes new credit. More than payable → extra repays old credit.',
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          _CreditPreview(
-            entered: double.tryParse(_creditAmountCtrl.text.trim()) ?? 0,
-            payable: widget.payableTotal,
-            existingCredit: widget.selectedCustomer?.creditBalance ?? 0,
-          ),
-        ],
-        const SizedBox(height: 12),
-  _actionsSection(
-          onQuickPrint: widget.onQuickPrint,
+        SizedBox(height: context.sizes.gapMd),
+  _paymentAndCheckoutRow(
+          context: context,
           onCheckout: () {
             if (widget.selectedPaymentMode == PaymentMode.credit) {
               final amt = double.tryParse(_creditAmountCtrl.text.trim()) ?? 0;
@@ -176,9 +147,33 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
               widget.onCheckout();
             }
           },
-          openPrintSettings: () => _openPrintSettings(context),
           creditMode: widget.selectedPaymentMode == PaymentMode.credit,
         ),
+        if (widget.selectedPaymentMode == PaymentMode.credit) ...[  
+          context.gapVSm,
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: TextField(
+                controller: _creditAmountCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Amount Paid Now (₹)',
+                  prefixIcon: Icon(Icons.receipt_long),
+                  border: OutlineInputBorder(),
+                  helperText: 'Leave blank = 0. Less than payable → rest becomes new credit. More than payable → extra repays old credit.',
+                ),
+              ),
+            ),
+          ),
+          context.gapVXs,
+          _CreditPreview(
+            entered: double.tryParse(_creditAmountCtrl.text.trim()) ?? 0,
+            payable: widget.payableTotal,
+            existingCredit: widget.selectedCustomer?.creditBalance ?? 0,
+          ),
+        ],
       ]),
     );
     return Card(
@@ -190,254 +185,182 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
     );
   }
 
-  // Localized responsive section: payment modes
-  Widget _paymentModesSection({
-    required Widget Function(PaymentMode mode, String label, IconData icon) buildButton,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 420;
-        if (narrow) {
-          return Column(children: [
-            SizedBox(width: double.infinity, child: buildButton(PaymentMode.cash, 'Cash', Icons.payments)),
-            const SizedBox(height: 8),
-            SizedBox(width: double.infinity, child: buildButton(PaymentMode.upi, 'UPI', Icons.qr_code)),
-          ]);
-        }
-        return Row(children: [
-          Expanded(child: buildButton(PaymentMode.cash, 'Cash', Icons.payments)),
-          const SizedBox(width: 8),
-          Expanded(child: buildButton(PaymentMode.upi, 'UPI', Icons.qr_code)),
-        ]);
-      },
-    );
-  }
-
-  // Localized responsive section: actions (print/settings/checkout)
-  Widget _actionsSection({
-    required VoidCallback? onQuickPrint,
-    required VoidCallback openPrintSettings,
+  // Compact payment toggle with checkout
+  Widget _paymentAndCheckoutRow({
+    required BuildContext context,
     required VoidCallback onCheckout,
     required bool creditMode,
   }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 420;
-        if (narrow) {
-          return Column(children: [
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              ElevatedButton.icon(
-                onPressed: () { final qp = onQuickPrint; if (qp != null) qp(); },
-                icon: const Icon(Icons.print),
-                label: const Text('Print'),
+    final cs = Theme.of(context).colorScheme;
+    final isCash = widget.selectedPaymentMode == PaymentMode.cash;
+    final isUpi = widget.selectedPaymentMode == PaymentMode.upi;
+    
+    return Column(
+      children: [
+        // Compact segmented toggle
+        Container(
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.4),
+            borderRadius: context.radiusSm,
+          ),
+          padding: EdgeInsets.all(context.sizes.gapXs),
+          child: Row(
+            children: [
+              // Cash toggle
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => widget.onPaymentModeChanged(PaymentMode.cash),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: EdgeInsets.symmetric(vertical: context.sizes.gapSm),
+                    decoration: BoxDecoration(
+                      color: isCash ? cs.primary : Colors.transparent,
+                      borderRadius: context.radiusSm,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.payments_rounded, size: context.sizes.iconXs, color: isCash ? cs.onPrimary : cs.onSurfaceVariant),
+                        SizedBox(width: context.sizes.gapXs),
+                        Text('Cash', style: TextStyle(fontSize: context.sizes.fontXs, color: isCash ? cs.onPrimary : cs.onSurfaceVariant, fontWeight: isCash ? FontWeight.w600 : FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              IconButton(
-                tooltip: 'Print Settings',
-                onPressed: openPrintSettings,
-                icon: const Icon(Icons.settings),
+              // UPI toggle
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => widget.onPaymentModeChanged(PaymentMode.upi),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: EdgeInsets.symmetric(vertical: context.sizes.gapSm),
+                    decoration: BoxDecoration(
+                      color: isUpi ? cs.primary : Colors.transparent,
+                      borderRadius: context.radiusSm,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.qr_code_rounded, size: context.sizes.iconXs, color: isUpi ? cs.onPrimary : cs.onSurfaceVariant),
+                        SizedBox(width: context.sizes.gapXs),
+                        Text('UPI', style: TextStyle(fontSize: context.sizes.fontXs, color: isUpi ? cs.onPrimary : cs.onSurfaceVariant, fontWeight: isUpi ? FontWeight.w600 : FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ]),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: onCheckout,
-                icon: const Icon(Icons.check_circle),
-                label: Text(creditMode ? 'Checkout (Credit Mix)' : 'Checkout'),
-              ),
+            ],
+          ),
+        ),
+        SizedBox(height: context.sizes.gapSm),
+        // Checkout button
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: onCheckout,
+            icon: Icon(creditMode ? Icons.credit_card : Icons.check_circle_rounded, size: context.sizes.iconSm),
+            label: Text(creditMode ? 'Pay Credit' : 'Checkout', style: TextStyle(fontWeight: FontWeight.w600, fontSize: context.sizes.fontSm)),
+            style: FilledButton.styleFrom(
+              padding: EdgeInsets.symmetric(vertical: context.sizes.gapMd),
+              shape: RoundedRectangleBorder(borderRadius: context.radiusSm),
             ),
-          ]);
-        }
-        return Row(children: [
-          ElevatedButton.icon(
-            onPressed: () { final qp = onQuickPrint; if (qp != null) qp(); },
-            icon: const Icon(Icons.print),
-            label: const Text('Print'),
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Print Settings',
-            onPressed: openPrintSettings,
-            icon: const Icon(Icons.settings),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: onCheckout,
-              icon: const Icon(Icons.check_circle),
-              label: Text(creditMode ? 'Checkout (Credit Mix)' : 'Checkout'),
-            ),
-          ),
-        ]);
-      },
+        ),
+      ],
     );
   }
-  Widget _payModeButton(BuildContext context, PaymentMode mode, String label, IconData icon) {
-    final selected = widget.selectedPaymentMode == mode;
-    return OutlinedButton.icon(
-      onPressed: () {
-        if (mode == PaymentMode.credit) {
-          // Leave field blank per new UX (no auto-populate)
-          _creditAmountCtrl.text = '';
-        }
-        widget.onPaymentModeChanged(mode);
-      },
-      icon: Icon(icon, color: selected ? Theme.of(context).colorScheme.primary : null),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-  backgroundColor: selected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
-        side: BorderSide(color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor),
+}
+
+// Modern billing summary card
+class _BillingSummary extends StatelessWidget {
+  final double subtotal;
+  final double discountValue;
+  final double redeemValue;
+  final double grandTotal;
+  final double payableTotal;
+  final Map<int, double> taxesByRate;
+  
+  const _BillingSummary({
+    required this.subtotal,
+    required this.discountValue,
+    required this.redeemValue,
+    required this.grandTotal,
+    required this.payableTotal,
+    required this.taxesByRate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.colors;
+    final sizes = context.sizes;
+    return Container(
+      padding: EdgeInsets.all(sizes.gapMd),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withOpacity(0.3),
+        borderRadius: context.radiusSm,
+      ),
+      child: Column(
+        children: [
+          _row(context, 'Subtotal', subtotal, cs.onSurface),
+          if (discountValue > 0) _row(context, 'Discount', -discountValue, context.appColors.success),
+          if (redeemValue > 0) _row(context, 'Redeemed', -redeemValue, context.appColors.warning),
+          SizedBox(height: sizes.gapXs),
+          // GST rows
+          if (taxesByRate.isNotEmpty) ...[
+            Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapXs),
+                  decoration: BoxDecoration(
+                    color: cs.secondaryContainer,
+                    borderRadius: context.radiusSm,
+                  ),
+                  child: Text('GST', style: TextStyle(fontSize: sizes.fontXs, fontWeight: FontWeight.w600, color: cs.onSecondaryContainer)),
+                ),
+                const Spacer(),
+              ],
+            ),
+            SizedBox(height: sizes.gapXs),
+            ...taxesByRate.entries.map((e) => _row(context, '${e.key}%', e.value, cs.onSurfaceVariant, small: true)),
+          ],
+          Divider(height: sizes.gapMd, color: cs.outlineVariant.withOpacity(0.5)),
+          _row(context, 'Grand Total', grandTotal, cs.onSurface),
+          SizedBox(height: sizes.gapXs),
+          // Payable highlight
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapSm),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [cs.primary.withOpacity(0.15), cs.primary.withOpacity(0.05)],
+              ),
+              borderRadius: context.radiusSm,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Payable', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontSm, color: cs.primary)),
+                Text('₹${payableTotal.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontMd, color: cs.primary)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
-  Widget _kv(String label, double value, {bool bold = false}) {
-    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: Theme.of(context).colorScheme.onSurface,
-          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-        ) ?? TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+
+  Widget _row(BuildContext context, String label, double value, Color color, {bool small = false}) {
+    final sizes = context.sizes;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: style),
-        Text('₹${value.toStringAsFixed(2)}', style: style),
-      ]),
+      padding: EdgeInsets.symmetric(vertical: sizes.gapXs / 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: small ? sizes.fontXs : sizes.fontSm, color: color)),
+          Text('₹${value.toStringAsFixed(2)}', style: TextStyle(fontSize: small ? sizes.fontXs : sizes.fontSm, fontWeight: FontWeight.w500, color: color)),
+        ],
+      ),
     );
-  }
-  Future<void> _openPrintSettings(BuildContext context) async {
-    final ps = globalPrintSettings;
-    int tempWidth = ps.receiptCharWidth;
-    int tempPaperMm = ps.paperWidthMm;
-    int tempFontSize = ps.fontSizePt;
-    PaperSize tempSize = ps.paperSize;
-    PageOrientation tempOrientation = ps.orientation;
-    bool tempScale = ps.scaleToFit;
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        final scheme = Theme.of(ctx).colorScheme;
-        final texts = Theme.of(ctx).textTheme;
-        int previewWidth = tempScale && tempSize == PaperSize.receipt ? _deriveCharWidth(tempPaperMm) : tempWidth;
-        return AlertDialog(
-          title: Text(
-            'Print Settings',
-            style: texts.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700),
-          ),
-          content: DefaultTextStyle(
-            style: texts.bodyMedium?.copyWith(color: scheme.onSurface) ?? const TextStyle(),
-            child: SizedBox(
-            width: 380,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Row(children: [
-                const Text('Paper:'), const SizedBox(width: 8),
-                DropdownButton<PaperSize>(
-                  value: tempSize,
-                  items: const [
-                    DropdownMenuItem(value: PaperSize.receipt, child: Text('Receipt (Thermal)')),
-                    DropdownMenuItem(value: PaperSize.a4, child: Text('A4')),
-                  ],
-                  onChanged: (v) { if (v != null) setLocal(() => tempSize = v); },
-                ),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                const Text('Orientation:'), const SizedBox(width: 8),
-                DropdownButton<PageOrientation>(
-                  value: tempOrientation,
-                  items: const [
-                    DropdownMenuItem(value: PageOrientation.portrait, child: Text('Portrait')),
-                    DropdownMenuItem(value: PageOrientation.landscape, child: Text('Landscape')),
-                  ],
-                  onChanged: tempSize == PaperSize.receipt ? null : (v) { if (v != null) setLocal(() => tempOrientation = v); },
-                ),
-              ]),
-              if (tempSize == PaperSize.receipt) const SizedBox(height: 8),
-              if (tempSize == PaperSize.receipt) Row(children: [
-                const Text('Width (mm):'), const SizedBox(width: 8),
-                DropdownButton<int>(
-                  value: tempPaperMm,
-                  items: const [
-                    DropdownMenuItem(value: 48, child: Text('48 mm')),
-                    DropdownMenuItem(value: 58, child: Text('58 mm')),
-                    DropdownMenuItem(value: 80, child: Text('80 mm')),
-                  ],
-                  onChanged: (v) { if (v != null) setLocal(() => tempPaperMm = v); },
-                ),
-              ]),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Auto scale to paper width'),
-                value: tempScale,
-                onChanged: (v) => setLocal(() => tempScale = v),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                const Text('Font size:'), const SizedBox(width: 8),
-                Expanded(
-                  child: Slider(
-                    min: 6,
-                    max: 24,
-                    divisions: 18,
-                    value: tempFontSize.toDouble(),
-                    label: '${tempFontSize}pt',
-                    onChanged: (v) => setLocal(() => tempFontSize = v.round()),
-                  ),
-                ),
-                SizedBox(
-                    width: 40,
-                    child: Text(
-                      '${tempFontSize}pt',
-                      textAlign: TextAlign.right,
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ))
-              ]),
-              const SizedBox(height: 8),
-              if (tempSize == PaperSize.receipt && !tempScale) Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Receipt Character Width'),
-                Slider(
-                  min: 20,
-                  max: 80,
-                  divisions: 60,
-                  value: tempWidth.toDouble(),
-                  label: '$tempWidth',
-                  onChanged: (v) => setLocal(() => tempWidth = v.round()),
-                ),
-              ]),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Preview width: $previewWidth chars • Font ${tempFontSize}pt (${tempSize == PaperSize.receipt ? '${tempPaperMm}mm' : 'A4'})',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),
-                ),
-              )
-            ]),
-          ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(onPressed: () {
-              ps.update(
-                paperSize: tempSize,
-                orientation: tempOrientation,
-                scaleToFit: tempScale,
-                receiptCharWidth: tempWidth,
-                paperWidthMm: tempPaperMm,
-                fontSizePt: tempFontSize,
-              );
-              Navigator.pop(ctx);
-            }, child: const Text('Save')),
-          ],
-        );
-      }),
-    );
-  }
-  int _deriveCharWidth(int mm) {
-    if (mm <= 50) return 32;
-    if (mm <= 60) return 40;
-    if (mm <= 72) return 48;
-    if (mm <= 86) return 56;
-    return 64;
   }
 }
 
@@ -483,57 +406,81 @@ class _CustomerInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = selected; if (c == null || c.id.isEmpty) return const SizedBox();
     String planLabel = (c.status ?? 'standard'); planLabel = planLabel[0].toUpperCase() + planLabel.substring(1);
+    final cs = context.colors;
+    final sizes = context.sizes;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(8),
+      padding: EdgeInsets.all(sizes.gapSm),
       decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(6),
+        gradient: LinearGradient(
+          colors: [cs.primaryContainer.withOpacity(0.3), cs.primaryContainer.withOpacity(0.1)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: context.radiusSm,
+        border: Border.all(color: cs.primary.withOpacity(0.2)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Builder(
-          builder: (context) => Text(
-            c.name,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-          ),
+        Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(sizes.gapXs),
+              decoration: BoxDecoration(
+                color: cs.primary.withOpacity(0.1),
+                borderRadius: context.radiusSm,
+              ),
+              child: Icon(Icons.person_rounded, size: sizes.iconXs, color: cs.primary),
+            ),
+            SizedBox(width: sizes.gapSm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(c.name, style: TextStyle(fontWeight: FontWeight.w600, fontSize: sizes.fontSm, color: cs.onSurface)),
+                  if (c.email != null && c.email!.isNotEmpty)
+                    Text(c.email!, style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ],
         ),
-        if (c.email != null && c.email!.isNotEmpty)
-          Text(
-            c.email!,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-        const SizedBox(height: 4),
-        Wrap(spacing: 12, runSpacing: 4, children: [
-          _miniInfoChip(context, Icons.workspace_premium, 'Plan: $planLabel'),
-          _miniInfoChip(context, Icons.percent, 'Discount: ${c.discountPercent.toStringAsFixed(0)}%'),
-          _miniInfoChip(context, Icons.card_giftcard, 'Rewards: ${_fmtPts(c.rewardsPoints)}'),
-          _miniInfoChip(context, Icons.account_balance_wallet, 'Spend: ₹${c.totalSpend.toStringAsFixed(0)}'),
+        SizedBox(height: sizes.gapSm),
+        Wrap(spacing: sizes.gapSm, runSpacing: sizes.gapXs, children: [
+          _CompactChip(icon: Icons.workspace_premium_rounded, text: planLabel, color: cs.tertiary),
+          _CompactChip(icon: Icons.percent_rounded, text: '${c.discountPercent.toStringAsFixed(0)}%', color: cs.secondary),
+          _CompactChip(icon: Icons.card_giftcard_rounded, text: _fmtPts(c.rewardsPoints), color: cs.primary),
+          _CompactChip(icon: Icons.account_balance_wallet_rounded, text: '₹${c.totalSpend.toStringAsFixed(0)}', color: context.appColors.success),
           if (c.creditBalance > 0 || creditActive)
-            _miniInfoChip(context, Icons.receipt_long, 'Credit: ₹${c.creditBalance.toStringAsFixed(0)}'),
+            _CompactChip(icon: Icons.receipt_long_rounded, text: '₹${c.creditBalance.toStringAsFixed(0)}', color: cs.error),
         ])
       ]),
     );
   }
-  Widget _miniInfoChip(BuildContext context, IconData icon, String text) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(24),
-  border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
-    ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary),
-      const SizedBox(width: 4),
-      Text(
-        text,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+}
+
+// Compact info chip
+class _CompactChip extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+  const _CompactChip({required this.icon, required this.text, required this.color});
+  
+  @override
+  Widget build(BuildContext context) {
+    final sizes = context.sizes;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapXs),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: context.radiusSm,
       ),
-    ]),
-  );
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: sizes.iconXs - 4, color: color),
+        SizedBox(width: sizes.gapXs),
+        Text(text, style: TextStyle(fontSize: sizes.fontXs, color: color, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
 }
 
 // _PayCreditButton removed (repayment flow simplified)
@@ -544,46 +491,50 @@ class _RedeemSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entered = redeemedPoints; final over = entered > availablePoints; final negative = entered < 0;
-    String? errorText; if (negative) { errorText = 'Cannot be negative'; } else if (over) { errorText = 'Not enough points (Avail: ${availablePoints.toStringAsFixed(0)})'; }
-    final helper = (!over && !negative && redeemValue > 0) ? 'Value: ₹${redeemValue.toStringAsFixed(2)}' : (!over && !negative ? 'Enter points to redeem' : null);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 8),
-      Row(children: [
-        Flexible(child: Align(
-          alignment: Alignment.centerLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 280),
-            child: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                labelText: 'Redeem Points',
-                prefixIcon: const Icon(Icons.card_giftcard),
-                helperText: helper,
-                errorText: errorText,
-                suffixIcon: (availablePoints > 0)
-                    ? Tooltip(
-                        message: 'Available: ${availablePoints.toStringAsFixed(0)}',
-                        child: Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: Center(
-                                widthFactor: 1,
-                                child: Text(
-                                  availablePoints.toStringAsFixed(0),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                ))))
-                    : null,
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (_) => onChange(),
+    String? errorText; if (negative) { errorText = 'Cannot be negative'; } else if (over) { errorText = 'Max: ${availablePoints.toStringAsFixed(0)}'; }
+    final cs = context.colors;
+    final sizes = context.sizes;
+    return Row(children: [
+      Flexible(child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 200),
+          child: TextField(
+            controller: controller,
+            style: TextStyle(fontSize: sizes.fontXs),
+            decoration: InputDecoration(
+              labelText: 'Redeem Points',
+              labelStyle: TextStyle(fontSize: sizes.fontXs),
+              prefixIcon: Icon(Icons.card_giftcard_rounded, size: sizes.iconSm, color: cs.primary),
+              errorText: errorText,
+              errorStyle: TextStyle(fontSize: sizes.fontXs),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: sizes.gapMd, vertical: sizes.gapSm),
+              suffixIcon: availablePoints > 0 ? Padding(
+                padding: EdgeInsets.only(right: sizes.gapSm),
+                child: Center(
+                  widthFactor: 1,
+                  child: Text(availablePoints.toStringAsFixed(0), style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant)),
+                ),
+              ) : null,
             ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => onChange(),
           ),
-        )),
-        const SizedBox(width: 8),
-        ElevatedButton(onPressed: availablePoints <= 0 ? null : onMax, child: const Text('Max')),
-      ])
+        ),
+      )),
+      SizedBox(width: sizes.gapSm),
+      SizedBox(
+        height: sizes.buttonHeightSm,
+        child: FilledButton(
+          onPressed: availablePoints <= 0 ? null : onMax,
+          style: FilledButton.styleFrom(
+            padding: EdgeInsets.symmetric(horizontal: sizes.gapMd),
+            textStyle: TextStyle(fontSize: sizes.fontXs),
+          ),
+          child: const Text('Max'),
+        ),
+      ),
     ]);
   }
 }
@@ -633,7 +584,7 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
                 if (created != null) { widget.onSelected(created); if (!mounted) return; setState(() { _expanded = false; }); }
               },
             ),
-            const SizedBox(width: 4),
+            context.gapHXs,
             Icon(_expanded ? Icons.expand_less : Icons.expand_more),
           ]),
         ),
@@ -645,7 +596,7 @@ class _CustomerDropdownState extends State<_CustomerDropdown> {
           margin: const EdgeInsets.only(top: 4),
           decoration: BoxDecoration(
             border: Border.all(color: Theme.of(context).dividerColor),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: context.radiusSm,
             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
           ),
           child: Column(children: [

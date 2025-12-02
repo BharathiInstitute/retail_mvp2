@@ -4,7 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/auth/auth.dart';
+import '../../core/auth/auth_repository_and_provider.dart';
 import 'models.dart';
 
 // Current selected store id (in-memory). Persisting can be added later.

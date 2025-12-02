@@ -9,6 +9,7 @@ class Product {
   int stock;
   final int taxPercent; // GST % from taxPct
   final String? barcode;
+  final List<String> imageUrls;
   final DocumentReference<Map<String, dynamic>>? ref;
 
   Product({
@@ -18,6 +19,7 @@ class Product {
     required this.stock,
     required this.taxPercent,
     this.barcode,
+    this.imageUrls = const [],
     this.ref,
   });
 
@@ -42,6 +44,9 @@ class Product {
     }
     final taxRaw = data['taxPct'];
     final tax = taxRaw is num ? taxRaw.toInt() : int.tryParse('$taxRaw') ?? 0;
+    // Parse imageUrls
+    final rawUrls = data['imageUrls'];
+    final imageUrls = rawUrls is List ? rawUrls.map((e) => e.toString()).toList() : <String>[];
     return Product(
       sku: (data['sku'] ?? doc.id).toString(),
       name: (data['name'] ?? '').toString(),
@@ -49,6 +54,7 @@ class Product {
       stock: stock,
       taxPercent: tax,
       barcode: (data['barcode'] ?? '').toString(),
+      imageUrls: imageUrls,
       ref: doc.reference,
     );
   }

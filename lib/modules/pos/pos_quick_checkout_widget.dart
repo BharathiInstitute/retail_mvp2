@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'pos.dart';
+import '../../core/theme/theme_extension_helpers.dart';
 
 /// Minimal checkout UI for the tab screen: hides totals/calculations.
 /// When the user taps Checkout, a sheet pops up to select Cash or UPI.
@@ -18,7 +19,7 @@ class SimpleCheckoutTab extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Customer', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
+            context.gapVSm,
             // Placeholder for customer selection; intentionally minimal
             InputDecorator(
               decoration: const InputDecoration(
@@ -28,7 +29,7 @@ class SimpleCheckoutTab extends StatelessWidget {
               ),
               child: const SizedBox.shrink(),
             ),
-            const SizedBox(height: 12),
+            context.gapVMd,
             ElevatedButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text(title),
@@ -53,7 +54,7 @@ class SimpleCheckoutTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text('Select Payment Method', style: Theme.of(ctx).textTheme.titleMedium),
-              const SizedBox(height: 12),
+              context.gapVMd,
               FilledButton.icon(
                 onPressed: () {
                   Navigator.pop(ctx, PaymentMode.cash);
@@ -63,7 +64,7 @@ class SimpleCheckoutTab extends StatelessWidget {
                 icon: const Icon(Icons.payments),
                 label: const Text('Cash'),
               ),
-              const SizedBox(height: 12),
+              context.gapVMd,
               OutlinedButton.icon(
                 onPressed: () {
                   Navigator.pop(ctx, PaymentMode.upi);

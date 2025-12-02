@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:retail_mvp2/core/theme/theme_utils.dart';
+import 'package:retail_mvp2/core/theme/theme_extension_helpers.dart';
 
 /// Field size variants
 enum FieldSize { sm, md, lg }

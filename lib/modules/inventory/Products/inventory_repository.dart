@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../core/store_scoped_refs.dart';
+import '../../../core/firestore_store_collections.dart';
 
 /// Clean rebuilt InventoryRepository (single definition) providing CRUD,
 /// audit overwrite and incremental stock movement support.

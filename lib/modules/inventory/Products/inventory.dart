@@ -1,28 +1,30 @@
 // ignore_for_file: use_build_context_synchronously
 // Rebuilt Inventory module root screen (clean version)
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart';
-import '../web_image_picker_stub.dart' if (dart.library.html) '../web_image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../core/store_scoped_refs.dart';
+import '../../../core/firestore_store_collections.dart';
+import '../../../core/theme/theme_extension_helpers.dart';
 import '../../stores/providers.dart';
 
-import '../../../core/paging/paged_list_controller.dart';
-import '../../../core/firebase/firestore_paging.dart';
-import '../../../core/loading/page_loader_overlay.dart';
+import '../../../core/paging/infinite_scroll_controller.dart';
+import '../../../core/firebase/firestore_pagination_helper.dart';
+import '../../../core/loading/page_loading_state_widget.dart';
 
-import '../../../core/auth/auth.dart';
-import '../../../core/permissions.dart';
+import '../../../core/auth/auth_repository_and_provider.dart';
+import '../../../core/user_permissions_provider.dart';
 import 'inventory_repository.dart';
 import 'csv_utils.dart';
 import '../download_helper_stub.dart' if (dart.library.html) '../download_helper_web.dart';
-import 'barcodes_pdf.dart';
-import '../import_products_screen.dart' show ImportProductsScreen;
-import 'inventory_sheet_page.dart';
-import 'invoice_analysis_page.dart';
-import '../category_screen.dart';
+import 'barcode_label_generator.dart';
+import '../product_csv_import_screen.dart' show ImportProductsScreen;
+import 'products_spreadsheet_screen.dart';
+import 'ai_invoice_analyzer_screen.dart';
+import '../category_management_screen.dart';
 import 'product_image_uploader.dart';
 
 // -------------------- Inventory Root Screen (Tabs) --------------------
@@ -106,6 +108,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   String _search = '';
   _ActiveFilter _activeFilter = _ActiveFilter.all;
   int _gstFilter = -1; // -1 => All, otherwise 0/5/12/18
+  bool _isGridView = true; // Toggle between grid and list view
   // Horizontal scroll controller for drag/swipe panning on desktop/tablet/mobile
   final ScrollController _hScrollCtrl = ScrollController();
   // Vertical controller for infinite scroll
@@ -165,31 +168,38 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
   final selStore = ref.watch(selectedStoreIdProvider);
   final bool isSignedIn = user != null;
     return Padding(
-      padding: const EdgeInsets.all(12.0),
+      padding: const EdgeInsets.all(10.0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         LayoutBuilder(builder: (context, constraints) {
           final narrow = constraints.maxWidth < 560;
-          final searchWidth = narrow ? 220.0 : 280.0;
-          final btnMinH = 36.0;
-          final btnPad = const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
+          final searchWidth = narrow ? 180.0 : 220.0;
+          final btnMinH = 30.0;
+          final btnPad = const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
+          final iconSize = 14.0;
+          final fontSize = 11.0;
           final compactFilled = FilledButton.styleFrom(
             minimumSize: Size(0, btnMinH),
             padding: btnPad,
             visualDensity: VisualDensity.compact,
+            textStyle: TextStyle(fontSize: fontSize),
           );
           final compactOutlined = OutlinedButton.styleFrom(
             minimumSize: Size(0, btnMinH),
             padding: btnPad,
             visualDensity: VisualDensity.compact,
+            textStyle: TextStyle(fontSize: fontSize),
           );
           final searchBox = SizedBox(
             width: searchWidth,
+            height: 32,
             child: TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
+              style: TextStyle(fontSize: context.sizes.fontSm),
+              decoration: InputDecoration(
+                prefixIcon: Icon(Icons.search, size: 16),
                 hintText: 'Search SKU/Name/Barcode',
+                hintStyle: TextStyle(fontSize: context.sizes.fontSm),
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 floatingLabelBehavior: FloatingLabelBehavior.never,
               ),
               onChanged: (v) => setState(() => _search = v),
@@ -198,6 +208,8 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
           final activeDrop = DropdownButton<_ActiveFilter>(
             value: _activeFilter,
             onChanged: (v) => setState(() => _activeFilter = v ?? _ActiveFilter.all),
+            isDense: true,
+            style: TextStyle(fontSize: fontSize, color: Theme.of(context).colorScheme.onSurface),
             items: const [
               DropdownMenuItem(value: _ActiveFilter.all, child: Text('All')),
               DropdownMenuItem(value: _ActiveFilter.active, child: Text('Active')),
@@ -207,17 +219,19 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
           final gstDrop = DropdownButton<int>(
             value: _gstFilter,
             onChanged: (v) => setState(() => _gstFilter = v ?? -1),
+            isDense: true,
+            style: TextStyle(fontSize: fontSize, color: Theme.of(context).colorScheme.onSurface),
             items: const [
               DropdownMenuItem(value: -1, child: Text('GST: All')),
-              DropdownMenuItem(value: 0, child: Text('GST 0%')),
-              DropdownMenuItem(value: 5, child: Text('GST 5%')),
-              DropdownMenuItem(value: 12, child: Text('GST 12%')),
-              DropdownMenuItem(value: 18, child: Text('GST 18%')),
+              DropdownMenuItem(value: 0, child: Text('0%')),
+              DropdownMenuItem(value: 5, child: Text('5%')),
+              DropdownMenuItem(value: 12, child: Text('12%')),
+              DropdownMenuItem(value: 18, child: Text('18%')),
             ],
           );
           return Wrap(
-            spacing: narrow ? 6 : 8,
-            runSpacing: narrow ? 6 : 8,
+            spacing: 6,
+            runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               searchBox,
@@ -226,14 +240,14 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
               FilledButton.icon(
                 style: compactFilled,
                 onPressed: isSignedIn && selStore != null ? () => _openAddDialog(context) : _requireSignInNotice,
-                icon: const Icon(Icons.add),
-                label: const Text('Add Product'),
+                icon: Icon(Icons.add, size: iconSize),
+                label: const Text('Add'),
               ),
               OutlinedButton.icon(
                 style: compactOutlined,
                 onPressed: () => _exportCsv(),
-                icon: const Icon(Icons.file_download_outlined),
-                label: const Text('Export CSV'),
+                icon: Icon(Icons.file_download_outlined, size: iconSize),
+                label: const Text('Export'),
               ),
               OutlinedButton.icon(
                 style: compactOutlined,
@@ -242,16 +256,16 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                           MaterialPageRoute(builder: (_) => const ImportProductsScreen()),
                         )
                     : _requireSignInNotice,
-                icon: const Icon(Icons.file_upload_outlined),
-                label: const Text('Import CSV'),
+                icon: Icon(Icons.file_upload_outlined, size: iconSize),
+                label: const Text('Import'),
               ),
               Builder(builder: (_) {
                 final hasData = state.items.isNotEmpty;
                 return OutlinedButton.icon(
                   style: compactOutlined,
-                  onPressed: hasData ? () => _exportBarcodesPdf(context) : null,
-                  icon: const Icon(Icons.qr_code_2),
-                  label: const Text('Barcodes PDF'),
+                  onPressed: hasData ? () => _openPrintBarcodesDialog(context) : null,
+                  icon: Icon(Icons.qr_code_2, size: iconSize),
+                  label: const Text('Barcodes'),
                 );
               }),
               OutlinedButton.icon(
@@ -259,15 +273,15 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const InventorySheetPage()),
                 ),
-                icon: const Icon(Icons.grid_on_outlined),
-                label: const Text('Update Sheet'),
+                icon: Icon(Icons.grid_on_outlined, size: iconSize),
+                label: const Text('Sheet'),
               ),
               OutlinedButton.icon(
                 style: compactOutlined,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const CategoryScreen()),
                 ),
-                icon: const Icon(Icons.category_outlined),
+                icon: Icon(Icons.category_outlined, size: iconSize),
                 label: const Text('Categories'),
               ),
               OutlinedButton.icon(
@@ -275,140 +289,309 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const InvoiceAnalysisPage()),
                 ),
-                icon: const Icon(Icons.analytics_outlined),
-                label: const Text('Invoice Analysis'),
+                icon: Icon(Icons.analytics_outlined, size: iconSize),
+                label: const Text('Analysis'),
+              ),
+              // View toggle
+              ToggleButtons(
+                isSelected: [_isGridView, !_isGridView],
+                onPressed: (i) => setState(() => _isGridView = i == 0),
+                borderRadius: context.radiusSm,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                children: [
+                  Icon(Icons.grid_view, size: context.sizes.iconSm),
+                  Icon(Icons.view_list, size: context.sizes.iconSm),
+                ],
               ),
             ],
           );
         }),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Expanded(
           child: PageLoaderOverlay(
             loading: state.loading && state.items.isEmpty,
             error: state.error,
             onRetry: () => ref.read(productsPagedControllerProvider).resetAndLoad(),
-            child: Card(
-              child: Builder(builder: (context) {
-                final list = state.items;
-                if (list.isEmpty && !state.loading) {
-                  return const Center(child: Text('No products found in Inventory.'));
-                }
-                final filtered = _applyFilters(list);
-                _currentProducts = filtered; // cache (export current view)
-                if (filtered.isEmpty && !state.loading) {
-                  return const Center(child: Text('No products match the filters.'));
-                }
-                return Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final table = DataTable(
-                        columnSpacing: 28,
-                        horizontalMargin: 12,
-                        columns: const [
-                          DataColumn(label: Text('SKU')),
-                          DataColumn(label: Text('Name')),
-                          DataColumn(label: Text('Barcode')),
-                          DataColumn(label: Text('Unit Price')),
-                          DataColumn(label: Text('GST %')),
-                          DataColumn(label: Text('Store')),
-                          DataColumn(label: Text('Warehouse')),
-                          DataColumn(label: Text('Total')),
-                          DataColumn(label: Text('Active')),
-                        ],
-                        rows: [
-                          for (final p in filtered)
-                            DataRow(
-                              onSelectChanged: (selected) {
-                                if (selected == true && isSignedIn) {
-                                  _openEditDialog(context, p);
-                                }
-                              },
-                              onLongPress: isSignedIn ? () => _confirmDelete(context, p) : null,
-                              cells: [
-                                DataCell(Text(p.sku)),
-                                DataCell(Text(p.name)),
-                                DataCell(Text(p.barcode)),
-                                DataCell(Text('₹${p.unitPrice.toStringAsFixed(2)}')),
-                                DataCell(Text((p.taxPct ?? 0).toString())),
-                                DataCell(Text(p.stockAt('Store').toString())),
-                                DataCell(Text(p.stockAt('Warehouse').toString())),
-                                DataCell(Text(p.totalStock.toString())),
-                                DataCell(
-                                  Builder(
-                                    builder: (context) {
-                                      final scheme = Theme.of(context).colorScheme;
-                                      final color = p.isActive ? scheme.primary : scheme.error;
-                                      return Icon(p.isActive ? Icons.check_circle : Icons.cancel, color: color);
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                        ],
-                      );
-                      return Column(
-                        children: [
-                          Expanded(
-                            child: Scrollbar(
-                              thumbVisibility: true,
-                              notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onHorizontalDragUpdate: (details) {
-                                  if (!_hScrollCtrl.hasClients) return;
-                                  final maxExtent = _hScrollCtrl.position.maxScrollExtent;
-                                  double next = _hScrollCtrl.offset - details.delta.dx;
-                                  if (next < 0) next = 0;
-                                  if (next > maxExtent) next = maxExtent;
-                                  _hScrollCtrl.jumpTo(next);
-                                },
-                                child: SingleChildScrollView(
-                                  controller: _hScrollCtrl,
-                                  physics: const ClampingScrollPhysics(),
-                                  scrollDirection: Axis.horizontal,
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                                    child: SingleChildScrollView(
-                                      controller: _vScrollCtrl,
-                                      child: DataTableTheme(
-                                        data: DataTableThemeData(
-                                          dataTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                                          headingTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700),
-                                        ),
-                                        child: table,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+            child: Builder(builder: (context) {
+              final list = state.items;
+              if (list.isEmpty && !state.loading) {
+                return const Center(child: Text('No products found in Inventory.'));
+              }
+              final filtered = _applyFilters(list);
+              _currentProducts = filtered; // cache (export current view)
+              if (filtered.isEmpty && !state.loading) {
+                return const Center(child: Text('No products match the filters.'));
+              }
+              return LayoutBuilder(builder: (context, constraints) {
+                // Responsive grid: more columns on wider screens
+                final crossAxisCount = constraints.maxWidth > 1200
+                    ? 7
+                    : constraints.maxWidth > 900
+                        ? 6
+                        : constraints.maxWidth > 600
+                            ? 5
+                            : 4;
+                return Column(
+                  children: [
+                    Expanded(
+                      child: _isGridView
+                          ? GridView.builder(
+                              controller: _vScrollCtrl,
+                              padding: const EdgeInsets.all(6),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                mainAxisSpacing: 6,
+                                crossAxisSpacing: 6,
+                                childAspectRatio: 0.85,
                               ),
+                              itemCount: filtered.length,
+                              itemBuilder: (context, index) {
+                                final p = filtered[index];
+                                return _buildProductTile(context, p, isSignedIn);
+                              },
+                            )
+                          : ListView.builder(
+                              controller: _vScrollCtrl,
+                              padding: const EdgeInsets.all(6),
+                              itemCount: filtered.length,
+                              itemBuilder: (context, index) {
+                                final p = filtered[index];
+                                return _buildProductListItem(context, p, isSignedIn);
+                              },
                             ),
-                          ),
-                          if (!state.endReached)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: state.loading
-                                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : OutlinedButton.icon(
-                                      onPressed: () => ref.read(productsPagedControllerProvider).loadMore(),
-                                      icon: const Icon(Icons.more_horiz),
-                                      label: const Text('Load more'),
-                                    ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
+                    ),
+                    if (!state.endReached)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: state.loading
+                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                            : OutlinedButton.icon(
+                                onPressed: () => ref.read(productsPagedControllerProvider).loadMore(),
+                                icon: const Icon(Icons.more_horiz),
+                                label: const Text('Load more'),
+                              ),
+                      ),
+                  ],
                 );
-              }),
-            ),
+              });
+            }),
           ),
         ),
       ]),
     );
   }
 
-  
+  // List item for list view
+  Widget _buildProductListItem(BuildContext context, ProductDoc p, bool isSignedIn) {
+    final cs = Theme.of(context).colorScheme;
+    final sizes = context.sizes;
+    return Container(
+      margin: EdgeInsets.only(bottom: sizes.gapSm),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: context.radiusMd,
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.5)),
+        boxShadow: [BoxShadow(color: cs.shadow.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 1))],
+      ),
+      child: InkWell(
+        borderRadius: context.radiusMd,
+        onTap: () => _showProductDetail(context, p, isSignedIn),
+        child: Padding(
+          padding: context.padSm,
+          child: Row(
+            children: [
+              // Product Image
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: context.radiusSm,
+                  color: cs.surfaceContainerHighest,
+                ),
+                child: p.imageUrls.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: context.radiusSm,
+                        child: Image.network(p.imageUrls.first, fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Icon(Icons.broken_image_outlined, size: sizes.iconSm, color: cs.outline),
+                        ),
+                      )
+                    : Icon(Icons.inventory_2_outlined, size: sizes.iconSm, color: cs.outline),
+              ),
+              SizedBox(width: sizes.gapMd),
+              // Product Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(p.name, style: TextStyle(fontWeight: FontWeight.w600, fontSize: sizes.fontSm, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    SizedBox(height: sizes.gapXs),
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: sizes.gapXs, vertical: 1),
+                          decoration: BoxDecoration(color: cs.primaryContainer.withOpacity(0.5), borderRadius: context.radiusSm),
+                          child: Text(p.sku, style: TextStyle(fontSize: sizes.fontXs, color: cs.primary, fontWeight: FontWeight.w500)),
+                        ),
+                        if (p.barcode.isNotEmpty) ...[
+                          SizedBox(width: sizes.gapSm),
+                          Expanded(child: Text(p.barcode, style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Price
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('₹${p.unitPrice.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontSm, color: cs.primary)),
+                  if ((p.taxPct ?? 0) > 0) Text('+${p.taxPct}%', style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant)),
+                ],
+              ),
+              SizedBox(width: sizes.gapSm),
+              // Stock
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapXs),
+                decoration: BoxDecoration(
+                  color: p.totalStock > (p.minStock ?? 0) ? context.appColors.success.withOpacity(0.1) : context.appColors.warning.withOpacity(0.1),
+                  borderRadius: context.radiusSm,
+                ),
+                child: Text('${p.totalStock}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontXs,
+                  color: p.totalStock > (p.minStock ?? 0) ? context.appColors.success : context.appColors.warning)),
+              ),
+              SizedBox(width: sizes.gapSm),
+              // Status
+              Container(
+                width: 16, height: 16,
+                decoration: BoxDecoration(color: p.isActive ? context.appColors.success : cs.error, shape: BoxShape.circle),
+                child: Icon(p.isActive ? Icons.check : Icons.close, size: 10, color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Simple image tile for grid - shows only product image with name overlay
+  Widget _buildProductTile(BuildContext context, ProductDoc p, bool isSignedIn) {
+    final cs = Theme.of(context).colorScheme;
+    final sizes = context.sizes;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: context.radiusMd,
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.4)),
+        boxShadow: [BoxShadow(color: cs.shadow.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: context.radiusMd,
+          onTap: () => _showProductDetail(context, p, isSignedIn),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Image section
+              Expanded(
+                flex: 3,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                      child: p.imageUrls.isNotEmpty
+                          ? Image.network(p.imageUrls.first, fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: cs.surfaceContainerHighest,
+                                child: Icon(Icons.inventory_2_outlined, size: 28, color: cs.outline),
+                              ),
+                            )
+                          : Container(
+                              color: cs.surfaceContainerHighest,
+                              child: Icon(Icons.inventory_2_outlined, size: 28, color: cs.outline),
+                            ),
+                    ),
+                    // Status indicator
+                    Positioned(
+                      top: 4, right: 4,
+                      child: Container(
+                        width: 14, height: 14,
+                        decoration: BoxDecoration(color: p.isActive ? context.appColors.success : cs.error, shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5)),
+                        child: Icon(p.isActive ? Icons.check : Icons.close, size: 8, color: Colors.white),
+                      ),
+                    ),
+                    // Image count
+                    if (p.imageUrls.length > 1)
+                      Positioned(
+                        top: 4, left: 4,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: sizes.gapXs, vertical: 1),
+                          decoration: BoxDecoration(color: Colors.black54, borderRadius: context.radiusSm),
+                          child: Text('${p.imageUrls.length}', style: TextStyle(color: Colors.white, fontSize: sizes.fontXs, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Info section
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: context.padSm,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(p.name, style: TextStyle(fontSize: sizes.fontXs, fontWeight: FontWeight.w600, color: cs.onSurface), maxLines: 2, overflow: TextOverflow.ellipsis),
+                      const Spacer(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('₹${p.unitPrice.toStringAsFixed(0)}', style: TextStyle(fontSize: sizes.fontXs, fontWeight: FontWeight.w700, color: cs.primary)),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: sizes.gapXs, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: p.totalStock > (p.minStock ?? 0) ? context.appColors.success.withOpacity(0.15) : context.appColors.warning.withOpacity(0.15),
+                              borderRadius: context.radiusSm,
+                            ),
+                            child: Text('${p.totalStock}', style: TextStyle(fontSize: sizes.fontXs, fontWeight: FontWeight.w700,
+                              color: p.totalStock > (p.minStock ?? 0) ? context.appColors.success : context.appColors.warning)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // E-commerce style product detail view
+  void _showProductDetail(BuildContext context, ProductDoc p, bool isSignedIn) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _ProductDetailDialog(
+        product: p,
+        isSignedIn: isSignedIn,
+        onEdit: () {
+          Navigator.pop(ctx);
+          _openEditDialog(context, p);
+        },
+        onDelete: () {
+          Navigator.pop(ctx);
+          _confirmDelete(context, p);
+        },
+      ),
+    );
+  }
 
   Future<void> _openAddDialog(BuildContext context) async {
     final user = ref.read(authStateProvider);
@@ -467,7 +650,7 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       builder: (_) => _EditProductDialog(product: p),
     );
     if (result == null) return;
-  final repo = ref.read(inventoryRepoProvider);
+    final repo = ref.read(inventoryRepoProvider);
     final storeId = ref.read(selectedStoreIdProvider);
     if (storeId == null) { _requireSignInNotice(); return; }
     await repo.updateProduct(
@@ -478,13 +661,17 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
       taxPct: result.taxPct,
       barcode: result.barcode,
       description: result.description,
-      variants: result.variants,
-      mrpPrice: result.mrpPrice,
+      imageUrls: result.imageUrls,
       costPrice: result.costPrice,
+      discountPct: result.discountPct,
+      category: result.category,
+      subCategory: result.subCategory,
+      quantityPerUnit: result.quantityPerUnit,
       height: result.height,
       width: result.width,
       weight: result.weight,
       volumeMl: result.volumeMl,
+      minStock: result.minStock,
       isActive: result.isActive,
     );
     ref.read(productsPagedControllerProvider).resetAndLoad();
@@ -611,44 +798,12 @@ class _CloudProductsViewState extends ConsumerState<_CloudProductsView> {
     });
   }
 
-  Future<void> _exportBarcodesPdf(BuildContext context) async {
+  void _openPrintBarcodesDialog(BuildContext context) {
     if (_currentProducts.isEmpty) return;
-    final products = _currentProducts
-        .map((p) => BarcodeProduct(sku: p.sku, realBarcode: p.barcode))
-        .toList();
-    late final Uint8List bytes;
-    try {
-      bytes = await buildBarcodesPdf(products);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to build PDF: $e')));
-      return;
-    }
-    final ok = await downloadBytes(bytes, 'product_barcodes.pdf', 'application/pdf');
-    if (!mounted) return;
-    if (!ok) {
-      // Fallback: show simple dialog with note
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text(
-            'Barcodes PDF generated',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          content: DefaultTextStyle(
-            style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
-                .copyWith(color: Theme.of(context).colorScheme.onSurface),
-            child: const Text('Automatic download failed. Try again or check browser settings.'),
-          ),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Barcodes PDF downloaded')));
-    }
+    showDialog(
+      context: context,
+      builder: (ctx) => PrintBarcodesDialog(products: _currentProducts),
+    );
   }
 
   // Old inline CSV import flow removed; now navigates to ImportProductsScreen
@@ -849,10 +1004,28 @@ class _AddProductDialogState extends State<_AddProductDialog> {
       FirebaseFirestore.instance.collection('stores').doc(storeId).collection('categories');
 
   Future<void> _scanBarcode() async {
-    // Placeholder for future barcode scanning implementation
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Scan Barcode: coming soon')),
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Barcode scanning not available on web. Use mobile app.')),
+      );
+      return;
+    }
+    
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const _BarcodeScannerScreen(),
+      ),
     );
+    
+    if (result != null && result.isNotEmpty && mounted) {
+      setState(() {
+        _barcode.text = result;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Barcode scanned: $result'), backgroundColor: context.appColors.success),
+      );
+    }
   }
 
   String _skuPrefixFromCategory(String category) {
@@ -1001,67 +1174,79 @@ class _AddProductDialogState extends State<_AddProductDialog> {
 
   Future<void> _pickImageShowOptions([int? slot]) async {
     final index = slot ?? _firstEmptySlot();
+    
+    // On mobile, show options for camera or gallery
     if (!kIsWeb) {
       final source = await showModalBottomSheet<ImageSource>(
         context: context,
         builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.photo_camera),
-                title: const Text('Camera'),
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Take Photo'),
                 onTap: () => Navigator.pop(ctx, ImageSource.camera),
               ),
               ListTile(
-                leading: const Icon(Icons.folder_open),
-                title: const Text('Browse Files'),
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Choose from Gallery'),
                 onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('Cancel'),
+                onTap: () => Navigator.pop(ctx),
               ),
             ],
           ),
         ),
       );
-      if (source == null) return;
-      final XFile? img = await _picker.pickImage(source: source);
+      
+      if (source == null || !mounted) return;
+      
+      final XFile? img = await _picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      
       if (!mounted) return;
       if (img != null) {
         final bytes = await img.readAsBytes();
-        setState(() => _pickedImages[index] = _PickedImage(name: img.name, bytes: bytes));
+        setState(() {
+          _pickedImages[index] = _PickedImage(name: img.name, bytes: bytes);
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Image selected: ${img.name}')),
+          SnackBar(
+            content: Text('Image added: ${img.name}'),
+            backgroundColor: context.appColors.success,
+          ),
         );
       }
-    } else {
-      final choice = await showModalBottomSheet<String>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo_camera),
-                title: const Text('Camera'),
-                onTap: () => Navigator.pop(ctx, 'camera'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.folder_open),
-                title: const Text('Browse Files'),
-                onTap: () => Navigator.pop(ctx, 'files'),
-              ),
-            ],
-          ),
+      return;
+    }
+    
+    // Web: use gallery only
+    final XFile? img = await _picker.pickImage(
+      source: ImageSource.gallery, 
+      maxWidth: 1024, 
+      maxHeight: 1024, 
+      imageQuality: 85,
+    );
+    
+    if (!mounted) return;
+    if (img != null) {
+      final bytes = await img.readAsBytes();
+      setState(() {
+        _pickedImages[index] = _PickedImage(name: img.name, bytes: bytes);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Image added: ${img.name}'),
+          backgroundColor: context.appColors.success,
         ),
       );
-      if (choice == null) return;
-      WebPickedImage? webImg = choice == 'camera' ? await pickImageFromCameraWeb() : await pickImageFromFilesWeb();
-      if (!mounted) return;
-      if (webImg != null) {
-        setState(() => _pickedImages[index] = _PickedImage(name: webImg.name, bytes: webImg.bytes));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Image selected: ${webImg.name}')),
-        );
-      }
     }
   }
 
@@ -1112,7 +1297,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
               TextButton(onPressed: _pickImageShowOptions, child: const Text('Upload Image')),
             ],
           ),
-          const SizedBox(height: 8),
+          context.gapVSm,
           // Preview strip directly below title
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1121,50 +1306,76 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                 final data = _pickedImages[i];
                 final uploadingThis = _uploading && data != null && _progress[i] < 1.0;
                 final failed = _uploadError != null;
+                final sizes = context.sizes;
                 return Padding(
-                  padding: EdgeInsets.only(right: i < 2 ? 8.0 : 0.0),
+                  padding: EdgeInsets.only(right: i < 2 ? sizes.gapMd : 0.0, top: sizes.gapXs),
                   child: InkWell(
                     onTap: () => (_uploading) ? null : (data == null ? _pickImageShowOptions(i) : _showImagePreview(i)),
+                    borderRadius: context.radiusSm,
                     child: Stack(
+                      clipBehavior: Clip.none,
                       children: [
                         Container(
                           width: 80,
                           height: 80,
                           decoration: BoxDecoration(
-                            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: data != null 
+                                  ? Theme.of(context).colorScheme.primary 
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                              width: data != null ? 2 : 1,
+                            ),
+                            borderRadius: context.radiusSm,
                             color: Theme.of(context).colorScheme.surfaceContainerHighest,
                           ),
                           child: data == null
                               ? Column(
                                   mainAxisSize: MainAxisSize.min,
                                   mainAxisAlignment: MainAxisAlignment.center,
-                                  children: const [
-                                    Icon(Icons.add_a_photo, size: 20),
-                                    SizedBox(height: 4),
-                                    Text('Image', style: TextStyle(fontSize: 11)),
+                                  children: [
+                                    Icon(
+                                      i == 0 ? Icons.add_a_photo_outlined : Icons.add_photo_alternate_outlined, 
+                                      size: sizes.iconMd,
+                                      color: i == 0 ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.primary,
+                                    ),
+                                    SizedBox(height: sizes.gapXs),
+                                    Text(
+                                      i == 0 ? 'Add *' : 'Image ${i + 1}', 
+                                      style: TextStyle(
+                                        fontSize: sizes.fontXs,
+                                        color: i == 0 ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
                                   ],
                                 )
                               : ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.memory(data.bytes, fit: BoxFit.cover, width: 80, height: 80),
+                                  borderRadius: context.radiusSm,
+                                  child: Image.memory(
+                                    data.bytes, 
+                                    fit: BoxFit.cover, 
+                                    width: 80, 
+                                    height: 80,
+                                    errorBuilder: (ctx, err, stack) => const Center(
+                                      child: Icon(Icons.broken_image, size: 24),
+                                    ),
+                                  ),
                                 ),
                         ),
                         if (data != null && !_uploading)
                           Positioned(
-                            top: 0,
-                            right: 0,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black45,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(minHeight: 24, minWidth: 24),
-                                icon: const Icon(Icons.close, size: 16, color: Colors.white),
-                                onPressed: () => _removeImage(i),
-                                tooltip: 'Remove',
+                            top: -6,
+                            right: -6,
+                            child: GestureDetector(
+                              onTap: () => _removeImage(i),
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.error,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 1.5),
+                                ),
+                                child: const Icon(Icons.close, size: 12, color: Colors.white),
                               ),
                             ),
                           ),
@@ -1173,7 +1384,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                             child: Container(
                               decoration: BoxDecoration(
                                 color: Colors.black38,
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: context.radiusSm,
                               ),
                               child: Center(
                                 child: SizedBox(
@@ -1182,8 +1393,8 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       const CircularProgressIndicator(strokeWidth: 3),
-                                      const SizedBox(height: 6),
-                                      Text('${(_progress[i]*100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: Colors.white)),
+                                      SizedBox(height: sizes.gapSm),
+                                      Text('${(_progress[i]*100).toStringAsFixed(0)}%', style: TextStyle(fontSize: sizes.fontXs, color: Colors.white)),
                                     ],
                                   ),
                                 ),
@@ -1194,7 +1405,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                           Positioned(
                             bottom: 4,
                             right: 4,
-                            child: Icon(Icons.check_circle, color: Colors.green.shade400, size: 20),
+                            child: Icon(Icons.check_circle, color: context.appColors.success, size: 20),
                           ),
                         if (data != null && failed)
                           Positioned(
@@ -1212,7 +1423,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
           if (_uploadError != null)
             Padding(
               padding: const EdgeInsets.only(top: 6.0),
-              child: Text('Upload failed: $_uploadError', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+              child: Text('Upload failed: $_uploadError', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: context.sizes.fontSm)),
             ),
         ],
       ),
@@ -1227,49 +1438,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                      controller: _sku,
-                      decoration: InputDecoration(
-                        labelText: 'SKU',
-                        suffixIcon: IconButton(
-                          tooltip: 'Generate SKU',
-                          icon: const Icon(Icons.auto_awesome),
-                          onPressed: _generateSku,
-                        ),
-                      ),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
-                      controller: _barcode,
-                      decoration: InputDecoration(
-                        labelText: 'Barcode',
-                        suffixIcon: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Generate from SKU',
-                              icon: const Icon(Icons.auto_awesome),
-                              onPressed: _generateBarcodeFromSku,
-                            ),
-                            IconButton(
-                              tooltip: 'Scan Barcode',
-                              icon: const Icon(Icons.qr_code_scanner_outlined),
-                              onPressed: _scanBarcode,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ]),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
+                // Category and Sub Category - moved to top after images
                 Builder(builder: (ctx) {
                   final storeId = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
                   if (storeId == null || storeId.isEmpty) {
@@ -1280,16 +1449,17 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                           controller: _category,
                           decoration: InputDecoration(
-                            labelText: 'Category',
+                            labelText: 'Category *',
                             suffixIcon: IconButton(
                               tooltip: 'Add Category',
                               icon: const Icon(Icons.add_circle_outline),
                               onPressed: _quickAddCategory,
                             ),
                           ),
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      context.gapHMd,
                       Expanded(
                         child: TextFormField(
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
@@ -1332,7 +1502,7 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                           child: DropdownButtonFormField<String>(
                             isExpanded: true,
                             decoration: InputDecoration(
-                              labelText: 'Category',
+                              labelText: 'Category *',
                               suffixIcon: IconButton(
                                 tooltip: 'Add Category',
                                 icon: const Icon(Icons.add_circle_outline),
@@ -1345,9 +1515,10 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                               _category.text = v ?? '';
                               _subCategory.clear();
                             }),
+                            validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        context.gapHMd,
                         Expanded(
                           child: DropdownButtonFormField<String>(
                             isExpanded: true,
@@ -1372,33 +1543,89 @@ class _AddProductDialogState extends State<_AddProductDialog> {
                     },
                   );
                 }),
+                context.gapVSm,
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                      controller: _sku,
+                      decoration: InputDecoration(
+                        labelText: 'SKU *',
+                        suffixIcon: IconButton(
+                          tooltip: 'Generate SKU',
+                          icon: const Icon(Icons.auto_awesome),
+                          onPressed: _generateSku,
+                        ),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                  context.gapHMd,
+                  Expanded(
+                    child: TextFormField(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+                      controller: _barcode,
+                      decoration: InputDecoration(
+                        labelText: 'Barcode *',
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Generate from SKU',
+                              icon: const Icon(Icons.auto_awesome),
+                              onPressed: _generateBarcodeFromSku,
+                            ),
+                            IconButton(
+                              tooltip: 'Scan Barcode',
+                              icon: const Icon(Icons.qr_code_scanner_outlined),
+                              onPressed: _scanBarcode,
+                            ),
+                          ],
+                        ),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                ]),
+                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
                 Row(children: [
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _buyingPrice, decoration: const InputDecoration(labelText: 'Buying Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _sellingPrice, decoration: const InputDecoration(labelText: 'Selling Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  context.gapHMd,
+                  Expanded(child: TextFormField(
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), 
+                    controller: _sellingPrice, 
+                    decoration: const InputDecoration(labelText: 'Selling Price *'), 
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Required';
+                      final price = double.tryParse(v.trim());
+                      if (price == null || price <= 0) return 'Enter valid price';
+                      return null;
+                    },
+                  )),
                 ]),
                 Row(children: [
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _discountPct, decoration: const InputDecoration(labelText: 'Discount %'), keyboardType: const TextInputType.numberWithOptions(decimal: true)) ),
-                  const SizedBox(width: 12),
+                  context.gapHMd,
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _quantityPerUnit, decoration: const InputDecoration(labelText: 'Unit / Count'))),
                 ]),
                 Row(children: [
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _height, decoration: const InputDecoration(labelText: 'Height (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
+                  context.gapHMd,
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _width, decoration: const InputDecoration(labelText: 'Width (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
+                  context.gapHMd,
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _weight, decoration: const InputDecoration(labelText: 'Weight (g)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
+                  context.gapHMd,
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _volumeMl, decoration: const InputDecoration(labelText: 'Volume (ml)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                 ]),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _minStock, decoration: const InputDecoration(labelText: 'Min Stock'), keyboardType: TextInputType.number),
                 TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
                 // Removed single-file indicator; use image boxes above
-                const SizedBox(height: 8),
+                context.gapVSm,
                 CheckboxListTile(value: _isActive, onChanged: (v) => setState(() => _isActive = v ?? true), title: const Text('Active')),
                 Row(children: [
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _storeQty, decoration: const InputDecoration(labelText: 'Initial Store Qty'), keyboardType: TextInputType.number)),
-                  const SizedBox(width: 12),
+                  context.gapHMd,
                   Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _warehouseQty, decoration: const InputDecoration(labelText: 'Initial Warehouse Qty'), keyboardType: TextInputType.number)),
                 ]),
               ],
@@ -1413,10 +1640,42 @@ class _AddProductDialogState extends State<_AddProductDialog> {
         FilledButton(
           onPressed: _uploading ? null : () async {
             if (!(_formKey.currentState?.validate() ?? false)) return;
+            
+            // Validate required fields
+            final List<String> missingFields = [];
+            
+            if (_category.text.trim().isEmpty) {
+              missingFields.add('Category');
+            }
             if (_sku.text.trim().isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SKU required before saving')));
+              missingFields.add('SKU');
+            }
+            if (_name.text.trim().isEmpty) {
+              missingFields.add('Name');
+            }
+            if (_sellingPrice.text.trim().isEmpty || (double.tryParse(_sellingPrice.text.trim()) ?? 0) <= 0) {
+              missingFields.add('Selling Price');
+            }
+            if (_barcode.text.trim().isEmpty) {
+              missingFields.add('Barcode');
+            }
+            // Check for at least 1 image
+            final hasImage = _pickedImages.any((img) => img != null);
+            if (!hasImage) {
+              missingFields.add('At least 1 Image');
+            }
+            
+            if (missingFields.isNotEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Required: ${missingFields.join(", ")}'),
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
               return;
             }
+            
             setState(() { _uploadError = null; });
             final parsedQty = int.tryParse(_quantity.text.trim());
             int storeQty = int.tryParse(_storeQty.text.trim()) ?? 0;
@@ -1497,164 +1756,526 @@ class _EditProductResult {
   final num? taxPct;
   final String? barcode;
   final String? description;
-  final List<String>? variants;
-  final double? mrpPrice;
   final double? costPrice;
   final double? height;
   final double? width;
   final double? weight;
   final double? volumeMl;
   final bool? isActive;
+  final String? category;
+  final String? subCategory;
+  final String? quantityPerUnit;
+  final num? discountPct;
+  final int? minStock;
+  final List<String>? imageUrls;
   _EditProductResult({
     this.name,
     this.unitPrice,
     this.taxPct,
     this.barcode,
     this.description,
-    this.variants,
-    this.mrpPrice,
     this.costPrice,
     this.height,
     this.width,
     this.weight,
     this.volumeMl,
     this.isActive,
+    this.category,
+    this.subCategory,
+    this.quantityPerUnit,
+    this.discountPct,
+    this.minStock,
+    this.imageUrls,
   });
 }
 
-class _EditProductDialog extends StatefulWidget {
+class _EditProductDialog extends ConsumerStatefulWidget {
   final ProductDoc product;
   const _EditProductDialog({required this.product});
   @override
-  State<_EditProductDialog> createState() => _EditProductDialogState();
+  ConsumerState<_EditProductDialog> createState() => _EditProductDialogState();
 }
 
-class _EditProductDialogState extends State<_EditProductDialog> {
+class _EditProductDialogState extends ConsumerState<_EditProductDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
-  late final TextEditingController _unitPrice;
+  late final TextEditingController _sellingPrice;
+  late final TextEditingController _costPrice;
   late final TextEditingController _taxPct;
   late final TextEditingController _barcode;
   late final TextEditingController _description;
-  late final TextEditingController _variants;
-  late final TextEditingController _mrpPrice;
-  late final TextEditingController _costPrice;
+  late final TextEditingController _category;
+  late final TextEditingController _subCategory;
+  late final TextEditingController _quantityPerUnit;
+  late final TextEditingController _discountPct;
   late final TextEditingController _height;
   late final TextEditingController _width;
   late final TextEditingController _weight;
   late final TextEditingController _volumeMl;
+  late final TextEditingController _minStock;
   late bool _isActive;
+  
+  // Image handling
+  final List<_PickedImage?> _pickedImages = List<_PickedImage?>.filled(3, null);
+  List<String> _existingImageUrls = [];
+  final ImagePicker _picker = ImagePicker();
+  bool _uploading = false;
 
   @override
   void initState() {
     super.initState();
     final p = widget.product;
     _name = TextEditingController(text: p.name);
-    _unitPrice = TextEditingController(text: p.unitPrice.toString());
+    _sellingPrice = TextEditingController(text: p.unitPrice.toString());
+    _costPrice = TextEditingController(text: p.costPrice?.toString() ?? '');
     _taxPct = TextEditingController(text: p.taxPct?.toString() ?? '');
     _barcode = TextEditingController(text: p.barcode);
     _description = TextEditingController(text: p.description ?? '');
-    _variants = TextEditingController(text: p.variants.join(';'));
-    _mrpPrice = TextEditingController(text: p.mrpPrice?.toString() ?? '');
-    _costPrice = TextEditingController(text: p.costPrice?.toString() ?? '');
+    _category = TextEditingController(text: p.category ?? '');
+    _subCategory = TextEditingController(text: p.subCategory ?? '');
+    _quantityPerUnit = TextEditingController(text: p.quantityPerUnit ?? '');
+    _discountPct = TextEditingController(text: p.discountPct?.toString() ?? '');
     _height = TextEditingController(text: p.height?.toString() ?? '');
     _width = TextEditingController(text: p.width?.toString() ?? '');
     _weight = TextEditingController(text: p.weight?.toString() ?? '');
     _volumeMl = TextEditingController(text: p.volumeMl?.toString() ?? '');
+    _minStock = TextEditingController(text: p.minStock?.toString() ?? '');
     _isActive = p.isActive;
+    _existingImageUrls = List<String>.from(p.imageUrls);
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _unitPrice.dispose();
+    _sellingPrice.dispose();
+    _costPrice.dispose();
     _taxPct.dispose();
     _barcode.dispose();
     _description.dispose();
-    _variants.dispose();
-    _mrpPrice.dispose();
-    _costPrice.dispose();
+    _category.dispose();
+    _subCategory.dispose();
+    _quantityPerUnit.dispose();
+    _discountPct.dispose();
     _height.dispose();
     _width.dispose();
     _weight.dispose();
     _volumeMl.dispose();
+    _minStock.dispose();
     super.dispose();
+  }
+
+  int _firstEmptySlot() {
+    for (int i = 0; i < 3; i++) {
+      if (_pickedImages[i] == null && i >= _existingImageUrls.length) return i;
+    }
+    return 0;
+  }
+
+  Future<void> _pickImage([int? slot]) async {
+    final index = slot ?? _firstEmptySlot();
+    final XFile? img = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 85,
+    );
+    if (!mounted) return;
+    if (img != null) {
+      final bytes = await img.readAsBytes();
+      setState(() {
+        _pickedImages[index] = _PickedImage(name: img.name, bytes: bytes);
+        // Remove from existing if replacing
+        if (index < _existingImageUrls.length) {
+          _existingImageUrls.removeAt(index);
+        }
+      });
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      if (index < _existingImageUrls.length) {
+        _existingImageUrls.removeAt(index);
+      } else {
+        final pickedIndex = index - _existingImageUrls.length;
+        if (pickedIndex >= 0 && pickedIndex < _pickedImages.length) {
+          _pickedImages[pickedIndex] = null;
+        }
+      }
+    });
+  }
+
+  CollectionReference<Map<String, dynamic>> _catsCol(String storeId) =>
+      FirebaseFirestore.instance.collection('stores').doc(storeId).collection('categories');
+
+  Future<String?> _promptText(BuildContext context, String title, {String? initial}) async {
+    final ctrl = TextEditingController(text: initial ?? '');
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Enter text'),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text), child: const Text('Save')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _quickAddCategory() async {
+    final text = await _promptText(context, 'Add category', initial: _category.text.trim().isEmpty ? null : _category.text.trim());
+    if (text == null || text.trim().isEmpty) return;
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null || sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store first')));
+      return;
+    }
+    final name = text.trim();
+    try {
+      final existing = await _catsCol(sid).where('name', isEqualTo: name).limit(1).get();
+      if (existing.docs.isEmpty) {
+        await _catsCol(sid).add({'name': name, 'subcategories': <String>[]});
+      }
+      setState(() => _category.text = name);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add category: $e')));
+    }
+  }
+
+  Future<void> _quickAddSubCategory() async {
+    if (_category.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter or add a Category first')));
+      return;
+    }
+    final text = await _promptText(context, 'Add sub category', initial: _subCategory.text.trim().isEmpty ? null : _subCategory.text.trim());
+    if (text == null || text.trim().isEmpty) return;
+    final sid = ref.read(selectedStoreIdProvider);
+    if (sid == null || sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a store first')));
+      return;
+    }
+    final name = text.trim();
+    try {
+      final q = await _catsCol(sid).where('name', isEqualTo: _category.text.trim()).limit(1).get();
+      if (q.docs.isEmpty) {
+        final doc = await _catsCol(sid).add({'name': _category.text.trim(), 'subcategories': <String>[]});
+        await _catsCol(sid).doc(doc.id).update({'subcategories': FieldValue.arrayUnion([name])});
+      } else {
+        await _catsCol(sid).doc(q.docs.first.id).update({'subcategories': FieldValue.arrayUnion([name])});
+      }
+      setState(() => _subCategory.text = name);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add subcategory: $e')));
+    }
+  }
+
+  Future<void> _saveProduct() async {
+    if (_uploading) return;
+    setState(() => _uploading = true);
+
+    try {
+      final storeId = ref.read(selectedStoreIdProvider);
+      if (storeId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No store selected')));
+        setState(() => _uploading = false);
+        return;
+      }
+
+      // Upload new images
+      List<String> newUrls = List<String>.from(_existingImageUrls);
+      final imagesToUpload = _pickedImages.where((img) => img != null).map((img) => img!.bytes).toList();
+      if (imagesToUpload.isNotEmpty) {
+        final uploadedUrls = await uploadProductImages(
+          storeId: storeId,
+          sku: widget.product.sku,
+          images: imagesToUpload,
+        );
+        newUrls.addAll(uploadedUrls);
+      }
+
+      final result = _EditProductResult(
+        name: _name.text.trim().isEmpty ? null : _name.text.trim(),
+        unitPrice: _sellingPrice.text.trim().isEmpty ? null : double.tryParse(_sellingPrice.text.trim()),
+        costPrice: _costPrice.text.trim().isEmpty ? null : double.tryParse(_costPrice.text.trim()),
+        taxPct: _taxPct.text.trim().isEmpty ? null : num.tryParse(_taxPct.text.trim()),
+        barcode: _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
+        description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+        category: _category.text.trim().isEmpty ? null : _category.text.trim(),
+        subCategory: _subCategory.text.trim().isEmpty ? null : _subCategory.text.trim(),
+        quantityPerUnit: _quantityPerUnit.text.trim().isEmpty ? null : _quantityPerUnit.text.trim(),
+        discountPct: _discountPct.text.trim().isEmpty ? null : num.tryParse(_discountPct.text.trim()),
+        height: _height.text.trim().isEmpty ? null : double.tryParse(_height.text.trim()),
+        width: _width.text.trim().isEmpty ? null : double.tryParse(_width.text.trim()),
+        weight: _weight.text.trim().isEmpty ? null : double.tryParse(_weight.text.trim()),
+        volumeMl: _volumeMl.text.trim().isEmpty ? null : double.tryParse(_volumeMl.text.trim()),
+        minStock: _minStock.text.trim().isEmpty ? null : int.tryParse(_minStock.text.trim()),
+        isActive: _isActive,
+        imageUrls: newUrls.isEmpty ? null : newUrls,
+      );
+      Navigator.pop(context, result);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final sizes = context.sizes;
+    final textStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface);
+    
+    // Combine existing and picked images for display
+    final allImages = <dynamic>[];
+    for (final url in _existingImageUrls) {
+      allImages.add(url);
+    }
+    for (final img in _pickedImages) {
+      if (img != null) allImages.add(img);
+    }
+
     return AlertDialog(
-      title: Text(
-        'Edit ${widget.product.sku}',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
-            ),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Edit ${widget.product.sku}', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w700)),
+          TextButton(
+            onPressed: _uploading ? null : () => _pickImage(),
+            child: Text('Upload Image', style: TextStyle(color: scheme.primary)),
+          ),
+        ],
       ),
       content: DefaultTextStyle(
-        style: (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
-            .copyWith(color: Theme.of(context).colorScheme.onSurface),
+        style: textStyle ?? const TextStyle(),
         child: Form(
-        key: _formKey,
-        child: SizedBox(
-          width: 600,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _name, decoration: const InputDecoration(labelText: 'Name')),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
-                Row(children: [
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _unitPrice, decoration: const InputDecoration(labelText: 'Unit Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
-                ]),
-                Row(children: [
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _mrpPrice, decoration: const InputDecoration(labelText: 'MRP'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _costPrice, decoration: const InputDecoration(labelText: 'Cost Price'), keyboardType: TextInputType.numberWithOptions(decimal: true))),
-                ]),
-                Row(children: [
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _height, decoration: const InputDecoration(labelText: 'Height (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _width, decoration: const InputDecoration(labelText: 'Width (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _weight, decoration: const InputDecoration(labelText: 'Weight (g)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _volumeMl, decoration: const InputDecoration(labelText: 'Volume (ml)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
-                ]),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _variants, decoration: const InputDecoration(labelText: 'Variants (separate with ;)')),
-                TextFormField(style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface), controller: _description, decoration: const InputDecoration(labelText: 'Description')),
-                const SizedBox(height: 8),
-                CheckboxListTile(value: _isActive, onChanged: (v) => setState(() => _isActive = v ?? true), title: const Text('Active')),
-              ],
+          key: _formKey,
+          child: SizedBox(
+            width: 600,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Image thumbnails
+                  if (allImages.isNotEmpty || _existingImageUrls.isEmpty)
+                    SizedBox(
+                      height: 80,
+                      child: Row(
+                        children: [
+                          // Add button
+                          InkWell(
+                            onTap: _uploading ? null : () => _pickImage(),
+                            child: Container(
+                              width: 70,
+                              height: 70,
+                              margin: EdgeInsets.only(right: sizes.gapSm),
+                              decoration: BoxDecoration(
+                                borderRadius: context.radiusMd,
+                                border: Border.all(color: scheme.outline),
+                              ),
+                              child: Icon(Icons.add_a_photo, color: scheme.outline),
+                            ),
+                          ),
+                          // Existing & picked images
+                          ...List.generate(allImages.length.clamp(0, 3), (i) {
+                            final item = allImages[i];
+                            return Stack(
+                              children: [
+                                Container(
+                                  width: 70,
+                                  height: 70,
+                                  margin: EdgeInsets.only(right: sizes.gapSm),
+                                  decoration: BoxDecoration(
+                                    borderRadius: context.radiusMd,
+                                    border: Border.all(color: scheme.primary),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: context.radiusSm,
+                                    child: item is String
+                                        ? Image.network(item, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Icon(Icons.broken_image))
+                                        : Image.memory((item as _PickedImage).bytes, fit: BoxFit.cover),
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 0,
+                                  right: sizes.gapSm,
+                                  child: GestureDetector(
+                                    onTap: () => _removeImage(i),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(2),
+                                      decoration: BoxDecoration(color: context.colors.error, shape: BoxShape.circle),
+                                      child: Icon(Icons.close, size: 14, color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  context.gapVMd,
+                  // Category dropdown with add button
+                  Builder(builder: (ctx) {
+                    final storeId = ref.watch(selectedStoreIdProvider);
+                    if (storeId == null || storeId.isEmpty) {
+                      return Row(children: [
+                        Expanded(
+                          child: TextFormField(
+                            style: textStyle,
+                            controller: _category,
+                            decoration: InputDecoration(
+                              labelText: 'Category',
+                              suffixIcon: IconButton(
+                                tooltip: 'Add Category',
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: _quickAddCategory,
+                              ),
+                            ),
+                          ),
+                        ),
+                        context.gapHMd,
+                        Expanded(
+                          child: TextFormField(
+                            style: textStyle,
+                            controller: _subCategory,
+                            decoration: InputDecoration(
+                              labelText: 'Sub Category',
+                              suffixIcon: IconButton(
+                                tooltip: 'Add Sub Category',
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: _quickAddSubCategory,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ]);
+                    }
+                    final stream = FirebaseFirestore.instance
+                        .collection('stores')
+                        .doc(storeId)
+                        .collection('categories')
+                        .orderBy('name')
+                        .snapshots();
+                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: stream,
+                      builder: (ctx, snap) {
+                        final cats = <String>[];
+                        final subsByCat = <String, List<String>>{};
+                        if (snap.hasData) {
+                          for (final d in snap.data!.docs) {
+                            final data = d.data();
+                            final name = (data['name'] ?? '') as String;
+                            cats.add(name);
+                            subsByCat[name] = List<String>.from((data['subcategories'] ?? const <dynamic>[]) as List<dynamic>);
+                          }
+                        }
+                        final selCat = _category.text.trim().isEmpty ? null : _category.text.trim();
+                        final subs = selCat == null ? const <String>[] : (subsByCat[selCat] ?? const <String>[]);
+                        return Row(children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: 'Category',
+                                suffixIcon: IconButton(
+                                  tooltip: 'Add Category',
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  onPressed: _quickAddCategory,
+                                ),
+                              ),
+                              value: (selCat != null && cats.contains(selCat)) ? selCat : null,
+                              items: cats.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                              onChanged: (v) => setState(() {
+                                _category.text = v ?? '';
+                                _subCategory.clear();
+                              }),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: 'Sub Category',
+                                suffixIcon: IconButton(
+                                  tooltip: 'Add Sub Category',
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  onPressed: _quickAddSubCategory,
+                                ),
+                              ),
+                              value: (_subCategory.text.trim().isNotEmpty && subs.contains(_subCategory.text.trim())) ? _subCategory.text.trim() : null,
+                              items: subs.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                              onChanged: subs.isEmpty ? null : (v) => setState(() => _subCategory.text = v ?? ''),
+                            ),
+                          ),
+                        ]);
+                      },
+                    );
+                  }),
+                  context.gapVSm,
+                  TextFormField(style: textStyle, controller: _name, decoration: const InputDecoration(labelText: 'Name')),
+                  context.gapVSm,
+                  TextFormField(style: textStyle, controller: _barcode, decoration: const InputDecoration(labelText: 'Barcode')),
+                  context.gapVSm,
+                  Row(children: [
+                    Expanded(child: TextFormField(style: textStyle, controller: _costPrice, decoration: const InputDecoration(labelText: 'Buying Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                    context.gapHMd,
+                    Expanded(child: TextFormField(style: textStyle, controller: _sellingPrice, decoration: const InputDecoration(labelText: 'Selling Price'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  ]),
+                  context.gapVSm,
+                  Row(children: [
+                    Expanded(child: TextFormField(style: textStyle, controller: _discountPct, decoration: const InputDecoration(labelText: 'Discount %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                    context.gapHMd,
+                    Expanded(child: TextFormField(style: textStyle, controller: _taxPct, decoration: const InputDecoration(labelText: 'GST %'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  ]),
+                  context.gapVSm,
+                  Row(children: [
+                    Expanded(child: TextFormField(style: textStyle, controller: _quantityPerUnit, decoration: const InputDecoration(labelText: 'Unit / Count'))),
+                    context.gapHMd,
+                    Expanded(child: TextFormField(style: textStyle, controller: _minStock, decoration: const InputDecoration(labelText: 'Min Stock'), keyboardType: TextInputType.number)),
+                  ]),
+                  context.gapVSm,
+                  Row(children: [
+                    Expanded(child: TextFormField(style: textStyle, controller: _height, decoration: const InputDecoration(labelText: 'Height (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                    context.gapHSm,
+                    Expanded(child: TextFormField(style: textStyle, controller: _width, decoration: const InputDecoration(labelText: 'Width (cm)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                    context.gapHSm,
+                    Expanded(child: TextFormField(style: textStyle, controller: _weight, decoration: const InputDecoration(labelText: 'Weight (g)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                    context.gapHSm,
+                    Expanded(child: TextFormField(style: textStyle, controller: _volumeMl, decoration: const InputDecoration(labelText: 'Volume (ml)'), keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  ]),
+                  context.gapVSm,
+                  TextFormField(style: textStyle, controller: _description, decoration: const InputDecoration(labelText: 'Description'), maxLines: 2),
+                  context.gapVSm,
+                  CheckboxListTile(
+                    value: _isActive,
+                    onChanged: (v) => setState(() => _isActive = v ?? true),
+                    title: const Text('Active'),
+                    controlAffinity: ListTileControlAffinity.trailing,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: _uploading ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
-            final result = _EditProductResult(
-              name: _name.text.trim().isEmpty ? null : _name.text.trim(),
-              unitPrice: _unitPrice.text.trim().isEmpty ? null : double.tryParse(_unitPrice.text.trim()),
-              taxPct: _taxPct.text.trim().isEmpty ? null : num.tryParse(_taxPct.text.trim()),
-              barcode: _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
-              description: _description.text.trim().isEmpty ? null : _description.text.trim(),
-              variants: _variants.text.trim().isEmpty ? null : _variants.text.split(';').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
-              mrpPrice: _mrpPrice.text.trim().isEmpty ? null : double.tryParse(_mrpPrice.text.trim()),
-              costPrice: _costPrice.text.trim().isEmpty ? null : double.tryParse(_costPrice.text.trim()),
-              height: _height.text.trim().isEmpty ? null : double.tryParse(_height.text.trim()),
-              width: _width.text.trim().isEmpty ? null : double.tryParse(_width.text.trim()),
-              weight: _weight.text.trim().isEmpty ? null : double.tryParse(_weight.text.trim()),
-              volumeMl: _volumeMl.text.trim().isEmpty ? null : double.tryParse(_volumeMl.text.trim()),
-              isActive: _isActive,
-            );
-            Navigator.pop(context, result);
-          },
-          child: const Text('Save'),
+          onPressed: _uploading ? null : _saveProduct,
+          child: _uploading
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Save'),
         ),
       ],
     );
@@ -1662,3 +2283,597 @@ class _EditProductDialogState extends State<_EditProductDialog> {
 }
 
 enum _ActiveFilter { all, active, inactive }
+
+// E-commerce style product detail dialog with image gallery
+class _ProductDetailDialog extends StatefulWidget {
+  final ProductDoc product;
+  final bool isSignedIn;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _ProductDetailDialog({
+    required this.product,
+    required this.isSignedIn,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_ProductDetailDialog> createState() => _ProductDetailDialogState();
+}
+
+class _ProductDetailDialogState extends State<_ProductDetailDialog> {
+  int _selectedImageIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.product;
+    final scheme = Theme.of(context).colorScheme;
+    final sizes = context.sizes;
+    final isWide = MediaQuery.of(context).size.width > 700;
+
+    return Dialog(
+      backgroundColor: scheme.surface,
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: isWide ? 80 : sizes.gapMd,
+        vertical: sizes.gapLg,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: context.radiusXl),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: isWide ? 900 : 500,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header with close button
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: sizes.gapLg, vertical: sizes.gapMd),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(sizes.radiusXl)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      p.name,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            // Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: isWide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Left: Images
+                          Expanded(flex: 1, child: _buildImageGallery(p, scheme)),
+                          SizedBox(width: sizes.gapLg),
+                          // Right: Details
+                          Expanded(flex: 1, child: _buildProductDetails(p, scheme)),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildImageGallery(p, scheme),
+                          SizedBox(height: sizes.gapLg),
+                          _buildProductDetails(p, scheme),
+                        ],
+                      ),
+              ),
+            ),
+            // Action buttons
+            if (widget.isSignedIn)
+              Container(
+                padding: context.padMd,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(sizes.radiusXl)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: widget.onDelete,
+                      icon: Icon(Icons.delete_outline, color: scheme.error),
+                      label: Text('Delete', style: TextStyle(color: scheme.error)),
+                    ),
+                    SizedBox(width: sizes.gapMd),
+                    FilledButton.icon(
+                      onPressed: widget.onEdit,
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Edit'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageGallery(ProductDoc p, ColorScheme scheme) {
+    final sizes = context.sizes;
+    if (p.imageUrls.isEmpty) {
+      return Container(
+        height: 300,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: context.radiusLg,
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.image_not_supported_outlined, size: sizes.iconXl, color: scheme.outline),
+              SizedBox(height: sizes.gapMd),
+              Text('No images', style: TextStyle(color: scheme.outline)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // Main large image
+        Container(
+          height: 300,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: context.radiusLg,
+            border: Border.all(color: scheme.outlineVariant.withOpacity(0.3)),
+          ),
+          child: ClipRRect(
+            borderRadius: context.radiusLg,
+            child: Image.network(
+              p.imageUrls[_selectedImageIndex],
+              fit: BoxFit.contain,
+              width: double.infinity,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return Center(
+                  child: CircularProgressIndicator(
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                        : null,
+                  ),
+                );
+              },
+              errorBuilder: (_, __, ___) => Center(
+                child: Icon(Icons.broken_image_outlined, size: 64, color: scheme.outline),
+              ),
+            ),
+          ),
+        ),
+        // Thumbnail strip (if multiple images)
+        if (p.imageUrls.length > 1) ...[
+          SizedBox(height: sizes.gapMd),
+          SizedBox(
+            height: 70,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: p.imageUrls.length,
+              itemBuilder: (context, index) {
+                final isSelected = index == _selectedImageIndex;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedImageIndex = index),
+                  child: Container(
+                    width: 70,
+                    height: 70,
+                    margin: EdgeInsets.only(right: sizes.gapSm),
+                    decoration: BoxDecoration(
+                      borderRadius: context.radiusMd,
+                      border: Border.all(
+                        color: isSelected ? scheme.primary : scheme.outlineVariant.withOpacity(0.3),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: context.radiusSm,
+                      child: Image.network(
+                        p.imageUrls[index],
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: SizedBox(
+                              width: sizes.iconSm,
+                              height: sizes.iconSm,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          );
+                        },
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.broken_image_outlined,
+                          size: sizes.iconSm,
+                          color: scheme.outline,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildProductDetails(ProductDoc p, ColorScheme scheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Price section
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              '₹${p.unitPrice.toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: context.sizes.fontXxl + 4,
+                fontWeight: FontWeight.w700,
+                color: scheme.primary,
+              ),
+            ),
+            if ((p.taxPct ?? 0) > 0) ...[
+              const SizedBox(width: 8),
+              Text(
+                '+${p.taxPct}% GST',
+                style: TextStyle(fontSize: context.sizes.fontMd, color: scheme.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+        if (p.mrpPrice != null && p.mrpPrice! > p.unitPrice) ...[
+          context.gapVXs,
+          Row(
+            children: [
+              Text(
+                'MRP: ₹${p.mrpPrice!.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: context.sizes.fontMd,
+                  color: scheme.onSurfaceVariant,
+                  decoration: TextDecoration.lineThrough,
+                ),
+              ),
+              context.gapHSm,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: context.appColors.success,
+                  borderRadius: context.radiusXs,
+                ),
+                child: Text(
+                  '${((1 - p.unitPrice / p.mrpPrice!) * 100).toStringAsFixed(0)}% OFF',
+                  style: TextStyle(color: Colors.white, fontSize: context.sizes.fontSm, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ],
+        context.gapVLg,
+        // Status badge
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: p.isActive ? context.appColors.success.withOpacity(0.1) : scheme.error.withOpacity(0.1),
+                borderRadius: context.radiusLg,
+                border: Border.all(color: p.isActive ? context.appColors.success : scheme.error),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    p.isActive ? Icons.check_circle : Icons.cancel,
+                    size: 16,
+                    color: p.isActive ? context.appColors.success : scheme.error,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    p.isActive ? 'Active' : 'Inactive',
+                    style: TextStyle(
+                      color: p.isActive ? context.appColors.success : scheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        // Info cards
+        _buildInfoRow('SKU', p.sku, scheme),
+        if (p.barcode.isNotEmpty) _buildInfoRow('Barcode', p.barcode, scheme),
+        if (p.category != null && p.category!.isNotEmpty) _buildInfoRow('Category', p.category!, scheme),
+        if (p.subCategory != null && p.subCategory!.isNotEmpty) _buildInfoRow('Sub-category', p.subCategory!, scheme),
+        context.gapVLg,
+        // Stock info
+        Container(
+          padding: context.padLg,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: context.radiusMd,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Stock', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface)),
+              context.gapVMd,
+              Row(
+                children: [
+                  _buildStockChip('Total', p.totalStock, scheme),
+                  context.gapHMd,
+                  _buildStockChip('Store', p.stockAt('Store'), scheme),
+                  context.gapHMd,
+                  _buildStockChip('Warehouse', p.stockAt('Warehouse'), scheme),
+                ],
+              ),
+              if (p.minStock != null) ...[
+                context.gapVSm,
+                Text(
+                  'Min stock alert: ${p.minStock}',
+                  style: TextStyle(fontSize: context.sizes.fontSm, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ],
+          ),
+        ),
+        // Description
+        if (p.description != null && p.description!.isNotEmpty) ...[
+          context.gapVLg,
+          Text('Description', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface)),
+          context.gapVSm,
+          Text(p.description!, style: TextStyle(color: scheme.onSurfaceVariant)),
+        ],
+        // Variants
+        if (p.variants.isNotEmpty) ...[
+          context.gapVLg,
+          Text('Variants', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface)),
+          context.gapVSm,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: p.variants
+                .map((v) => Chip(
+                      label: Text(v, style: TextStyle(fontSize: context.sizes.fontSm)),
+                      backgroundColor: scheme.primaryContainer.withOpacity(0.5),
+                    ))
+                .toList(),
+          ),
+        ],
+        // Dimensions
+        if (p.height != null || p.width != null || p.weight != null || p.volumeMl != null) ...[
+          context.gapVLg,
+          Text('Dimensions', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface)),
+          context.gapVSm,
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              if (p.height != null) Text('H: ${p.height}cm', style: TextStyle(color: scheme.onSurfaceVariant)),
+              if (p.width != null) Text('W: ${p.width}cm', style: TextStyle(color: scheme.onSurfaceVariant)),
+              if (p.weight != null) Text('Weight: ${p.weight}g', style: TextStyle(color: scheme.onSurfaceVariant)),
+              if (p.volumeMl != null) Text('Volume: ${p.volumeMl}ml', style: TextStyle(color: scheme.onSurfaceVariant)),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: context.sizes.fontMd)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.w500, color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStockChip(String label, int qty, ColorScheme scheme) {
+    final isLow = qty <= 10;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isLow ? context.appColors.warning.withOpacity(0.1) : context.appColors.success.withOpacity(0.1),
+        borderRadius: context.radiusSm,
+      ),
+      child: Column(
+        children: [
+          Text(
+            qty.toString(),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: context.sizes.fontXl,
+              color: isLow ? context.appColors.warning : context.appColors.success,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: context.sizes.fontXs, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// -------------------- Barcode Scanner Screen --------------------
+class _BarcodeScannerScreen extends StatefulWidget {
+  const _BarcodeScannerScreen();
+
+  @override
+  State<_BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
+}
+
+class _BarcodeScannerScreenState extends State<_BarcodeScannerScreen> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.normal,
+    facing: CameraFacing.back,
+  );
+  bool _hasScanned = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_hasScanned) return;
+    
+    final List<Barcode> barcodes = capture.barcodes;
+    if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+      _hasScanned = true;
+      final code = barcodes.first.rawValue!;
+      Navigator.pop(context, code);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan Barcode'),
+        backgroundColor: cs.surface,
+        foregroundColor: cs.onSurface,
+        actions: [
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: _controller,
+              builder: (context, state, child) {
+                return Icon(
+                  state.torchState == TorchState.on 
+                      ? Icons.flash_on 
+                      : Icons.flash_off,
+                );
+              },
+            ),
+            onPressed: () => _controller.toggleTorch(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.flip_camera_ios),
+            onPressed: () => _controller.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+          ),
+          // Scan overlay
+          Center(
+            child: Container(
+              width: 280,
+              height: 150,
+              decoration: BoxDecoration(
+                border: Border.all(color: cs.primary, width: 3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          // Instructions
+          Positioned(
+            bottom: 80,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Point camera at barcode',
+                  style: TextStyle(color: Colors.white, fontSize: context.sizes.fontLg),
+                ),
+              ),
+            ),
+          ),
+          // Manual entry button
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: TextButton.icon(
+                onPressed: () async {
+                  final result = await showDialog<String>(
+                    context: context,
+                    builder: (ctx) {
+                      final controller = TextEditingController();
+                      return AlertDialog(
+                        title: const Text('Enter Barcode Manually'),
+                        content: TextField(
+                          controller: controller,
+                          decoration: const InputDecoration(
+                            labelText: 'Barcode',
+                            hintText: 'Enter barcode number',
+                          ),
+                          keyboardType: TextInputType.number,
+                          autofocus: true,
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                  if (result != null && result.isNotEmpty && mounted) {
+                    Navigator.pop(context, result);
+                  }
+                },
+                icon: const Icon(Icons.keyboard, color: Colors.white),
+                label: const Text('Enter Manually', style: TextStyle(color: Colors.white)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

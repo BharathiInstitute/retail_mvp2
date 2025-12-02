@@ -17,18 +17,20 @@ import 'pos_invoices/invoice_models.dart';
 import 'pos_invoices/invoice_pdf.dart' as pdf_gen; // For PDF generation (email attachment only; download removed)
 import 'pos_invoices/invoice_email_service.dart';
 import 'pos.dart'; // models & enums
-import 'pos_search_scan_fav_fixed.dart';
-import 'device_class_icon.dart';
-import 'pos_checkout.dart';
+import 'pos_product_selector_panel.dart';
+import 'pos_checkout_panel.dart';
 import 'credit_service.dart';
 import 'backend_launcher_stub.dart' if (dart.library.io) 'backend_launcher_desktop.dart';
-import 'printing/windows_print_stub.dart' if (dart.library.io) 'windows_print.dart';
-import 'printing/web_print_fallback_stub.dart' if (dart.library.js) 'printing/web_print_fallback.dart';
-import '../../core/app_keys.dart';
-import '../../core/paging/paged_list_controller.dart';
-import '../../core/loading/page_loader_overlay.dart';
-import '../../core/firebase/firestore_paging.dart';
-import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'printing/invoice_printer.dart';  // Unified printer (replaces windows_print + web_print_fallback)
+import 'printing/cloud_printer_settings.dart';
+import 'printing/receipt_settings.dart';
+import 'printing/print_service.dart';
+import '../../core/global_navigator_keys.dart';
+import '../../core/paging/infinite_scroll_controller.dart';
+import '../../core/loading/page_loading_state_widget.dart';
+import '../../core/firebase/firestore_pagination_helper.dart';
+import '../../core/theme/theme_extension_helpers.dart';
+import 'package:retail_mvp2/core/firestore_store_collections.dart';
 import 'package:retail_mvp2/modules/stores/providers.dart';
 
 // Debug/feature flags (set with --dart-define=KEY=value)
@@ -36,12 +38,6 @@ const bool kDisableInvoiceWrites = bool.fromEnvironment('DISABLE_INVOICE_WRITES'
 const bool kDisableLoyaltyTx = bool.fromEnvironment('DISABLE_LOYALTY_TX', defaultValue: false);
 const bool kPosVerbose = bool.fromEnvironment('POS_DEBUG_VERBOSE', defaultValue: false);
 const bool kSafeWindowsSkipFirestore = bool.fromEnvironment('SAFE_WINDOWS_SKIP_FIRESTORE', defaultValue: true); // default true until crash source isolated
-// Enable or disable direct hidden PowerShell printing on Windows (fallback / alternative to backend service)
-const bool kEnableDirectPsPrint = bool.fromEnvironment('ENABLE_DIRECT_PS_PRINT', defaultValue: true);
-// Web: if true, open the browser's print dialog; if false, send to backend silently
-const bool kWebOpenBrowserPrint = bool.fromEnvironment('WEB_OPEN_BROWSER_PRINT', defaultValue: false);
-// Web strict-silent: when true, never open browser print dialog (no fallback); fail with a message instead
-const bool kWebStrictSilent = bool.fromEnvironment('WEB_STRICT_SILENT', defaultValue: false);
 
 class PosPage extends ConsumerStatefulWidget {
   const PosPage({super.key});
@@ -103,6 +99,7 @@ class _PosPageState extends ConsumerState<PosPage> {
   Timer? _finalizeTimer;
   static const int _minScanLength = 3; // minimal length to consider a valid scan
   late final FocusNode _scannerFocusNode;
+  String? _lastStoreId; // Track store ID to reload products when store changes
 
   String get invoiceNumber => 'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
   late final String _backendBase; // resolved at runtime to support web/LAN
@@ -154,15 +151,53 @@ class _PosPageState extends ConsumerState<PosPage> {
         return (items, next);
       },
     );
-    _productsPager.resetAndLoad();
+    // Don't load here - will be triggered in build() when store is available
+    // _productsPager.resetAndLoad();
 
     _productsScrollCtrl.addListener(_maybeLoadMoreProducts);
+    // Listen to pager state changes to trigger rebuilds
+    _productsPager.addListener(_onProductsChanged);
+  }
+
+  void _onProductsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  // Printer settings cache to avoid repeated loads
+  String? _printerSettingsLoadedForStore;
+  
+  /// Load cloud printer settings and configure the invoice printer
+  void _loadPrinterSettings(String storeId) {
+    // Avoid reloading if already loaded for this store
+    if (_printerSettingsLoadedForStore == storeId) return;
+    _printerSettingsLoadedForStore = storeId;
+    
+    // Load cloud printer settings (PrintNode)
+    CloudPrinterSettingsRepository(storeId: storeId).fetch().then((settings) {
+      // Set the printer settings for the invoice printer
+      setCloudPrinterSettings(settings);
+    }).catchError((e) {
+      // Silently ignore - will fall back to browser print
+      debugPrint('Failed to load cloud printer settings: $e');
+    });
+    
+    // Load receipt settings (includes selectedPrinterName for local backend)
+    ReceiptSettingsRepository(storeId: storeId).fetch().then((settings) {
+      // Configure PrintService with saved URL
+      PrintService.setBackendUrl(settings.printServerUrl);
+      // Set receipt settings for the invoice printer (web)
+      setReceiptSettings(settings);
+      debugPrint('🖨️ Loaded receipt settings - printer: ${settings.selectedPrinterName}, url: ${settings.printServerUrl}');
+    }).catchError((e) {
+      debugPrint('Failed to load receipt settings: $e');
+    });
   }
 
   @override
   void dispose() {
     _productsScrollCtrl.dispose();
     _searchDebounce?.cancel();
+    _productsPager.removeListener(_onProductsChanged);
     _productsPager.dispose();
     _customerDocSub?.cancel();
     _scannerFocusNode.dispose();
@@ -269,80 +304,43 @@ class _PosPageState extends ConsumerState<PosPage> {
     setState(() => _isPrinting = true);
     try {
       final invoice = _buildTempInvoiceForPrint();
-      bool directOk = false;
-      if (kEnableDirectPsPrint) {
-        try {
-          directOk = await directWindowsPrintInvoice(invoice);
-        } catch (_) {
-          directOk = false;
+      
+      // Try unified local printing first (works on Web, Windows, macOS, Linux)
+      if (isPrintingSupported) {
+        final result = await invoicePrinter.printInvoice(invoice);
+        if (result.success) {
+          _snack('Invoice sent to printer');
+          return;
         }
-      }
-      if (directOk) {
-        _snack('Invoice sent to printer (direct)');
-        return;
+        if (kPosVerbose) debugPrint('[POS] unified print failed: ${result.message}');
       }
 
-      if (kIsWeb) {
-        // Web: try backend if available, then always fall back to browser print.
-        bool backendOk = false;
-        if (_canUseBackend) {
-          try {
-            try {
-              await http.get(Uri.parse('$_backendBase/health')).timeout(const Duration(seconds: 2));
-            } catch (_) {}
-            final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({'invoice': invoice.toJson()}));
-            if (resp.statusCode == 200) {
-              backendOk = true;
-              try {
-                final data = jsonDecode(resp.body) as Map<String, dynamic>;
-                final msg = (data['message'] as String?) ?? 'Invoice print sent';
-                final usedPrinter = data['usedPrinter'];
-                _snack(usedPrinter != null ? '$msg (${usedPrinter.toString()})' : msg);
-              } catch (_) {
-                _snack('Invoice print sent');
-              }
-              return;
-            } else if (kPosVerbose) {
-              debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
-            }
-          } catch (e) {
-            if (kPosVerbose) debugPrint('[POS][web] quick print backend error: $e');
-          }
-        }
-        // Not printed via backend => try browser dialog unless strict silent is enabled
-        if (!backendOk) {
-          if (kWebStrictSilent) {
-            _snack('Silent print unavailable (backend offline)');
-          } else {
-            // Pre-open window synchronously (for popup blockers), then populate and print
-            final handle = webPrintPreopen();
-            final handled = await webPrintPopulateAndPrint(handle, invoice);
-            if (handled) {
-              _snack('Browser print opened');
-              return;
-            }
-            _snack('Print error (popup blocked?)');
-          }
-        }
-      } else {
-        // Non-web: use backend service
+      // Fallback: try backend print service (useful for network printers or custom setups)
+      if (_canUseBackend) {
         try {
           try { await http.get(Uri.parse('$_backendBase/health')).timeout(const Duration(seconds: 2)); } catch (_) {}
           final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'invoice': invoice.toJson()}));
           if (resp.statusCode == 200) {
-            _snack('Invoice print sent');
-          } else {
-            _snack('Print failed (${resp.statusCode})');
+            try {
+              final data = jsonDecode(resp.body) as Map<String, dynamic>;
+              final msg = (data['message'] as String?) ?? 'Invoice print sent';
+              final usedPrinter = data['usedPrinter'];
+              _snack(usedPrinter != null ? '$msg (${usedPrinter.toString()})' : msg);
+            } catch (_) {
+              _snack('Invoice print sent');
+            }
+            return;
+          } else if (kPosVerbose) {
+            debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
           }
         } catch (e) {
-          if (kPosVerbose) debugPrint('[POS] quick print error: $e');
-          _snack('Print error');
+          if (kPosVerbose) debugPrint('[POS] backend print error: $e');
         }
       }
+      
+      _snack('Print failed - no printer available');
     } finally {
       if (mounted) setState(() => _isPrinting = false);
     }
@@ -612,111 +610,158 @@ class _PosPageState extends ConsumerState<PosPage> {
       barrierDismissible: true,
       builder: (dialogCtx) {
         final cs = Theme.of(dialogCtx).colorScheme;
-        final texts = Theme.of(dialogCtx).textTheme;
-        return AlertDialog(
-        title: Text(
-          'Invoice Preview (GST)',
-          style: Theme.of(dialogCtx).textTheme.titleLarge?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w700),
-        ),
-        content: DefaultTextStyle(
-          style: texts.bodyMedium?.copyWith(color: cs.onSurface) ?? const TextStyle(),
-          child: SizedBox(width: 480, child: summary),
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () => _emailInvoice(),
-            icon: const Icon(Icons.email),
-            label: const Text('Email'),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-            onPressed: _isPrinting ? null : () async {
-              setState(() => _isPrinting = true);
-              try {
-                bool directOk = false;
-                if (kEnableDirectPsPrint) {
-                  try { directOk = await directWindowsPrintInvoice(invoice); } catch (_) { directOk = false; }
-                }
-                if (directOk) {
-                  _snack('Invoice printed (direct)');
-                  if (kPosVerbose) debugPrint('[POS] direct print success');
-                } else {
-                  if (kIsWeb) {
-                    bool backendOk = false;
-                    if (_canUseBackend) {
-                      if (kPosVerbose) debugPrint('[POS] print-invoice POST');
-                      try {
-                        final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
-                            headers: {'Content-Type': 'application/json'},
-                            body: jsonEncode({'invoice': invoice.toJson()}));
-                        if (resp.statusCode == 200) {
-                          backendOk = true;
-                          _snack('Invoice printed');
-                          if (kPosVerbose) debugPrint('[POS] backend print success');
-                          return;
-                        } else if (kPosVerbose) {
-                          debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
-                        }
-                      } catch (e) {
-                        if (kPosVerbose) debugPrint('[POS][web] backend print error: $e');
-                      }
-                    }
-                    if (!backendOk) {
-                      if (kWebStrictSilent) {
-                        _snack('Silent print unavailable (backend offline)');
-                      } else {
-                        final handle = webPrintPreopen();
-                        final handled = await webPrintPopulateAndPrint(handle, invoice);
-                        if (handled) {
-                          _snack('Browser print opened');
-                          return;
-                        }
-                        _snack('Print error (popup blocked?)');
-                      }
-                    }
-                  } else {
-                    if (kPosVerbose) debugPrint('[POS] print-invoice POST');
-                    final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
-                        headers: {'Content-Type': 'application/json'},
-                        body: jsonEncode({'invoice': invoice.toJson()}));
-                    if (resp.statusCode == 200) {
-                      _snack('Invoice printed');
-                      if (kPosVerbose) debugPrint('[POS] backend print success');
-                    } else {
-                      _snack('Print failed: ${resp.statusCode} ${resp.body}');
-                      if (kPosVerbose) debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
-                    }
-                  }
-                }
-              } catch (e) {
-                _snack('Print error');
-                if (kPosVerbose) debugPrint('[POS] print error: $e');
-              } finally {
-                if (mounted) setState(() => _isPrinting = false);
-              }
-            },
-            icon: _isPrinting
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Theme.of(context).colorScheme.onPrimary,
+        final sizes = dialogCtx.sizes;
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: dialogCtx.radiusMd),
+          child: Container(
+            width: 440,
+            constraints: const BoxConstraints(maxHeight: 600),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Modern header with gradient
+                Container(
+                  padding: EdgeInsets.all(sizes.gapMd),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [cs.primary, cs.primary.withOpacity(0.8)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  )
-                : const Icon(Icons.print),
-            label: const Text('Print'),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(sizes.radiusMd)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.all(sizes.gapSm),
+                        decoration: BoxDecoration(
+                          color: cs.onPrimary.withOpacity(0.2),
+                          borderRadius: dialogCtx.radiusSm,
+                        ),
+                        child: Icon(Icons.receipt_long_rounded, color: cs.onPrimary, size: sizes.iconMd),
+                      ),
+                      SizedBox(width: sizes.gapMd),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Invoice Preview',
+                              style: TextStyle(color: cs.onPrimary, fontWeight: FontWeight.w700, fontSize: sizes.fontMd),
+                            ),
+                            Text(
+                              'GST Invoice',
+                              style: TextStyle(color: cs.onPrimary.withOpacity(0.8), fontSize: sizes.fontXs),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(),
+                        icon: Icon(Icons.close_rounded, color: cs.onPrimary, size: sizes.iconMd),
+                        style: IconButton.styleFrom(
+                          backgroundColor: cs.onPrimary.withOpacity(0.1),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Content
+                Flexible(
+                  child: Padding(
+                    padding: EdgeInsets.all(sizes.gapMd),
+                    child: summary,
+                  ),
+                ),
+                // Actions
+                Container(
+                  padding: EdgeInsets.fromLTRB(sizes.gapMd, sizes.gapSm, sizes.gapMd, sizes.gapMd),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withOpacity(0.3),
+                    borderRadius: BorderRadius.vertical(bottom: Radius.circular(sizes.radiusMd)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _emailInvoice(),
+                          icon: Icon(Icons.email_rounded, size: sizes.iconSm),
+                          label: const Text('Email'),
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.symmetric(vertical: sizes.gapSm),
+                            shape: RoundedRectangleBorder(borderRadius: dialogCtx.radiusSm),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: sizes.gapSm),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _isPrinting ? null : () async {
+                            setState(() => _isPrinting = true);
+                            try {
+                              if (isPrintingSupported) {
+                                final result = await invoicePrinter.printInvoice(invoice);
+                                if (result.success) {
+                                  _snack('Invoice printed');
+                                  if (kPosVerbose) debugPrint('[POS] unified print success');
+                                  return;
+                                }
+                                if (kPosVerbose) debugPrint('[POS] unified print failed: ${result.message}');
+                              }
+                              if (_canUseBackend) {
+                                if (kPosVerbose) debugPrint('[POS] print-invoice POST');
+                                try {
+                                  final resp = await http.post(Uri.parse('$_backendBase/print-invoice'),
+                                      headers: {'Content-Type': 'application/json'},
+                                      body: jsonEncode({'invoice': invoice.toJson()}));
+                                  if (resp.statusCode == 200) {
+                                    _snack('Invoice printed');
+                                    if (kPosVerbose) debugPrint('[POS] backend print success');
+                                    return;
+                                  } else if (kPosVerbose) {
+                                    debugPrint('[POS] backend print failed: ${resp.statusCode} ${resp.body}');
+                                  }
+                                } catch (e) {
+                                  if (kPosVerbose) debugPrint('[POS] backend print error: $e');
+                                }
+                              }
+                              _snack('Print failed - no printer available');
+                            } catch (e) {
+                              _snack('Print error');
+                              if (kPosVerbose) debugPrint('[POS] print error: $e');
+                            } finally {
+                              if (mounted) setState(() => _isPrinting = false);
+                            }
+                          },
+                          icon: _isPrinting
+                              ? SizedBox(
+                                  width: sizes.iconSm,
+                                  height: sizes.iconSm,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: cs.onPrimary),
+                                )
+                              : Icon(Icons.print_rounded, size: sizes.iconSm),
+                          label: const Text('Print'),
+                          style: FilledButton.styleFrom(
+                            padding: EdgeInsets.symmetric(vertical: sizes.gapSm),
+                            shape: RoundedRectangleBorder(borderRadius: dialogCtx.radiusSm),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: sizes.gapSm),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        ),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          TextButton(
-            onPressed: () {
-              if (Navigator.of(dialogCtx).canPop()) {
-                Navigator.of(dialogCtx).pop();
-              }
-            },
-            child: const Text('Close'),
-          ),
-        ],
-      );
+        );
       },
     );
   }
@@ -974,38 +1019,156 @@ class _PosPageState extends ConsumerState<PosPage> {
 
   Widget _buildInvoiceSummaryFromInvoice(BuildContext context, InvoiceData invoice) {
     final cs = Theme.of(context).colorScheme;
+    final sizes = context.sizes;
     final dateStr = '${invoice.timestamp.year.toString().padLeft(4, '0')}-${invoice.timestamp.month.toString().padLeft(2, '0')}-${invoice.timestamp.day.toString().padLeft(2, '0')}';
     final timeStr = '${invoice.timestamp.hour.toString().padLeft(2, '0')}:${invoice.timestamp.minute.toString().padLeft(2, '0')}:${invoice.timestamp.second.toString().padLeft(2, '0')}';
     return SingleChildScrollView(
-      child: DefaultTextStyle.merge(
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface) ?? TextStyle(color: cs.onSurface),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Invoice #: ${invoice.invoiceNumber}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          Text('Date: $dateStr  Time: $timeStr', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          Text('Customer: ${invoice.customerName}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          Text('Paid via: ${invoice.paymentMode}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          if ((invoice.customerEmail ?? '').isNotEmpty)
-            Text('Email: ${invoice.customerEmail}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          if ((invoice.customerPhone ?? '').isNotEmpty)
-            Text('Phone: ${invoice.customerPhone}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface)),
-          const SizedBox(height: 8),
-          const Divider(),
-          ...invoice.lines.map((it) => ListTile(
-                dense: true,
-                title: Text('${it.name} x ${it.qty}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w600)),
-                subtitle: Text('Price: ₹${it.unitPrice.toStringAsFixed(2)}  |  Disc: ₹${it.discount.toStringAsFixed(2)}  |  Tax ${it.taxPercent}%: ₹${it.tax.toStringAsFixed(2)}', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
-                trailing: Text('₹${it.lineTotal.toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w700)),
-              )),
-          const Divider(),
-          _kv(context, 'Subtotal', invoice.subtotal),
-          _kv(context, 'Discount', -invoice.discountTotal),
-          _kv(context, 'Tax Total', invoice.taxTotal),
-          const Divider(),
-          _kv(context, 'Grand Total', invoice.grandTotal, bold: true),
-          const SizedBox(height: 8),
-        ]),
-      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Invoice info card
+        Container(
+          padding: EdgeInsets.all(sizes.gapMd),
+          decoration: BoxDecoration(
+            color: cs.primaryContainer.withOpacity(0.3),
+            borderRadius: context.radiusSm,
+            border: Border.all(color: cs.primary.withOpacity(0.2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.tag_rounded, size: sizes.iconSm, color: cs.primary),
+                  SizedBox(width: sizes.gapXs),
+                  Text(invoice.invoiceNumber, style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontSm, color: cs.primary)),
+                  const Spacer(),
+                  Text('$dateStr  $timeStr', style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant)),
+                ],
+              ),
+              SizedBox(height: sizes.gapSm),
+              Row(
+                children: [
+                  _infoChip(cs, Icons.person_rounded, invoice.customerName),
+                  SizedBox(width: sizes.gapSm),
+                  _infoChip(cs, Icons.payment_rounded, invoice.paymentMode),
+                ],
+              ),
+              if ((invoice.customerEmail ?? '').isNotEmpty || (invoice.customerPhone ?? '').isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(top: sizes.gapXs),
+                  child: Row(
+                    children: [
+                      if ((invoice.customerEmail ?? '').isNotEmpty)
+                        Expanded(child: Text(invoice.customerEmail!, style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant), overflow: TextOverflow.ellipsis)),
+                      if ((invoice.customerPhone ?? '').isNotEmpty)
+                        Text(invoice.customerPhone!, style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        SizedBox(height: sizes.gapMd),
+        // Items list
+        ...invoice.lines.map((it) => Container(
+          margin: EdgeInsets.only(bottom: sizes.gapSm),
+          padding: EdgeInsets.all(sizes.gapSm),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.3),
+            borderRadius: context.radiusSm,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${it.name} × ${it.qty}', style: TextStyle(fontWeight: FontWeight.w600, fontSize: sizes.fontSm, color: cs.onSurface)),
+                    SizedBox(height: sizes.gapXs),
+                    Text(
+                      '₹${it.unitPrice.toStringAsFixed(0)}  •  Disc: ₹${it.discount.toStringAsFixed(0)}  •  GST ${it.taxPercent}%: ₹${it.tax.toStringAsFixed(0)}',
+                      style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              Text('₹${it.lineTotal.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontSm, color: cs.primary)),
+            ],
+          ),
+        )),
+        SizedBox(height: sizes.gapXs),
+        // Totals section
+        Container(
+          padding: EdgeInsets.all(sizes.gapMd),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withOpacity(0.4),
+            borderRadius: context.radiusSm,
+          ),
+          child: Column(
+            children: [
+              _summaryRow('Subtotal', invoice.subtotal, cs.onSurface),
+              if (invoice.discountTotal > 0)
+                _summaryRow('Discount', -invoice.discountTotal, context.appColors.success),
+              _summaryRow('GST', invoice.taxTotal, cs.onSurfaceVariant),
+              const Divider(height: 16),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapSm),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [cs.primary.withOpacity(0.15), cs.primary.withOpacity(0.05)],
+                  ),
+                  borderRadius: context.radiusSm,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Grand Total', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontSm, color: cs.primary)),
+                    Text('₹${invoice.grandTotal.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: sizes.fontMd, color: cs.primary)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ]),
     );
+  }
+
+  Widget _infoChip(ColorScheme cs, IconData icon, String text) {
+    return Builder(builder: (context) {
+      final sizes = context.sizes;
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: sizes.gapSm, vertical: sizes.gapXs),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(sizes.radiusSm),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: sizes.fontSm, color: cs.onSurfaceVariant),
+            SizedBox(width: sizes.gapXs),
+            Text(text, style: TextStyle(fontSize: sizes.fontXs, color: cs.onSurface)),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _summaryRow(String label, double value, Color color) {
+    return Builder(builder: (context) {
+      final sizes = context.sizes;
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: sizes.gapXs),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(fontSize: sizes.fontSm, color: color)),
+            Text('₹${value.toStringAsFixed(2)}', style: TextStyle(fontSize: sizes.fontSm, fontWeight: FontWeight.w500, color: color)),
+          ],
+        ),
+      );
+    });
   }
 
   void _snack(String msg) {
@@ -1016,6 +1179,29 @@ class _PosPageState extends ConsumerState<PosPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch store ID and reload products when it changes
+    final currentStoreId = ref.watch(selectedStoreIdProvider);
+    
+    // Show message if no store selected
+    if (currentStoreId == null) {
+      return const Center(child: Text('Select a store to start POS'));
+    }
+    
+    // Load cloud printer settings for this store
+    _loadPrinterSettings(currentStoreId);
+    
+    // Handle store change or initial load (when _lastStoreId is null)
+    if (currentStoreId != _lastStoreId) {
+      _lastStoreId = currentStoreId;
+      // Schedule reload after build to avoid calling setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _cacheProducts.clear();
+          _productsPager.resetAndLoad();
+        }
+      });
+    }
+    
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth >= 1280;
     final isTablet = screenWidth >= 900 && screenWidth < 1280;
@@ -1045,7 +1231,6 @@ class _PosPageState extends ConsumerState<PosPage> {
             child: body,
           ),
         ),
-        const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
       ]),
     );
   }
@@ -1087,7 +1272,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                 onBarcodeSubmitted: _scan,
                 onSearchChanged: _onSearchChangedDebounced,
               ),
-              const SizedBox(height: 8),
+              context.gapVSm,
               Expanded(
                 child: Scrollbar(
                   controller: _productsScrollCtrl,
@@ -1106,7 +1291,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              context.gapVSm,
               PosPopularItemsGrid(
                 allProducts: products,
                 favoriteSkus: favoriteSkus,
@@ -1115,7 +1300,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             ],
           ),
         ),
-        const SizedBox(width: 12),
+        context.gapHMd,
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1146,7 +1331,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             ],
           ),
         ),
-        const SizedBox(width: 12),
+        context.gapHMd,
         SizedBox(
           width: 300,
           child: CheckoutPanel(
@@ -1240,7 +1425,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             ],
           ),
         ),
-        const SizedBox(width: 8),
+        context.gapHSm,
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1253,7 +1438,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                 availablePoints: _availablePoints,
                 onSelected: (c) => _onCustomerSelected(c),
               ),
-              const SizedBox(height: 8),
+              context.gapVSm,
               Expanded(
                 child: CartSection(
                   cart: cart,
@@ -1280,7 +1465,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             ],
           ),
         ),
-        const SizedBox(width: 8),
+        context.gapHSm,
         SizedBox(
           width: 300,
           child: CheckoutPanel(
@@ -1338,7 +1523,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           onBarcodeSubmitted: _scan,
           onSearchChanged: _onSearchChangedDebounced,
         ),
-        const SizedBox(height: 8),
+        context.gapVSm,
         SizedBox(
           height: 200,
           child: Scrollbar(
@@ -1358,13 +1543,13 @@ class _PosPageState extends ConsumerState<PosPage> {
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        context.gapVSm,
         PosPopularItemsGrid(
           allProducts: products,
           favoriteSkus: favoriteSkus,
           onAdd: (p) => addToCart(p),
         ),
-        const SizedBox(height: 8),
+        context.gapVSm,
         _CustomersDropdownCard(
           customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
           initialCustomers: customers,
@@ -1373,7 +1558,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           availablePoints: _availablePoints,
           onSelected: (c) => _onCustomerSelected(c),
         ),
-        const SizedBox(height: 8),
+        context.gapVSm,
         CartSection(
           cart: cart,
           heldOrders: heldOrders,
@@ -1395,7 +1580,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           onChangeQty: (sku, d) => changeQty(sku, d),
           onRemove: (sku) => removeFromCart(sku),
         ),
-        const SizedBox(height: 8),
+        context.gapVSm,
         CheckoutPanel(
           customersStream: _customerStream(ref.watch(selectedStoreIdProvider)),
           initialCustomers: customers,
@@ -1561,20 +1746,6 @@ class _PosPageState extends ConsumerState<PosPage> {
   // _cartSection moved to CartSection widget
 
   // _paymentAndSummary & related helpers moved to CheckoutPanel
-
-  Widget _kv(BuildContext context, String label, double value, {bool bold = false}) {
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: Theme.of(context).colorScheme.onSurface,
-          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-        ) ?? TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: bold ? FontWeight.bold : FontWeight.normal);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text('₹${value.toStringAsFixed(2)}', style: style)],
-      ),
-    );
-  }
 
   Future<void> _payCustomerCredit(double enteredAmount) async {
     final cust = selectedCustomer;
@@ -1770,7 +1941,7 @@ class _CustomersDropdownCard extends StatelessWidget {
           _InfoRow(icon: Icons.stars_outlined, label: 'Status', value: (selectedCustomer?.status ?? 'walk-in').toString()),
           _InfoRow(icon: Icons.savings_outlined, label: 'Points', value: availablePoints.toStringAsFixed(0)),
           _InfoRow(icon: Icons.account_balance_wallet_outlined, label: 'Credit', value: '₹${(selectedCustomer?.creditBalance ?? 0).toStringAsFixed(2)}'),
-          const SizedBox(height: 4),
+          context.gapVXs,
           Divider(height: 1, color: cs.outlineVariant),
         ],
       ),
@@ -1793,7 +1964,7 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, size: 18, color: cs.primary),
-          const SizedBox(width: 8),
+          context.gapHSm,
           Expanded(child: Text(label, style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant))),
           Text(value, style: tt.bodyMedium?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w600)),
         ],

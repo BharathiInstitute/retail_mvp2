@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../theme/app_theme.dart';
-import '../theme/theme_utils.dart';
-import '../theme/font_controller.dart';
+import '../theme/theme_config_and_providers.dart';
+import '../theme/theme_extension_helpers.dart';
+import '../theme/font_preference_controller.dart';
 
 /// A settings dialog for theme, density, and font preferences
 class SettingsDialog extends ConsumerWidget {

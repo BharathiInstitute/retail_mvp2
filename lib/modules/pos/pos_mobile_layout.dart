@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:retail_mvp2/core/store_scoped_refs.dart';
+import 'package:retail_mvp2/core/firestore_store_collections.dart';
+import 'package:retail_mvp2/core/theme/theme_extension_helpers.dart';
 import 'package:retail_mvp2/modules/stores/providers.dart';
 import 'pos.dart';
-import 'pos_search_scan_fav_fixed.dart';
-import 'pos_two_section_tab.dart';
-import 'device_class_icon.dart';
+import 'pos_product_selector_panel.dart';
+import 'pos_desktop_split_layout.dart';
 import '../inventory/Products/inventory_repository.dart';
 
 /// Mobile-friendly POS: vertical stack with
@@ -73,6 +73,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                   stock: d.totalStock,
                   taxPercent: (d.taxPct ?? 0).toInt(),
                   barcode: d.barcode.isEmpty ? null : d.barcode,
+                  imageUrls: d.imageUrls,
                   ref: StoreRefs.of(storeId).products().doc(d.sku),
                 ))
             .toList();
@@ -317,7 +318,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                 onBarcodeSubmitted: _onUnifiedSubmit,
                 onSearchChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 8),
+              context.gapVSm,
               // Products list shares space with bottom card and expands when room is available
               Flexible(
                 flex: 1,
@@ -368,6 +369,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                   total: payableTotal,
                   onSelectPayment: (mode) { setState(() { selectedPaymentMode = mode; }); },
                   onShowCustomers: _showCustomerPopup,
+                  onPrint: () { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete payment to print invoice'))); },
                   compact: true,
                 ),
               ),
@@ -375,7 +377,6 @@ class _PosMobilePageState extends State<PosMobilePage> {
           ),
           ),
             ),
-          const Positioned(top: 4, right: 4, child: DeviceClassIcon()),
         ]);
       },
     );
@@ -407,7 +408,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Customers', style: tt.titleMedium),
-                        const SizedBox(height: 8),
+                        ctx.gapVSm,
                         TextField(
                           controller: searchCtrl,
                           decoration: const InputDecoration(
@@ -416,7 +417,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                           ),
                           onChanged: (_) { setLocal((){}); },
                         ),
-                        const SizedBox(height: 8),
+                        ctx.gapVSm,
                         StreamBuilder<List<Customer>>(
                           stream: () {
                             final s = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
@@ -443,7 +444,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                                   dense: true,
                                   leading: const Icon(Icons.person_outline),
                                   title: Text(cust.name, overflow: TextOverflow.ellipsis),
-                                  trailing: (selectedCustomer?.id == cust.id) ? const Icon(Icons.check, color: Colors.green) : null,
+                                  trailing: (selectedCustomer?.id == cust.id) ? Icon(Icons.check, color: context.appColors.success) : null,
                                   onTap: () {
                                     setState(() {
                                       selectedCustomer = cust;
@@ -461,7 +462,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                         const SizedBox(height: 6),
                         Row(children: [
                           const Icon(Icons.person_outline),
-                          const SizedBox(width: 8),
+                          ctx.gapHSm,
                           Expanded(child: Text((selectedCustomer ?? c).name, style: tt.titleSmall)),
                         ]),
                         const SizedBox(height: 6),
@@ -470,7 +471,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                         _infoRow(icon: Icons.stars_outlined, label: 'Status', value: ((selectedCustomer ?? c).status ?? 'walk-in').toString()),
                         _infoRow(icon: Icons.savings_outlined, label: 'Points', value: _availablePoints.toStringAsFixed(0)),
                         _infoRow(icon: Icons.account_balance_wallet_outlined, label: 'Credit', value: '₹${((selectedCustomer ?? c).creditBalance).toStringAsFixed(2)}'),
-                        const SizedBox(height: 12),
+                        ctx.gapVMd,
                         Align(
                           alignment: Alignment.centerRight,
                           child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
@@ -495,7 +496,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
       padding: const EdgeInsets.symmetric(vertical: 3.0),
       child: Row(children: [
         Icon(icon, size: 18, color: cs.primary),
-        const SizedBox(width: 8),
+        context.gapHSm,
         Expanded(child: Text(label, style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant))),
         Text(value, style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
       ]),
@@ -524,13 +525,13 @@ class _PosMobilePageState extends State<PosMobilePage> {
                   decoration: const InputDecoration(labelText: 'Name', prefixIcon: Icon(Icons.person_outline)),
                   validator: (v) => (v==null || v.trim().isEmpty) ? 'Enter name' : null,
                 ),
-                const SizedBox(height: 8),
+                ctx.gapVSm,
                 TextFormField(
                   controller: phoneCtrl,
                   decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone_iphone)),
                   keyboardType: TextInputType.phone,
                 ),
-                const SizedBox(height: 8),
+                ctx.gapVSm,
                 TextFormField(
                   controller: emailCtrl,
                   decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)),
@@ -618,7 +619,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                         ),
                         onChanged: (_) { setLocal((){}); },
                       ),
-                      const SizedBox(height: 8),
+                      ctx.gapVSm,
                       StreamBuilder<List<Customer>>(
                         stream: () {
                           final s = ProviderScope.containerOf(ctx).read(selectedStoreIdProvider);
@@ -644,7 +645,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                                 dense: true,
                                 leading: const Icon(Icons.person_outline),
                                 title: Text(cust.name, overflow: TextOverflow.ellipsis),
-                                trailing: (selectedCustomer?.id == cust.id) ? const Icon(Icons.check, color: Colors.green) : null,
+                                trailing: (selectedCustomer?.id == cust.id) ? Icon(Icons.check, color: context.appColors.success) : null,
                                 onTap: () {
                                   setState(() {
                                     selectedCustomer = cust;
@@ -662,7 +663,7 @@ class _PosMobilePageState extends State<PosMobilePage> {
                       const SizedBox(height: 6),
                       Row(children: [
                         const Icon(Icons.person_outline),
-                        const SizedBox(width: 8),
+                        ctx.gapHSm,
                         Expanded(child: Text((selectedCustomer ?? c).name, style: tt.titleSmall)),
                       ]),
                       const SizedBox(height: 6),

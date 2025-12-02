@@ -1,5 +1,6 @@
-import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 
 /// Simple MIME type guess from leading bytes. Defaults to image/jpeg.
 String _guessMime(Uint8List bytes) {
@@ -26,8 +27,31 @@ String _guessMime(Uint8List bytes) {
   return 'image/jpeg';
 }
 
+/// Create a thumbnail from image bytes
+Future<Uint8List> _createThumbnail(Uint8List imageBytes, {int maxSize = 200}) async {
+  try {
+    final codec = await ui.instantiateImageCodec(
+      imageBytes,
+      targetWidth: maxSize,
+      targetHeight: maxSize,
+    );
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      return byteData.buffer.asUint8List();
+    }
+  } catch (e) {
+    debugPrint('Thumbnail creation failed: $e');
+  }
+  // Return original if thumbnail fails
+  return imageBytes;
+}
+
 /// Upload product images to Firebase Storage.
 /// Path pattern: stores/{storeId}/products/{sku}/image_{index}.jpg
+///              stores/{storeId}/products/{sku}/thumb_{index}.jpg (thumbnail)
 /// Returns download URLs in same order as input list.
 /// Optional [onProgress] callback emits cumulative task progress per index (0..1).
 class ProductImageUploadException implements Exception {
@@ -35,6 +59,13 @@ class ProductImageUploadException implements Exception {
   ProductImageUploadException(this.errors);
   @override
   String toString() => 'ProductImageUploadException(${errors.join('; ')})';
+}
+
+/// Result of image upload containing both main and thumbnail URLs
+class ProductImageUrls {
+  final String mainUrl;
+  final String thumbUrl;
+  ProductImageUrls({required this.mainUrl, required this.thumbUrl});
 }
 
 String _mimeExt(String mime) {
@@ -47,8 +78,36 @@ String _mimeExt(String mime) {
   }
 }
 
-/// Returns list of download URLs. In case of partial failures throws a
-/// [ProductImageUploadException] containing per-image error messages.
+/// Upload a single file to Firebase Storage
+Future<String> _uploadFile({
+  required Reference ref,
+  required Uint8List data,
+  required String mime,
+  void Function(double)? onProgress,
+}) async {
+  final uploadTask = ref.putData(
+    data,
+    SettableMetadata(contentType: mime),
+  );
+  
+  if (onProgress != null) {
+    uploadTask.snapshotEvents.listen((snap) {
+      final total = snap.totalBytes == 0 ? 1 : snap.totalBytes;
+      final prog = snap.bytesTransferred / total;
+      onProgress(prog.clamp(0, 1));
+    });
+  }
+  
+  final snap = await uploadTask;
+  if (snap.state == TaskState.success) {
+    return await ref.getDownloadURL();
+  }
+  throw Exception('Upload failed with state: ${snap.state.name}');
+}
+
+/// Returns list of download URLs (main images only for backward compatibility).
+/// Also uploads thumbnails as thumb_{index}.png
+/// In case of partial failures throws a [ProductImageUploadException].
 Future<List<String>> uploadProductImages({
   required String storeId,
   required String sku,
@@ -60,37 +119,46 @@ Future<List<String>> uploadProductImages({
   final baseRef = storage.ref().child('stores/$storeId/products/$sku');
   final urls = <String>[];
   final errors = <String>[];
+  
   for (int i = 0; i < images.length; i++) {
     final data = images[i];
     final mime = _guessMime(data);
     final ext = _mimeExt(mime);
-    final ref = baseRef.child('image_$i.$ext');
-    final uploadTask = ref.putData(
-      data,
-      SettableMetadata(contentType: mime),
-    );
-    if (onProgress != null) {
-      uploadTask.snapshotEvents.listen((snap) {
-        final total = snap.totalBytes == 0 ? 1 : snap.totalBytes;
-        final prog = snap.bytesTransferred / total;
-        onProgress(i, prog.clamp(0, 1));
-      });
-    }
+    
     try {
-      final snap = await uploadTask;
-      if (snap.state == TaskState.success) {
-        final url = await ref.getDownloadURL();
-        urls.add(url);
-        if (onProgress != null) onProgress(i, 1.0);
-      } else {
-        errors.add('Image #${i + 1} upload did not succeed (state=${snap.state.name})');
+      // Upload main image
+      final mainRef = baseRef.child('image_$i.$ext');
+      final mainUrl = await _uploadFile(
+        ref: mainRef,
+        data: data,
+        mime: mime,
+        onProgress: (p) => onProgress?.call(i, p * 0.7), // 70% for main
+      );
+      urls.add(mainUrl);
+      
+      // Create and upload thumbnail (200px)
+      try {
+        final thumbData = await _createThumbnail(data, maxSize: 200);
+        final thumbRef = baseRef.child('thumb_$i.png');
+        await _uploadFile(
+          ref: thumbRef,
+          data: thumbData,
+          mime: 'image/png',
+          onProgress: (p) => onProgress?.call(i, 0.7 + p * 0.3), // 30% for thumb
+        );
+      } catch (e) {
+        debugPrint('Thumbnail upload failed for image $i: $e');
+        // Continue even if thumbnail fails
       }
+      
+      onProgress?.call(i, 1.0);
     } on FirebaseException catch (e) {
       errors.add('Image #${i + 1} FirebaseException code=${e.code} message=${e.message ?? ''}');
     } catch (e) {
-      errors.add('Image #${i + 1} unexpected error: $e');
+      errors.add('Image #${i + 1} error: $e');
     }
   }
+  
   if (errors.isNotEmpty) {
     throw ProductImageUploadException(errors);
   }

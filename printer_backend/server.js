@@ -4,9 +4,23 @@ import bodyParser from 'body-parser';
 import fileUpload from 'express-fileupload';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import * as cp from 'child_process';
-import { execFile } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import PDFDocument from 'pdfkit';
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Always use user's AppData for data/temp files to avoid permission issues in Program Files
+// This ensures the server works whether run from development or installed location
+const DATA_DIR = path.join(process.env.APPDATA || process.env.LOCALAPPDATA || process.env.HOME || __dirname, 'RetailPOS-PrintHelper');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
 // NOTE: We no longer attempt to monkey-patch child_process methods on ESM modules
 // because module namespace objects are read-only in Node >= 14+, which caused
@@ -16,9 +30,33 @@ import PDFDocument from 'pdfkit';
 // Dynamically import pdf-to-printer AFTER patching child_process
 const ptp = await import('pdf-to-printer');
 const mod = ptp.default || ptp; // ESM/CJS compatibility
-const getPrinters = mod.getPrinters;
+const _getPrintersInternal = mod.getPrinters;
 const print = mod.print;
-// moved imports earlier
+
+// Safe wrapper for getPrinters that falls back to PowerShell on Windows
+async function getPrinters() {
+  // First try PowerShell on Windows - more reliable
+  if (process.platform === 'win32') {
+    try {
+      const psOutput = execSync('powershell.exe -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name | ConvertTo-Json"', 
+        { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      const parsed = JSON.parse(psOutput.trim());
+      const names = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      // Return as objects to match pdf-to-printer format
+      return names.map(n => ({ name: n }));
+    } catch (psError) {
+      console.error('PowerShell getPrinters failed:', psError.message);
+    }
+  }
+  
+  // Fallback to pdf-to-printer
+  try {
+    return await _getPrintersInternal();
+  } catch (e) {
+    console.error('pdf-to-printer getPrinters failed:', e.message);
+    return [];
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -41,9 +79,8 @@ app.get('/diagnostics', (req,res)=>{
 
 app.get('/logs', (req,res)=>{
   try {
-    const logPath = path.join(process.cwd(), 'print_backend.log');
-    if (!fs.existsSync(logPath)) return res.json({ log: '' });
-    const content = fs.readFileSync(logPath, 'utf8');
+    if (!fs.existsSync(LOG_PATH)) return res.json({ log: '' });
+    const content = fs.readFileSync(LOG_PATH, 'utf8');
     const maxLen = 2000;
     const tail = content.length > maxLen ? content.slice(-maxLen) : content;
     res.json({ log: tail });
@@ -67,7 +104,9 @@ app.get('/debug-printers', async (req,res)=>{
   }
 });
 
-const CONFIG_PATH = path.join(process.cwd(), 'config.json');
+const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
+const LOG_PATH = path.join(DATA_DIR, 'print_backend.log');
+
 function loadConfig() {
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH,'utf8'));
@@ -117,12 +156,135 @@ async function autoAssignDefaultPrinter(cfg) {
 // Get config
 app.get('/config', (req,res)=>{ res.json(loadConfig()); });
 
-// List printers
+// Get printer status using PowerShell (Windows only)
+async function getPrinterStatus(printerName) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve({ status: 'unknown', connected: true });
+      return;
+    }
+    
+    // Use PowerShell to get printer status
+    const psCommand = `Get-Printer -Name '${printerName.replace(/'/g, "''")}' | Select-Object -Property PrinterStatus,DeviceType | ConvertTo-Json`;
+    
+    execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], { windowsHide: true, timeout: 3000 }, (error, stdout, stderr) => {
+      if (error) {
+        // Printer might not exist or PowerShell failed
+        resolve({ status: 'unknown', connected: false });
+        return;
+      }
+      
+      try {
+        const result = JSON.parse(stdout.trim());
+        // PrinterStatus: 0=Normal, 1=Paused, 2=Error, 3=Pending Deletion, 4=Paper Jam, 5=Paper Out, 6=Manual Feed, 7=Paper Problem, etc.
+        const statusCode = result.PrinterStatus || 0;
+        let status = 'ready';
+        let connected = true;
+        
+        switch (statusCode) {
+          case 0: status = 'ready'; connected = true; break;
+          case 1: status = 'paused'; connected = true; break;
+          case 2: status = 'error'; connected = false; break;
+          case 3: status = 'deleting'; connected = false; break;
+          case 4: status = 'paper_jam'; connected = true; break;
+          case 5: status = 'paper_out'; connected = true; break;
+          case 6: status = 'manual_feed'; connected = true; break;
+          case 7: status = 'paper_problem'; connected = true; break;
+          case 8: status = 'offline'; connected = false; break;
+          case 9: status = 'io_active'; connected = true; break;
+          case 10: status = 'busy'; connected = true; break;
+          case 11: status = 'printing'; connected = true; break;
+          case 12: status = 'output_bin_full'; connected = true; break;
+          case 13: status = 'not_available'; connected = false; break;
+          case 14: status = 'waiting'; connected = true; break;
+          case 15: status = 'processing'; connected = true; break;
+          case 16: status = 'initializing'; connected = true; break;
+          case 17: status = 'warming_up'; connected = true; break;
+          case 18: status = 'toner_low'; connected = true; break;
+          case 19: status = 'no_toner'; connected = true; break;
+          case 20: status = 'page_punt'; connected = true; break;
+          case 21: status = 'user_intervention'; connected = true; break;
+          case 22: status = 'out_of_memory'; connected = true; break;
+          case 23: status = 'door_open'; connected = true; break;
+          case 24: status = 'server_unknown'; connected = false; break;
+          case 25: status = 'power_save'; connected = true; break;
+          default: status = 'unknown'; connected = true;
+        }
+        
+        resolve({ status, connected, statusCode });
+      } catch (e) {
+        resolve({ status: 'unknown', connected: true });
+      }
+    });
+  });
+}
+
+// List printers with full details
 app.get('/printers', async (req, res) => {
   try {
-    const names = await listPrintersSafe();
-    // Return in a consistent shape
-    res.json({ printers: names.map(n => ({ name: n })) });
+    const printersRaw = await getPrinters();
+    const cfg = loadConfig();
+    
+    // Build detailed printer list
+    const printers = [];
+    if (Array.isArray(printersRaw)) {
+      for (const p of printersRaw) {
+        const name = typeof p === 'string' ? p : (p && p.name) ? p.name : '';
+        if (!name) continue;
+        
+        // Get real printer status
+        const statusInfo = await getPrinterStatus(name);
+        
+        // Detect connection type from name patterns
+        let connectionType = 'unknown';
+        const nameLower = name.toLowerCase();
+        if (nameLower.includes('usb') || nameLower.includes('pos') || nameLower.includes('58') || nameLower.includes('80')) {
+          connectionType = 'usb';
+        } else if (nameLower.includes('wifi') || nameLower.includes('network') || nameLower.includes('wireless')) {
+          connectionType = 'wifi';
+        } else if (name.includes('\\\\') || nameLower.includes('shared')) {
+          connectionType = 'network';
+        } else if (nameLower.includes('pdf') || nameLower.includes('xps') || nameLower.includes('onenote') || nameLower.includes('fax')) {
+          connectionType = 'virtual';
+        } else {
+          connectionType = 'local';
+        }
+        
+        // Detect printer type
+        let printerType = 'standard';
+        if (nameLower.includes('pos') || nameLower.includes('58') || nameLower.includes('80') || nameLower.includes('thermal') || nameLower.includes('receipt')) {
+          printerType = 'thermal';
+        } else if (nameLower.includes('pdf') || nameLower.includes('xps') || nameLower.includes('onenote')) {
+          printerType = 'virtual';
+        }
+        
+        printers.push({
+          name: name,
+          connectionType: connectionType,
+          printerType: printerType,
+          isDefault: name === cfg.defaultPrinter,
+          status: statusInfo.status,
+          connected: statusInfo.connected,
+          // Include raw properties if available
+          ...(typeof p === 'object' ? { raw: p } : {})
+        });
+      }
+    }
+    
+    // Sort: default first, then thermal, then by name
+    printers.sort((a, b) => {
+      if (a.isDefault && !b.isDefault) return -1;
+      if (!a.isDefault && b.isDefault) return 1;
+      if (a.printerType === 'thermal' && b.printerType !== 'thermal') return -1;
+      if (a.printerType !== 'thermal' && b.printerType === 'thermal') return 1;
+      return a.name.localeCompare(b.name);
+    });
+    
+    res.json({ 
+      printers: printers,
+      defaultPrinter: cfg.defaultPrinter,
+      count: printers.length
+    });
   } catch (e) {
     console.error('GET /printers error:', e);
     res.status(500).json({ error: String(e) });
@@ -151,7 +313,7 @@ app.post('/print-text', async (req, res) => {
   }
   try {
     // Skipping live printer validation to avoid spawning PowerShell/console windows on each print.
-    const tempFile = path.join(process.cwd(), 'temp_print.txt');
+    const tempFile = path.join(DATA_DIR, 'temp_print.txt');
     fs.writeFileSync(tempFile, text, 'utf8');
     const opts = buildPrintOptions(targetPrinter, settings || cfg.settings);
     await print(tempFile, opts);
@@ -198,7 +360,7 @@ app.post('/print-pdf', async (req,res)=>{
   const cfg = loadConfig();
   const printer = req.body.printer || cfg.defaultPrinter;
   const f = req.files.file;
-  const tempPath = path.join(process.cwd(), 'upload_'+Date.now()+'.pdf');
+  const tempPath = path.join(DATA_DIR, 'upload_'+Date.now()+'.pdf');
   try {
     // Skip validation to keep operation silent (no PowerShell window for enumeration).
     await f.mv(tempPath);
@@ -241,7 +403,7 @@ app.post('/print-invoice', async (req, res) => {
     }
     // Skip validation to avoid PowerShell enumeration when printing; rely on spooler failure if invalid.
     // Build PDF into buffer
-    const pdfPath = path.join(process.cwd(), `inv_${Date.now()}.pdf`);
+    const pdfPath = path.join(DATA_DIR, `inv_${Date.now()}.pdf`);
     await buildThermalInvoicePdf(invoice, pdfPath);
     // Raw PowerShell fallback removed to prevent any visible window. Rely solely on pdf-to-printer.
     if (process.env.PRINT_VERBOSE === '1') {
@@ -287,7 +449,7 @@ app.post('/print-invoice', async (req, res) => {
       // Attempt fallback plain text print (best effort) if on Windows
       if (process.platform === 'win32') {
         try {
-          const txtPath = path.join(process.cwd(), `inv_${Date.now()}.txt`);
+          const txtPath = path.join(DATA_DIR, `inv_${Date.now()}.txt`);
           fs.writeFileSync(txtPath, buildPlainTextInvoice(invoice), 'utf8');
           logToFile('PRINT_INVOICE_FALLBACK_TXT_ATTEMPT file=' + txtPath);
           const winPrinterArg = `/D:${(printer || '').replace(/\s+/g,' ')}`; // print cmd cannot handle quoted printer inside /D:
@@ -303,7 +465,7 @@ app.post('/print-invoice', async (req, res) => {
           try {
             const cfg2 = loadConfig();
             if (cfg2.rawShare) {
-              const escPath = path.join(process.cwd(), `inv_${Date.now()}.esc`);
+              const escPath = path.join(DATA_DIR, `inv_${Date.now()}.esc`);
               const escBuf = buildEscPosReceipt(invoice);
               fs.writeFileSync(escPath, escBuf);
               logToFile('PRINT_INVOICE_FALLBACK_ESC_ATTEMPT file=' + escPath + ' share=' + cfg2.rawShare);
@@ -432,7 +594,7 @@ function buildThermalInvoicePdf(invoice, outPath) {
 function logToFile(message) {
   try {
     const line = `[${new Date().toISOString()}] ${message}\n`;
-    fs.appendFileSync(path.join(process.cwd(), 'print_backend.log'), line, 'utf8');
+    fs.appendFileSync(LOG_PATH, line, 'utf8');
   } catch (_) {}
 }
 

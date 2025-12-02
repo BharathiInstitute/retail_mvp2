@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'auth/auth.dart';
+import 'auth/auth_repository_and_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:collection/collection.dart';
 import '../modules/stores/providers.dart';

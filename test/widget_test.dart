@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:retail_mvp2/app_shell.dart';
-import 'package:retail_mvp2/core/auth/auth.dart';
-import 'package:retail_mvp2/core/permissions.dart';
+import 'package:retail_mvp2/core/auth/auth_repository_and_provider.dart';
+import 'package:retail_mvp2/core/user_permissions_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 

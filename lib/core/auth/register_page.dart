@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'auth.dart' show authRepositoryProvider;
+import '../theme/theme_extension_helpers.dart';
+import 'auth_repository_and_provider.dart' show authRepositoryProvider;
 
 class RegisterScreen extends ConsumerStatefulWidget {
 	const RegisterScreen({super.key});
@@ -49,7 +50,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 				child: ConstrainedBox(
 					constraints: const BoxConstraints(maxWidth: 420),
 					child: Padding(
-						padding: const EdgeInsets.all(16),
+						padding: context.padLg,
 						child: AutofillGroup(
 							child: Form(
 								key: _formKey,
@@ -64,7 +65,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 											decoration: const InputDecoration(labelText: 'Email'),
 											validator: (v) => (v == null || v.isEmpty || !v.contains('@')) ? 'Enter a valid email' : null,
 										),
-										const SizedBox(height: 12),
+										context.gapVMd,
 										TextFormField(
 											controller: _passwordCtrl,
 											autofillHints: const [AutofillHints.newPassword],
@@ -72,18 +73,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 											decoration: const InputDecoration(labelText: 'Password'),
 											validator: (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
 										),
-										const SizedBox(height: 12),
+										context.gapVMd,
 										if (_error != null)
 											Text(
 												_error!,
 												style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.error),
 											),
-										const SizedBox(height: 12),
+										context.gapVMd,
 										FilledButton(
 											onPressed: _loading ? null : _submit,
 											child: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Create account'),
 										),
-										const SizedBox(height: 12),
+										context.gapVMd,
 										TextButton(
 											onPressed: _loading ? null : () => context.go('/login'),
 											child: const Text('Back to sign in'),
